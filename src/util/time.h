@@ -57,4 +57,7 @@ std::string FormatISO8601DateTime(int64_t nTime);
 std::string FormatISO8601Date(int64_t nTime);
 int64_t ParseISO8601DateTime(const std::string& str);
 
+/** Sanity check epoch match normal Unix epoch */
+bool ChronoSanityCheck();
+
 #endif // BITCOIN_UTIL_TIME_H
