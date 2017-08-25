@@ -169,19 +169,11 @@ void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length);
 bool RenameOver(fs::path src, fs::path dest);
 bool TryCreateDirectories(const fs::path& p);
 fs::path GetDefaultDataDir();
-const fs::path &GetDataDir(bool fNetSpecific = true);
-void ClearDatadirCache();
-fs::path GetConfigFile(const std::string& confPath);
-#ifndef WIN32
-fs::path GetPidFile();
-void CreatePidFile(const fs::path &path, pid_t pid);
-#endif
 #ifdef WIN32
 fs::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
 #endif
-void OpenDebugLog();
-void ShrinkDebugFile();
 void runCommand(const std::string& strCommand);
+
 
 inline bool IsSwitchChar(char c)
 {
@@ -198,9 +190,24 @@ protected:
     mutable CCriticalSection cs_args;
     std::map<std::string, std::string> mapArgs;
     std::map<std::string, std::vector<std::string>> mapMultiArgs;
+
+    mutable CCriticalSection csPathCached;
+    fs::path pathCached;
+    fs::path pathCachedNetSpecific;
+
 public:
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
+
+    const fs::path &GetDataDir(bool fNetSpecific = true);
+    void ClearDatadirCache();
+    fs::path GetConfigFile(const std::string& confPath);
+    #ifndef WIN32
+    fs::path GetPidFile();
+    void CreatePidFile(pid_t pid);
+    #endif
+    void OpenDebugLog();
+    void ShrinkDebugFile();
 
     /**
      * Return a vector of strings of the given argument

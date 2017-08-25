@@ -42,7 +42,7 @@ bool SerializeFileDB(const std::string& prefix, const fs::path& path, const Data
     std::string tmpfn = strprintf("%s.%04x", prefix, randv);
 
     // open temp output file, and associate with CAutoFile
-    fs::path pathTmp = GetDataDir() / tmpfn;
+    fs::path pathTmp = gArgs.GetDataDir() / tmpfn;
     FILE *file = fsbridge::fopen(pathTmp, "wb");
     CAutoFile fileout(file, SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull())
@@ -107,7 +107,7 @@ bool DeserializeFileDB(const fs::path& path, Data& data)
 
 CBanDB::CBanDB()
 {
-    pathBanlist = GetDataDir() / "banlist.dat";
+    pathBanlist = gArgs.GetDataDir() / "banlist.dat";
 }
 
 bool CBanDB::Write(const banmap_t& banSet)
@@ -122,7 +122,7 @@ bool CBanDB::Read(banmap_t& banSet)
 
 CAddrDB::CAddrDB()
 {
-    pathAddr = GetDataDir() / "peers.dat";
+    pathAddr = gArgs.GetDataDir() / "peers.dat";
 }
 
 bool CAddrDB::Write(const CAddrMan& addr)

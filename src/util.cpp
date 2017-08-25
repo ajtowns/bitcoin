@@ -189,7 +189,7 @@ static void DebugPrintInit()
     vMsgsBeforeOpenLog = new std::list<std::string>;
 }
 
-void OpenDebugLog()
+void ArgsManager::OpenDebugLog()
 {
     boost::call_once(&DebugPrintInit, debugPrintInitFlag);
     boost::mutex::scoped_lock scoped_lock(*mutexDebugLog);
@@ -354,7 +354,7 @@ int LogPrintStr(const std::string &str)
             // reopen the log file, if requested
             if (fReopenDebugLog) {
                 fReopenDebugLog = false;
-                fs::path pathDebug = GetDataDir() / "debug.log";
+                fs::path pathDebug = gArgs.GetDataDir() / "debug.log";
                 if (fsbridge::freopen(pathDebug,"a",fileout) != nullptr)
                     setbuf(fileout, nullptr); // unbuffered
             }
@@ -546,11 +546,7 @@ fs::path GetDefaultDataDir()
 #endif
 }
 
-static fs::path pathCached;
-static fs::path pathCachedNetSpecific;
-static CCriticalSection csPathCached;
-
-const fs::path &GetDataDir(bool fNetSpecific)
+const fs::path &ArgsManager::GetDataDir(bool fNetSpecific)
 {
 
     LOCK(csPathCached);
@@ -562,8 +558,8 @@ const fs::path &GetDataDir(bool fNetSpecific)
     if (!path.empty())
         return path;
 
-    if (gArgs.IsArgSet("-datadir")) {
-        path = fs::system_complete(gArgs.GetArg("-datadir", ""));
+    if (IsArgSet("-datadir")) {
+        path = fs::system_complete(GetArg("-datadir", ""));
         if (!fs::is_directory(path)) {
             path = "";
             return path;
@@ -579,7 +575,7 @@ const fs::path &GetDataDir(bool fNetSpecific)
     return path;
 }
 
-void ClearDatadirCache()
+void ArgsManager::ClearDatadirCache()
 {
     LOCK(csPathCached);
 
@@ -587,7 +583,7 @@ void ClearDatadirCache()
     pathCachedNetSpecific = fs::path();
 }
 
-fs::path GetConfigFile(const std::string& confPath)
+fs::path ArgsManager::GetConfigFile(const std::string& confPath)
 {
     fs::path pathConfigFile(confPath);
     if (!pathConfigFile.is_complete())
@@ -623,16 +619,16 @@ void ArgsManager::ReadConfigFile(const std::string& confPath)
 }
 
 #ifndef WIN32
-fs::path GetPidFile()
+fs::path ArgsManager::GetPidFile()
 {
-    fs::path pathPidFile(gArgs.GetArg("-pid", BITCOIN_PID_FILENAME));
+    fs::path pathPidFile(GetArg("-pid", BITCOIN_PID_FILENAME));
     if (!pathPidFile.is_complete()) pathPidFile = GetDataDir() / pathPidFile;
     return pathPidFile;
 }
 
-void CreatePidFile(const fs::path &path, pid_t pid)
+void ArgsManager::CreatePidFile(pid_t pid)
 {
-    FILE* file = fsbridge::fopen(path, "w");
+    FILE* file = fsbridge::fopen(GetPidFile(), "w");
     if (file)
     {
         fprintf(file, "%d\n", pid);
@@ -765,7 +761,7 @@ void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length) {
 #endif
 }
 
-void ShrinkDebugFile()
+void ArgsManager::ShrinkDebugFile()
 {
     // Amount of debug.log to save at end when shrinking (must fit in memory)
     constexpr size_t RECENT_DEBUG_HISTORY_SIZE = 10 * 1000000;

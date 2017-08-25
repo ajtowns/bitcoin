@@ -253,7 +253,7 @@ bool CDB::VerifyEnvironment(const std::string& walletFile, const fs::path& dataD
         // try again
         if (!bitdb.Open(dataDir)) {
             // if it still fails, it probably means we can't even create the database env
-            errorStr = strprintf(_("Error initializing wallet database environment %s!"), GetDataDir());
+            errorStr = strprintf(_("Error initializing wallet database environment %s!"), gArgs.GetDataDir());
             return false;
         }
     }
@@ -376,7 +376,7 @@ CDB::CDB(CWalletDBWrapper& dbw, const char* pszMode, bool fFlushOnCloseIn) : pdb
 
     {
         LOCK(env->cs_db);
-        if (!env->Open(GetDataDir()))
+        if (!env->Open(gArgs.GetDataDir()))
             throw std::runtime_error("CDB: Failed to open database environment.");
 
         strFile = strFilename;
@@ -667,7 +667,7 @@ bool CWalletDBWrapper::Backup(const std::string& strDest)
                 env->mapFileUseCount.erase(strFile);
 
                 // Copy wallet file
-                fs::path pathSrc = GetDataDir() / strFile;
+                fs::path pathSrc = gArgs.GetDataDir() / strFile;
                 fs::path pathDest(strDest);
                 if (fs::is_directory(pathDest))
                     pathDest /= strFile;
