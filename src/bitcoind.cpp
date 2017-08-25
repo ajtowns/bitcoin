@@ -64,9 +64,6 @@ bool AppInit(int argc, char* argv[])
 {
     SetupEnvironment();
 
-    // Connect bitcoind signal handlers
-    noui_connect();
-
     boost::thread_group threadGroup;
     CScheduler scheduler;
 
@@ -77,6 +74,9 @@ bool AppInit(int argc, char* argv[])
     //
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
     gArgs.ParseParameters(argc, argv);
+
+    // Connect bitcoind signal handlers
+    noui_connect();
 
     // Process help and version before taking care about datadir
     if (gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") ||  gArgs.IsArgSet("-help") || gArgs.IsArgSet("-version"))
