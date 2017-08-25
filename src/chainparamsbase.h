@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "util.h"
 
 /**
  * CBaseChainParams defines the base parameters (shared between bitcoin-cli and bitcoind)
@@ -52,6 +53,14 @@ const CBaseChainParams& BaseParams();
 
 /** Sets the params returned by Params() to those for the given network. */
 void SelectBaseParams(const std::string& chain);
+
+/**
+ * Loads config file and chooses chain base params based on parameters.
+ */
+inline bool InitConfigBaseParams(StartupErrorHandler *error)
+{
+    return InitConfigParams_raw(SelectBaseParams, error);
+}
 
 /**
  * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.

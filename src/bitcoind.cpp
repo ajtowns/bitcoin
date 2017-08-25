@@ -62,37 +62,42 @@ void WaitForShutdown(boost::thread_group* threadGroup)
 //
 bool AppInit(int argc, char* argv[])
 {
-    SetupEnvironment();
 
     boost::thread_group threadGroup;
     CScheduler scheduler;
 
     bool fRet = false;
 
-    //
-    // Parameters
-    //
-    // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
-    gArgs.ParseParameters(argc, argv);
+    StartupPrintfErrorHandler error;
+    if (!InitEnvParams(argc, argv, &error, true))
+    {
+        fprintf(stderr, "%s", error.msg.c_str());
+        return false;
+    }
 
     // Connect bitcoind signal handlers
     noui_connect();
 
-    // Process help and version before taking care about datadir
-    if (gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") ||  gArgs.IsArgSet("-help") || gArgs.IsArgSet("-version"))
+    HELP_REQUEST help = InitCheckHelpRequest();
+    if (help != HELP_REQ_NONE)
     {
         std::string strUsage = strprintf(_("%s Daemon"), _(PACKAGE_NAME)) + " " + _("version") + " " + FormatFullVersion() + "\n";
 
-        if (gArgs.IsArgSet("-version"))
+        switch(help)
         {
+        case HELP_REQ_VERSION:
             strUsage += FormatParagraph(LicenseInfo());
-        }
-        else
-        {
+            break;
+        case HELP_REQ_HELP:
             strUsage += "\n" + _("Usage:") + "\n" +
-                  "  bitcoind [options]                     " + strprintf(_("Start %s Daemon"), _(PACKAGE_NAME)) + "\n";
-
+                  "  bitcoind [options]                     " +
+                  strprintf(_("Start %s Daemon"), _(PACKAGE_NAME)) + "\n";
             strUsage += "\n" + HelpMessage(HMM_BITCOIND);
+            break;
+        default:
+            // Unreachable
+            assert(false);
+            break;
         }
 
         fprintf(stdout, "%s", strUsage.c_str());
@@ -101,32 +106,9 @@ bool AppInit(int argc, char* argv[])
 
     try
     {
-        if (!fs::is_directory(GetDataDir(false)))
-        {
-            fprintf(stderr, "Error: Specified data directory \"%s\" does not exist.\n", gArgs.GetArg("-datadir", "").c_str());
+        if (!InitConfigParams(&error)) {
+            fprintf(stderr, "%s", error.msg.c_str());
             return false;
-        }
-        try
-        {
-            gArgs.ReadConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
-        } catch (const std::exception& e) {
-            fprintf(stderr,"Error reading configuration file: %s\n", e.what());
-            return false;
-        }
-        // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
-        try {
-            SelectParams(ChainNameFromCommandLine());
-        } catch (const std::exception& e) {
-            fprintf(stderr, "Error: %s\n", e.what());
-            return false;
-        }
-
-        // Error out when loose non-argument tokens are encountered on command line
-        for (int i = 1; i < argc; i++) {
-            if (!IsSwitchChar(argv[i][0])) {
-                fprintf(stderr, "Error: Command line contains unexpected token '%s', see bitcoind -h for a list of options.\n", argv[i]);
-                exit(EXIT_FAILURE);
-            }
         }
 
         // -server defaults to true for bitcoind but not for the GUI so do this here

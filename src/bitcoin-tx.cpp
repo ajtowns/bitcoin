@@ -30,16 +30,82 @@ static bool fCreateBlank;
 static std::map<std::string,UniValue> registers;
 static const int CONTINUE_EXECUTION=-1;
 
+static std::string RawTxUsage(void)
+{
+    // First part of help message is specific to this utility
+    std::string strUsage = _("Usage:") + "\n" +
+          "  bitcoin-tx [options] <hex-tx> [commands]  " + _("Update hex-encoded bitcoin transaction") + "\n" +
+          "  bitcoin-tx [options] -create [commands]   " + _("Create hex-encoded bitcoin transaction") + "\n" +
+          "\n";
+
+    strUsage += HelpMessageGroup(_("Options:"));
+    strUsage += HelpMessageOpt("-?", _("This help message"));
+    strUsage += HelpMessageOpt("-create", _("Create new, empty TX."));
+    strUsage += HelpMessageOpt("-json", _("Select JSON output"));
+    strUsage += HelpMessageOpt("-txid", _("Output only the hex-encoded transaction id of the resultant transaction."));
+    AppendParamsHelpMessages(strUsage);
+
+    strUsage += HelpMessageGroup(_("Commands:"));
+    strUsage += HelpMessageOpt("delin=N", _("Delete input N from TX"));
+    strUsage += HelpMessageOpt("delout=N", _("Delete output N from TX"));
+    strUsage += HelpMessageOpt("in=TXID:VOUT(:SEQUENCE_NUMBER)", _("Add input to TX"));
+    strUsage += HelpMessageOpt("locktime=N", _("Set TX lock time to N"));
+    strUsage += HelpMessageOpt("nversion=N", _("Set TX version to N"));
+    strUsage += HelpMessageOpt("replaceable(=N)", _("Set RBF opt-in sequence number for input N (if not provided, opt-in all available inputs)"));
+    strUsage += HelpMessageOpt("outaddr=VALUE:ADDRESS", _("Add address-based output to TX"));
+    strUsage += HelpMessageOpt("outpubkey=VALUE:PUBKEY[:FLAGS]", _("Add pay-to-pubkey output to TX") + ". " +
+        _("Optionally add the \"W\" flag to produce a pay-to-witness-pubkey-hash output") + ". " +
+        _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
+    strUsage += HelpMessageOpt("outdata=[VALUE:]DATA", _("Add data-based output to TX"));
+    strUsage += HelpMessageOpt("outscript=VALUE:SCRIPT[:FLAGS]", _("Add raw script output to TX") + ". " +
+        _("Optionally add the \"W\" flag to produce a pay-to-witness-script-hash output") + ". " +
+        _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
+    strUsage += HelpMessageOpt("outmultisig=VALUE:REQUIRED:PUBKEYS:PUBKEY1:PUBKEY2:....[:FLAGS]", _("Add Pay To n-of-m Multi-sig output to TX. n = REQUIRED, m = PUBKEYS") + ". " +
+        _("Optionally add the \"W\" flag to produce a pay-to-witness-script-hash output") + ". " +
+        _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
+    strUsage += HelpMessageOpt("sign=SIGHASH-FLAGS", _("Add zero or more signatures to transaction") + ". " +
+        _("This command requires JSON registers:") +
+        _("prevtxs=JSON object") + ", " +
+        _("privatekeys=JSON object") + ". " +
+        _("See signrawtransaction docs for format of sighash flags, JSON objects."));
+
+    strUsage += HelpMessageGroup(_("Register Commands:"));
+    strUsage += HelpMessageOpt("load=NAME:FILENAME", _("Load JSON file FILENAME into register NAME"));
+    strUsage += HelpMessageOpt("set=NAME:JSON-STRING", _("Set register NAME to given JSON-STRING"));
+    return strUsage;
+}
+
 //
 // This function returns either one of EXIT_ codes when it's expected to stop the process or
 // CONTINUE_EXECUTION when it's expected to continue further.
 //
 static int AppInitRawTx(int argc, char* argv[])
 {
-    //
-    // Parameters
-    //
-    gArgs.ParseParameters(argc, argv);
+    InitEnvParams(argc, argv);
+
+    HELP_REQUEST helpreq = InitCheckHelpRequest();
+    if (helpreq != HELP_REQ_NONE || argc < 2)
+    {
+        std::string strProgram = strprintf(_("%s bitcoin-tx utility version"), _(PACKAGE_NAME)) + " " + FormatFullVersion() + "\n\n";
+        if (helpreq == HELP_REQ_VERSION)
+        {
+            fprintf(stdout, "%s", strProgram.c_str());
+            return EXIT_SUCCESS;            
+        } else {
+            std::string strUsage = RawTxUsage();
+            fprintf(stdout, "%s", strProgram.c_str());
+            fprintf(stdout, "%s", strUsage.c_str());
+
+            if (helpreq == HELP_REQ_NONE) { // argc < 2
+                fprintf(stderr, "Error: too few parameters\n");
+                return EXIT_FAILURE;
+            } else {
+                return EXIT_SUCCESS;
+            }
+        }
+        // Unreachable
+        assert(false);
+    }
 
     // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
     try {
@@ -51,62 +117,6 @@ static int AppInitRawTx(int argc, char* argv[])
 
     fCreateBlank = gArgs.GetBoolArg("-create", false);
 
-    if (argc<2 || gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") || gArgs.IsArgSet("-help"))
-    {
-        // First part of help message is specific to this utility
-        std::string strUsage = strprintf(_("%s bitcoin-tx utility version"), _(PACKAGE_NAME)) + " " + FormatFullVersion() + "\n\n" +
-            _("Usage:") + "\n" +
-              "  bitcoin-tx [options] <hex-tx> [commands]  " + _("Update hex-encoded bitcoin transaction") + "\n" +
-              "  bitcoin-tx [options] -create [commands]   " + _("Create hex-encoded bitcoin transaction") + "\n" +
-              "\n";
-
-        fprintf(stdout, "%s", strUsage.c_str());
-
-        strUsage = HelpMessageGroup(_("Options:"));
-        strUsage += HelpMessageOpt("-?", _("This help message"));
-        strUsage += HelpMessageOpt("-create", _("Create new, empty TX."));
-        strUsage += HelpMessageOpt("-json", _("Select JSON output"));
-        strUsage += HelpMessageOpt("-txid", _("Output only the hex-encoded transaction id of the resultant transaction."));
-        AppendParamsHelpMessages(strUsage);
-
-        fprintf(stdout, "%s", strUsage.c_str());
-
-        strUsage = HelpMessageGroup(_("Commands:"));
-        strUsage += HelpMessageOpt("delin=N", _("Delete input N from TX"));
-        strUsage += HelpMessageOpt("delout=N", _("Delete output N from TX"));
-        strUsage += HelpMessageOpt("in=TXID:VOUT(:SEQUENCE_NUMBER)", _("Add input to TX"));
-        strUsage += HelpMessageOpt("locktime=N", _("Set TX lock time to N"));
-        strUsage += HelpMessageOpt("nversion=N", _("Set TX version to N"));
-        strUsage += HelpMessageOpt("replaceable(=N)", _("Set RBF opt-in sequence number for input N (if not provided, opt-in all available inputs)"));
-        strUsage += HelpMessageOpt("outaddr=VALUE:ADDRESS", _("Add address-based output to TX"));
-        strUsage += HelpMessageOpt("outpubkey=VALUE:PUBKEY[:FLAGS]", _("Add pay-to-pubkey output to TX") + ". " +
-            _("Optionally add the \"W\" flag to produce a pay-to-witness-pubkey-hash output") + ". " +
-            _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
-        strUsage += HelpMessageOpt("outdata=[VALUE:]DATA", _("Add data-based output to TX"));
-        strUsage += HelpMessageOpt("outscript=VALUE:SCRIPT[:FLAGS]", _("Add raw script output to TX") + ". " +
-            _("Optionally add the \"W\" flag to produce a pay-to-witness-script-hash output") + ". " +
-            _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
-        strUsage += HelpMessageOpt("outmultisig=VALUE:REQUIRED:PUBKEYS:PUBKEY1:PUBKEY2:....[:FLAGS]", _("Add Pay To n-of-m Multi-sig output to TX. n = REQUIRED, m = PUBKEYS") + ". " +
-            _("Optionally add the \"W\" flag to produce a pay-to-witness-script-hash output") + ". " +
-            _("Optionally add the \"S\" flag to wrap the output in a pay-to-script-hash."));
-        strUsage += HelpMessageOpt("sign=SIGHASH-FLAGS", _("Add zero or more signatures to transaction") + ". " +
-            _("This command requires JSON registers:") +
-            _("prevtxs=JSON object") + ", " +
-            _("privatekeys=JSON object") + ". " +
-            _("See signrawtransaction docs for format of sighash flags, JSON objects."));
-        fprintf(stdout, "%s", strUsage.c_str());
-
-        strUsage = HelpMessageGroup(_("Register Commands:"));
-        strUsage += HelpMessageOpt("load=NAME:FILENAME", _("Load JSON file FILENAME into register NAME"));
-        strUsage += HelpMessageOpt("set=NAME:JSON-STRING", _("Set register NAME to given JSON-STRING"));
-        fprintf(stdout, "%s", strUsage.c_str());
-
-        if (argc < 2) {
-            fprintf(stderr, "Error: too few parameters\n");
-            return EXIT_FAILURE;
-        }
-        return EXIT_SUCCESS;
-    }
     return CONTINUE_EXECUTION;
 }
 
@@ -834,8 +844,6 @@ static int CommandLineRawTx(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
-    SetupEnvironment();
-
     try {
         int ret = AppInitRawTx(argc, argv);
         if (ret != CONTINUE_EXECUTION)

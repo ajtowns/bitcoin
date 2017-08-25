@@ -546,15 +546,11 @@ WId BitcoinApplication::getMainWinId() const
 #ifndef BITCOIN_QT_TEST
 int main(int argc, char *argv[])
 {
-    SetupEnvironment();
-
-    /// 1. Parse command-line options. These take precedence over anything else.
-    // Command-line options take precedence:
-    gArgs.ParseParameters(argc, argv);
+    InitEnvParams(argc, argv);
 
     // Do not refer to data directory yet, this can be overridden by Intro::pickDataDirectory
 
-    /// 2. Basic Qt initialization (not dependent on parameters or configuration)
+    /// 1. Basic Qt initialization (not dependent on parameters or configuration)
 #if QT_VERSION < 0x050000
     // Internal string conversion is all UTF-8
     QTextCodec::setCodecForTr(QTextCodec::codecForName("UTF-8"));
@@ -590,7 +586,7 @@ int main(int argc, char *argv[])
     qRegisterMetaType< CAmount >("CAmount");
     qRegisterMetaType< std::function<void(void)> >("std::function<void(void)>");
 
-    /// 3. Application identification
+    /// 2. Application identification
     // must be set before OptionsModel is initialized or translations are loaded,
     // as it is used to locate QSettings
     QApplication::setOrganizationName(QAPP_ORG_NAME);
@@ -598,55 +594,49 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QAPP_APP_NAME_DEFAULT);
     GUIUtil::SubstituteFonts(GetLangTerritory());
 
-    /// 4. Initialization of translations, so that intro dialog is in user's language
+    /// 3. Initialization of translations, so that intro dialog is in user's language
     // Now that QSettings are accessible, initialize translations
     QTranslator qtTranslatorBase, qtTranslator, translatorBase, translator;
     initTranslations(qtTranslatorBase, qtTranslator, translatorBase, translator);
     translationInterface.Translate.connect(Translate);
 
-    // Show help message immediately after parsing command-line options (for "-lang") and setting locale,
-    // but before showing splash screen.
-    if (gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") || gArgs.IsArgSet("-help") || gArgs.IsArgSet("-version"))
+    // Show help message immediately after parsing command-line options (for "-lang")
+    // and setting locale, but before showing splash screen.
+    HELP_REQUEST help_req = InitCheckHelpRequest();
+    if (help_req != HELP_REQ_NONE)
     {
-        HelpMessageDialog help(nullptr, gArgs.IsArgSet("-version"));
+        HelpMessageDialog help(nullptr, help_req == HELP_REQ_VERSION);
         help.showOrPrint();
         return EXIT_SUCCESS;
     }
 
-    /// 5. Now that settings and translations are available, ask user for data directory
+    /// 4. Now that settings and translations are available, ask user for data directory
     // User language is set up: pick a data directory
     if (!Intro::pickDataDirectory())
         return EXIT_SUCCESS;
 
-    /// 6. Determine availability of data directory and parse bitcoin.conf
-    /// - Do not call GetDataDir(true) before this step finishes
-    if (!fs::is_directory(GetDataDir(false)))
-    {
-        QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
-                              QObject::tr("Error: Specified data directory \"%1\" does not exist.").arg(QString::fromStdString(gArgs.GetArg("-datadir", ""))));
-        return EXIT_FAILURE;
-    }
-    try {
-        gArgs.ReadConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
-    } catch (const std::exception& e) {
-        QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
-                              QObject::tr("Error: Cannot parse configuration file: %1. Only use key=value syntax.").arg(e.what()));
-        return EXIT_FAILURE;
-    }
-
-    /// 7. Determine network (and switch to network specific options)
+    /// 5. Determine availability of data directory and parse bitcoin.conf,
+    ///    work out if using testnet/regtest, etc.
     // - Do not call Params() before this step
-    // - Do this after parsing the configuration file, as the network can be switched there
     // - QSettings() will use the new application name after this, resulting in network-specific settings
     // - Needs to be done before createOptionsModel
+    class QtStartupErrorHandler : public StartupErrorHandler {
+    public:
+	QString msg;
+	virtual void Error1(const char *fmt, const char *arg) {
+	    // Error messages use C-style %s, but Qt and translations use %1 instead
+	    std::string fmtstr(fmt);
+	    fmtstr.replace(fmtstr.find("%s"), 2, "%1");
+	    msg = QObject::tr(fmtstr.c_str()).arg(QString::fromStdString(arg));
+	}
+    };
+    QtStartupErrorHandler error;
 
-    // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
-    try {
-        SelectParams(ChainNameFromCommandLine());
-    } catch(std::exception &e) {
-        QMessageBox::critical(0, QObject::tr(PACKAGE_NAME), QObject::tr("Error: %1").arg(e.what()));
-        return EXIT_FAILURE;
+    if (!InitConfigParams(&error)) {
+	QMessageBox::critical(0, QObject::tr(PACKAGE_NAME), error.msg);
+	return EXIT_FAILURE;
     }
+
 #ifdef ENABLE_WALLET
     // Parse URIs on command line -- this can affect Params()
     PaymentServer::ipcParseCommandLine(argc, argv);

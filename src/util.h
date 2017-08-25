@@ -326,4 +326,23 @@ template <typename Callable> void TraceThread(const char* name,  Callable func)
 
 std::string CopyrightHolders(const std::string& strPrefix);
 
+class StartupErrorHandler {
+public:
+    virtual void Error1(const char *fmt, const char *arg) = 0;
+};
+
+class StartupPrintfErrorHandler : public StartupErrorHandler {
+public:
+    std::string msg;
+    virtual void Error1(const char *fmt, const char *arg);
+};
+enum HELP_REQUEST { HELP_REQ_NONE, HELP_REQ_HELP, HELP_REQ_VERSION };
+
+//!Initialise environment and parameters
+bool InitEnvParams(int argc, char **argv, StartupErrorHandler *error=nullptr, bool check_loose_params=false);
+//!Check for -help or -version
+HELP_REQUEST InitCheckHelpRequest(void);
+//!Load config, select parameters,
+bool InitConfigParams_raw(void(*SelectParams)(const std::string &network), StartupErrorHandler *error);
+
 #endif // BITCOIN_UTIL_H

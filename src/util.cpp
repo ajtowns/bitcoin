@@ -897,3 +897,65 @@ int64_t GetStartupTime()
 {
     return nStartupTime;
 }
+
+bool InitEnvParams(int argc, char **argv, StartupErrorHandler *error, bool check_loose_params)
+{
+    SetupEnvironment();
+    gArgs.ParseParameters(argc, argv);
+
+    if (check_loose_params) {
+        // Error out when loose non-argument tokens are encountered on command line
+        for (int i = 1; i < argc; i++) {
+            if (!IsSwitchChar(argv[i][0])) {
+                error->Error1("Error: Command line contains unexpected token '%s', see bitcoind -h for a list of options.\n", argv[i]);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+HELP_REQUEST InitCheckHelpRequest(void)
+{
+    // Process help and version before taking care about datadir
+    if (gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") ||  gArgs.IsArgSet("-help")) {
+        return HELP_REQ_HELP;
+    } else if (gArgs.IsArgSet("-version")) {
+        return HELP_REQ_VERSION;
+    } else {
+        return HELP_REQ_NONE;
+    }
+}
+
+void StartupPrintfErrorHandler::Error1(const char *fmt, const char *arg) {
+    msg = strprintf(fmt, arg);
+}
+
+
+bool InitConfigParams_raw(void(*SelectParams)(const std::string &network), StartupErrorHandler *error)
+{
+    if (!fs::is_directory(GetDataDir(false)))
+    {
+        error->Error1("Error: Specified data directory \"%s\" does not exist.\n", gArgs.GetArg("-datadir", "").c_str());
+        return false;
+    }
+
+    try
+    {
+        gArgs.ReadConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
+    } catch (const std::exception& e) {
+        error->Error1("Error reading configuration file: %s. Only use key=value syntax.\n", e.what());
+        return false;
+    }
+
+    // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
+    try {
+        SelectParams(ChainNameFromCommandLine());
+    } catch (const std::exception& e) {
+        error->Error1("Error: %s\n", e.what());
+        return false;
+    }
+
+    return true;
+}

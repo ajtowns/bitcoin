@@ -77,13 +77,12 @@ public:
 //
 static int AppInitRPC(int argc, char* argv[])
 {
-    //
-    // Parameters
-    //
-    gArgs.ParseParameters(argc, argv);
-    if (argc<2 || gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") || gArgs.IsArgSet("-help") || gArgs.IsArgSet("-version")) {
+    InitEnvParams(argc, argv);
+
+    HELP_REQUEST help_req = InitCheckHelpRequest();
+    if (help_req != HELP_REQ_NONE || argc < 2) {	
         std::string strUsage = strprintf(_("%s RPC client version"), _(PACKAGE_NAME)) + " " + FormatFullVersion() + "\n";
-        if (!gArgs.IsArgSet("-version")) {
+        if (help_req != HELP_REQ_VERSION) {
             strUsage += "\n" + _("Usage:") + "\n" +
                   "  bitcoin-cli [options] <command> [params]  " + strprintf(_("Send command to %s"), _(PACKAGE_NAME)) + "\n" +
                   "  bitcoin-cli [options] -named <command> [name=value] ... " + strprintf(_("Send command to %s (with named arguments)"), _(PACKAGE_NAME)) + "\n" +
@@ -94,34 +93,30 @@ static int AppInitRPC(int argc, char* argv[])
         }
 
         fprintf(stdout, "%s", strUsage.c_str());
-        if (argc < 2) {
+        if (help_req == HELP_REQ_NONE) { // argc < 2
             fprintf(stderr, "Error: too few parameters\n");
             return EXIT_FAILURE;
         }
         return EXIT_SUCCESS;
     }
-    if (!fs::is_directory(GetDataDir(false))) {
-        fprintf(stderr, "Error: Specified data directory \"%s\" does not exist.\n", gArgs.GetArg("-datadir", "").c_str());
+
+    StartupPrintfErrorHandler error;
+    if (!InitConfigBaseParams(&error)) {
+        fprintf(stderr, "%s", error.msg.c_str());
         return EXIT_FAILURE;
     }
-    try {
-        gArgs.ReadConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
-    } catch (const std::exception& e) {
-        fprintf(stderr,"Error reading configuration file: %s\n", e.what());
+
+    if (!SetupNetworking()) {
+        fprintf(stderr, "Error: Initializing networking failed\n");
         return EXIT_FAILURE;
     }
-    // Check for -testnet or -regtest parameter (BaseParams() calls are only valid after this clause)
-    try {
-        SelectBaseParams(ChainNameFromCommandLine());
-    } catch (const std::exception& e) {
-        fprintf(stderr, "Error: %s\n", e.what());
-        return EXIT_FAILURE;
-    }
+
     if (gArgs.GetBoolArg("-rpcssl", false))
     {
         fprintf(stderr, "Error: SSL mode for RPC (-rpcssl) is no longer supported.\n");
         return EXIT_FAILURE;
     }
+
     return CONTINUE_EXECUTION;
 }
 
@@ -389,12 +384,6 @@ int CommandLineRPC(int argc, char *argv[])
 
 int main(int argc, char* argv[])
 {
-    SetupEnvironment();
-    if (!SetupNetworking()) {
-        fprintf(stderr, "Error: Initializing networking failed\n");
-        return EXIT_FAILURE;
-    }
-
     try {
         int ret = AppInitRPC(argc, argv);
         if (ret != CONTINUE_EXECUTION)

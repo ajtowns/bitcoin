@@ -10,6 +10,7 @@
 #include "consensus/params.h"
 #include "primitives/block.h"
 #include "protocol.h"
+#include "util.h"
 
 #include <memory>
 #include <vector>
@@ -114,6 +115,14 @@ const CChainParams &Params();
  * @throws std::runtime_error when the chain is not supported.
  */
 void SelectParams(const std::string& chain);
+
+/**
+ * Loads config file and chooses chain based on parameters.
+ */
+inline bool InitConfigParams(StartupErrorHandler *error)
+{
+    return InitConfigParams_raw(SelectParams, error);
+}
 
 /**
  * Allows modifying the Version Bits regtest parameters.
