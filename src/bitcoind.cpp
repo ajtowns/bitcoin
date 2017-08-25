@@ -62,6 +62,11 @@ void WaitForShutdown(boost::thread_group* threadGroup)
 //
 bool AppInit(int argc, char* argv[])
 {
+    SetupEnvironment();
+
+    // Connect bitcoind signal handlers
+    noui_connect();
+
     boost::thread_group threadGroup;
     CScheduler scheduler;
 
@@ -187,10 +192,5 @@ bool AppInit(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
-    SetupEnvironment();
-
-    // Connect bitcoind signal handlers
-    noui_connect();
-
     return (AppInit(argc, argv) ? EXIT_SUCCESS : EXIT_FAILURE);
 }
