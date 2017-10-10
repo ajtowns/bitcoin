@@ -172,7 +172,7 @@ bool TryCreateDirectories(const fs::path& p);
 fs::path GetDefaultDataDir();
 const fs::path &GetDataDir(bool fNetSpecific = true);
 void ClearDatadirCache();
-fs::path GetConfigFile(const std::string& confPath, bool fNetSpecific = false);
+fs::path GetConfigFile(const std::string& confPath, bool fNetSpecific);
 #ifndef WIN32
 fs::path GetPidFile();
 void CreatePidFile(const fs::path &path, pid_t pid);
@@ -201,7 +201,7 @@ protected:
     std::map<std::string, std::vector<std::string>> mapMultiArgs;
 public:
     void ParseParameters(int argc, const char*const argv[]);
-    void ReadConfigFile(const std::string& confPath, bool fNetSpecific = false);
+    void ReadConfigFile(const std::string& confPath, bool fNetSpecific);
 
     /**
      * Return a vector of strings of the given argument
