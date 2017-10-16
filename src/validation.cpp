@@ -1550,17 +1550,17 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
     unsigned int flags = fStrictPayToScriptHash ? SCRIPT_VERIFY_P2SH : SCRIPT_VERIFY_NONE;
 
     // Start enforcing the DERSIG (BIP66) rule
-    if (pindex->nHeight >= consensusparams.BIP66Height) {
+    if (consensusparams.DeploymentActive(Consensus::DEPLOYMENT_STRICTDER, pindex)) {
         flags |= SCRIPT_VERIFY_DERSIG;
     }
 
     // Start enforcing CHECKLOCKTIMEVERIFY (BIP65) rule
-    if (pindex->nHeight >= consensusparams.BIP65Height) {
+    if (consensusparams.DeploymentActive(Consensus::DEPLOYMENT_CLTV, pindex)) {
         flags |= SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY;
     }
 
     // Start enforcing BIP68 (sequence locks) and BIP112 (CHECKSEQUENCEVERIFY) using versionbits logic.
-    if (consensusparams.DeploymentActive(Consensus::DEPLOYMENT_CSV, pindex->pprev)) {
+    if (consensusparams.DeploymentActive(Consensus::DEPLOYMENT_CSV, pindex)) {
         flags |= SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
     }
 
@@ -1667,9 +1667,8 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
     // duplicate transactions descending from the known pairs either.
     // If we're on the known chain at height greater than where BIP34 activated, we can save the db accesses needed for the BIP30 check.
     assert(pindex->pprev);
-    CBlockIndex *pindexBIP34height = pindex->pprev->GetAncestor(chainparams.GetConsensus().BIP34Height);
     //Only continue to enforce if we're below BIP34 activation height or the block hash at that height doesn't correspond.
-    fEnforceBIP30 = fEnforceBIP30 && (!pindexBIP34height || !(pindexBIP34height->GetBlockHash() == chainparams.GetConsensus().BIP34Hash));
+    fEnforceBIP30 = fEnforceBIP30 && !chainparams.GetConsensus().DeploymentActive(Consensus::DEPLOYMENT_BIP30FAST, pindex);
 
     if (fEnforceBIP30) {
         for (const auto& tx : block.vtx) {
@@ -1684,7 +1683,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
     // Start enforcing BIP68 (sequence locks) and BIP112 (CHECKSEQUENCEVERIFY) using versionbits logic.
     int nLockTimeFlags = 0;
-    if (chainparams.GetConsensus().DeploymentActive(Consensus::DEPLOYMENT_CSV, pindex->pprev)) {
+    if (chainparams.GetConsensus().DeploymentActivePrev(Consensus::DEPLOYMENT_CSV, pindex->pprev)) {
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
@@ -2781,7 +2780,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
-    return (params.DeploymentActive(Consensus::DEPLOYMENT_SEGWIT, pindexPrev));
+    return (params.DeploymentActivePrev(Consensus::DEPLOYMENT_SEGWIT, pindexPrev));
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -2873,9 +2872,9 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, CValidationSta
 
     // Reject outdated version blocks when 95% (75% on testnet) of the network has upgraded:
     // check for version 2, 3 and 4 upgrades
-    if((block.nVersion < 2 && nHeight >= consensusParams.BIP34Height) ||
-       (block.nVersion < 3 && nHeight >= consensusParams.BIP66Height) ||
-       (block.nVersion < 4 && nHeight >= consensusParams.BIP65Height))
+    if((block.nVersion < 2 && consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_COINBASEHEIGHT, pindexPrev)) ||
+       (block.nVersion < 3 && consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_STRICTDER, pindexPrev)) ||
+       (block.nVersion < 4 && consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_CLTV, pindexPrev)))
             return state.Invalid(false, REJECT_OBSOLETE, strprintf("bad-version(0x%08x)", block.nVersion),
                                  strprintf("rejected nVersion=0x%08x block", block.nVersion));
 
@@ -2888,7 +2887,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
 
     // Start enforcing BIP113 (Median Time Past) using versionbits logic.
     int nLockTimeFlags = 0;
-    if (consensusParams.DeploymentActive(Consensus::DEPLOYMENT_CSV, pindexPrev)) {
+    if (consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_CSV, pindexPrev)) {
         nLockTimeFlags |= LOCKTIME_MEDIAN_TIME_PAST;
     }
 
@@ -2904,7 +2903,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     }
 
     // Enforce rule that the coinbase starts with serialized block height
-    if (nHeight >= consensusParams.BIP34Height)
+    if (pindexPrev && consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_COINBASEHEIGHT, pindexPrev))
     {
         CScript expect = CScript() << nHeight;
         if (block.vtx[0]->vin[0].scriptSig.size() < expect.size() ||
@@ -2922,7 +2921,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     //   {0xaa, 0x21, 0xa9, 0xed}, and the following 32 bytes are SHA256^2(witness root, witness nonce). In case there are
     //   multiple, the last one is used.
     bool fHaveWitness = false;
-    if (consensusParams.DeploymentActive(Consensus::DEPLOYMENT_SEGWIT, pindexPrev)) {
+    if (consensusParams.DeploymentActivePrev(Consensus::DEPLOYMENT_SEGWIT, pindexPrev)) {
         int commitpos = GetWitnessCommitmentIndex(block);
         if (commitpos != -1) {
             bool malleated = false;

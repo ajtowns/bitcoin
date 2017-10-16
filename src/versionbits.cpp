@@ -209,12 +209,6 @@ ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::
     return VersionBitsConditionChecker(pos).GetStateFor(pindexPrev, params, versionbitscache.caches[pos]);
 }
 
-bool Consensus::Params::DeploymentActive(Consensus::DeploymentPos pos, const CBlockIndex* pindex) const
-{
-    AssertLockHeld(cs_main);
-    return VersionBitsState(pindex, *this, pos) == THRESHOLD_ACTIVE;
-}
-
 static BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     return VersionBitsConditionChecker(pos).GetStateStatisticsFor(pindexPrev, params);

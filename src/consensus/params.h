@@ -26,6 +26,8 @@ struct UnknownDeploymentWarning {
 struct Params {
     uint256 hashGenesisBlock;
     int nSubsidyHalvingInterval;
+
+private:
     /** Block height and hash at which BIP34 becomes active */
     int BIP34Height;
     uint256 BIP34Hash;
@@ -33,6 +35,13 @@ struct Params {
     int BIP65Height;
     /** Block height at which BIP66 becomes active */
     int BIP66Height;
+
+public:
+    inline void SetBIP34Params(int height) { BIP34Height = height; BIP34Hash = uint256(); }
+    inline void SetBIP34Params(int height, const char* hash) { BIP34Height = height; BIP34Hash = uint256S(hash); }
+    inline void SetBIP65Params(int height) { BIP65Height = height; }
+    inline void SetBIP66Params(int height) { BIP66Height = height; }
+
     /**
      * Minimum blocks including miner confirmation of the total of 2016 blocks in a retargeting period,
      * (nPowTargetTimespan / nPowTargetSpacing) which is also used for BIP9 deployments.
@@ -53,6 +62,7 @@ struct Params {
 
     /** Determine if a given deployment is active at the given block.
      * Expects cs_main to be already locked */
+    bool DeploymentActivePrev(Consensus::DeploymentPos pos, const CBlockIndex* pindexPrev) const;
     bool DeploymentActive(Consensus::DeploymentPos pos, const CBlockIndex* pindex) const;
     /** Check for activation of unknown warnings
      * Expects cs_main to be already locked */

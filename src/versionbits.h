@@ -89,4 +89,35 @@ uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentP
  * Expects cs_main to be already locked */
 void VersionBitsCachesClear();
 
+
+inline bool Consensus::Params::DeploymentActive(Consensus::DeploymentPos pos, const CBlockIndex* pindex) const { assert(pindex != nullptr); return DeploymentActivePrev(pos, pindex->pprev); }
+
+inline bool Consensus::Params::DeploymentActivePrev(Consensus::DeploymentPos pos, const CBlockIndex* pindexPrev) const
+{
+    // AssertLockHeld(cs_main);
+
+    const int nHeight = (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1);
+
+    switch (pos) {
+    case DEPLOYMENT_COINBASEHEIGHT:
+        return nHeight >= BIP34Height;
+    case DEPLOYMENT_CLTV:
+        return nHeight >= BIP65Height;
+    case DEPLOYMENT_STRICTDER:
+        return nHeight >= BIP66Height;
+    case DEPLOYMENT_BIP30FAST:
+        if (pindexPrev != nullptr) {
+            const CBlockIndex *pindexBIP34height = pindexPrev->GetAncestor(BIP34Height);
+            if (pindexBIP34height != nullptr && pindexBIP34height->GetBlockHash() == BIP34Hash) {
+                return true;
+            }
+        }
+        return false;
+    default:
+         assert(pos < MAX_VERSION_BITS_DEPLOYMENTS);
+         return VersionBitsState(pindexPrev, *this, pos) == THRESHOLD_ACTIVE;
+    }
+    assert(0);
+}
+
 #endif
