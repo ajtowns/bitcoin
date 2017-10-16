@@ -21,6 +21,7 @@
 #include "httprpc.h"
 #include "key.h"
 #include "validation.h"
+#include "versionbits.h"
 #include "miner.h"
 #include "netbase.h"
 #include "net.h"

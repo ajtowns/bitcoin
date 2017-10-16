@@ -25,6 +25,7 @@
 #include "utilstrencodings.h"
 #include "hash.h"
 #include "warnings.h"
+#include "versionbits.h"
 
 #include <stdint.h>
 

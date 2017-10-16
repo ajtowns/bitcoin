@@ -73,17 +73,27 @@ struct VersionBitsCache
     void Clear();
 };
 
-ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
-int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
-
-inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache) {
-    return VersionBitsState(pindex, params, pos, cache) == THRESHOLD_ACTIVE;
-}
+extern VersionBitsCache versionbitscache;
 
 void VersionBitsCachesClear();
 void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages);
 
+/** Get the BIP9 state for a given deployment at the current tip. */
+ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+/** Get the BIP9 state for a given deployment at the given block. */
+ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
+uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip. */
+BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip. */
+int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+/**  Determine if a given deployment is active at the given block. */
+inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache) {
+    return VersionBitsState(pindex, params, pos, cache) == THRESHOLD_ACTIVE;
+}
 
 #endif
