@@ -23,14 +23,14 @@ enum DeploymentPos
  */
 struct BIP9Deployment {
     /** Bit position to select the particular bit in nVersion. */
-    int bit;
+    int Xbit;
     /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
-    int64_t nStartTime;
+    int64_t XnStartTime;
     /** Timeout/expiry MedianTime for the deployment attempt. */
-    int64_t nTimeout;
+    int64_t XnTimeout;
 
     inline bool Defined() const {
-        return nTimeout > 0;
+        return XnTimeout > 0;
     }
 };
 
