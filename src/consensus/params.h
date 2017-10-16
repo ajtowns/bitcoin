@@ -11,7 +11,14 @@
 #include <map>
 #include <string>
 
+class CBlockIndex;
+
 namespace Consensus {
+
+struct UnknownDeploymentWarning {
+    virtual void DoWarning(const std::string&) = 0;
+    std::vector<std::string> warningMessages;
+};
 
 /**
  * Parameters that influence chain consensus.
@@ -43,6 +50,10 @@ struct Params {
     int64_t DifficultyAdjustmentInterval() const { return nPowTargetTimespan / nPowTargetSpacing; }
     uint256 nMinimumChainWork;
     uint256 defaultAssumeValid;
+
+    /** Check for activation of unknown warnings
+     * Expects cs_main to be already locked */
+    void CheckUnknownRules(const CBlockIndex* pindex, UnknownDeploymentWarning *warn) const;
 };
 } // namespace Consensus
 

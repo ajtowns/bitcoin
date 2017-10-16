@@ -91,10 +91,6 @@ inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params
     return VersionBitsState(pindex, params, pos) == THRESHOLD_ACTIVE;
 }
 
-/** Check for activation of unknown warnings
- * Expects cs_main to be already locked */
-void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages);
-
 /** Clear Caches used for calculating BIP9 states
  * Expects cs_main to be already locked */
 void VersionBitsCachesClear();

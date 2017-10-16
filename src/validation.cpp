@@ -1950,15 +1950,17 @@ void PruneAndFlush() {
     FlushStateToDisk(chainparams, state, FLUSH_STATE_NONE);
 }
 
-static void DoWarning(const std::string& strWarning)
-{
-    static bool fWarned = false;
-    SetMiscWarning(strWarning);
-    if (!fWarned) {
-        AlertNotify(strWarning);
-        fWarned = true;
+struct VUDWarning : Consensus::UnknownDeploymentWarning {
+    void DoWarning(const std::string& strWarning) override
+    {
+        static bool fWarned = false;
+        SetMiscWarning(strWarning);
+        if (!fWarned) {
+            AlertNotify(strWarning);
+            fWarned = true;
+        }
     }
-}
+};
 
 /** Update chainActive and related internal data structures. */
 void static UpdateTip(CBlockIndex *pindexNew, const CChainParams& chainParams) {
@@ -1969,11 +1971,11 @@ void static UpdateTip(CBlockIndex *pindexNew, const CChainParams& chainParams) {
 
     cvBlockChange.notify_all();
 
-    std::vector<std::string> warningMessages;
+    VUDWarning warn;
     if (!IsInitialBlockDownload())
     {
-	const CBlockIndex* pindex = chainActive.Tip();
-	CheckUnknownRules(pindex, chainParams, DoWarning, warningMessages);
+        const CBlockIndex* pindex = chainActive.Tip();
+        chainParams.GetConsensus().CheckUnknownRules(pindex, &warn);
 
     }
     
@@ -1982,8 +1984,8 @@ void static UpdateTip(CBlockIndex *pindexNew, const CChainParams& chainParams) {
       log(chainActive.Tip()->nChainWork.getdouble())/log(2.0), (unsigned long)chainActive.Tip()->nChainTx,
       DateTimeStrFormat("%Y-%m-%d %H:%M:%S", chainActive.Tip()->GetBlockTime()),
       GuessVerificationProgress(chainParams.TxData(), chainActive.Tip()), pcoinsTip->DynamicMemoryUsage() * (1.0 / (1<<20)), pcoinsTip->GetCacheSize());
-    if (!warningMessages.empty())
-        LogPrintf(" warning='%s'", boost::algorithm::join(warningMessages, ", "));
+    if (!warn.warningMessages.empty())
+        LogPrintf(" warning='%s'", boost::algorithm::join(warn.warningMessages, ", "));
     LogPrintf("\n");
 
 }
