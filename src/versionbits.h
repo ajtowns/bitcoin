@@ -87,9 +87,7 @@ uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentP
 
 /** Determine if a given deployment is active at the given block.
  * Expects cs_main to be already locked */
-inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos) {
-    return VersionBitsState(pindex, params, pos) == THRESHOLD_ACTIVE;
-}
+bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos);
 
 /** Clear Caches used for calculating BIP9 states
  * Expects cs_main to be already locked */
