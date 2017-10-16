@@ -9,6 +9,14 @@
 #include "chainparams.h"
 #include "validation.h"
 
+struct VersionBitsCache
+{
+    ThresholdConditionCache caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS];
+};
+
+// Protected by cs_main
+static VersionBitsCache versionbitscache;
+
 const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] = {
     {
         /*.name =*/ "testdummy",
@@ -195,9 +203,10 @@ public:
 
 } // namespace
 
-ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache)
+ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
-    return VersionBitsConditionChecker(pos).GetStateFor(pindexPrev, params, cache.caches[pos]);
+    AssertLockHeld(cs_main);
+    return VersionBitsConditionChecker(pos).GetStateFor(pindexPrev, params, versionbitscache.caches[pos]);
 }
 
 static BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
@@ -215,23 +224,13 @@ uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentP
     return VersionBitsConditionChecker(pos).Mask(params);
 }
 
-void VersionBitsCache::Clear()
-{
-    for (unsigned int d = 0; d < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; d++) {
-        caches[d].clear();
-    }
-}
-
-// Protected by cs_main
-VersionBitsCache versionbitscache;
-
 int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
     int32_t nVersion = VERSIONBITS_TOP_BITS;
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        ThresholdState state = VersionBitsState(pindexPrev, params, (Consensus::DeploymentPos)i, versionbitscache);
+        ThresholdState state = VersionBitsState(pindexPrev, params, (Consensus::DeploymentPos)i);
         if (state == THRESHOLD_LOCKED_IN || state == THRESHOLD_STARTED) {
             nVersion |= VersionBitsMask(params, (Consensus::DeploymentPos)i);
         }
@@ -270,7 +269,7 @@ static ThresholdConditionCache warningcache[VERSIONBITS_NUM_BITS];
 ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(cs_main);
-    return VersionBitsState(chainActive.Tip(), params, pos, versionbitscache);
+    return VersionBitsState(chainActive.Tip(), params, pos);
 }
 
 BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos)
@@ -287,7 +286,11 @@ int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::D
 
 void VersionBitsCachesClear()
 {
-    versionbitscache.Clear();
+    AssertLockHeld(cs_main);
+
+    for (unsigned int d = 0; d < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; d++) {
+        versionbitscache.caches[d].clear();
+    }
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();
     }
@@ -295,6 +298,8 @@ void VersionBitsCachesClear()
 
 void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages)
 {
+    AssertLockHeld(cs_main);
+
     int nUpgraded = 0;
 
     for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {

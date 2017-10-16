@@ -1560,7 +1560,7 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
     }
 
     // Start enforcing BIP68 (sequence locks) and BIP112 (CHECKSEQUENCEVERIFY) using versionbits logic.
-    if (VersionBitsActive(pindex->pprev, consensusparams, Consensus::DEPLOYMENT_CSV, versionbitscache)) {
+    if (VersionBitsActive(pindex->pprev, consensusparams, Consensus::DEPLOYMENT_CSV)) {
         flags |= SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
     }
 
@@ -1684,7 +1684,7 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
 
     // Start enforcing BIP68 (sequence locks) and BIP112 (CHECKSEQUENCEVERIFY) using versionbits logic.
     int nLockTimeFlags = 0;
-    if (VersionBitsActive(pindex->pprev, chainparams.GetConsensus(), Consensus::DEPLOYMENT_CSV, versionbitscache)) {
+    if (VersionBitsActive(pindex->pprev, chainparams.GetConsensus(), Consensus::DEPLOYMENT_CSV)) {
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
@@ -2779,7 +2779,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
-    return (VersionBitsActive(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT, versionbitscache));
+    return (VersionBitsActive(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT));
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -2886,7 +2886,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
 
     // Start enforcing BIP113 (Median Time Past) using versionbits logic.
     int nLockTimeFlags = 0;
-    if (VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_CSV, versionbitscache)) {
+    if (VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_CSV)) {
         nLockTimeFlags |= LOCKTIME_MEDIAN_TIME_PAST;
     }
 
@@ -2920,7 +2920,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
     //   {0xaa, 0x21, 0xa9, 0xed}, and the following 32 bytes are SHA256^2(witness root, witness nonce). In case there are
     //   multiple, the last one is used.
     bool fHaveWitness = false;
-    if (VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT, versionbitscache)) {
+    if (VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT)) {
         int commitpos = GetWitnessCommitmentIndex(block);
         if (commitpos != -1) {
             bool malleated = false;

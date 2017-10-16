@@ -541,7 +541,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     pblock->nNonce = 0;
 
     // NOTE: If at some point we support pre-segwit miners post-segwit-activation, this needs to take segwit support into consideration
-    const bool fPreSegWit = !VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT, versionbitscache);
+    const bool fPreSegWit = !VersionBitsActive(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT);
 
     UniValue aCaps(UniValue::VARR); aCaps.push_back("proposal");
 
@@ -600,7 +600,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     UniValue vbavailable(UniValue::VOBJ);
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
-        ThresholdState state = VersionBitsState(pindexPrev, consensusParams, pos, versionbitscache);
+        ThresholdState state = VersionBitsState(pindexPrev, consensusParams, pos);
         switch (state) {
             case THRESHOLD_DEFINED:
             case THRESHOLD_FAILED:

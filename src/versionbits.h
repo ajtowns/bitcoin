@@ -66,34 +66,37 @@ public:
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, ThresholdConditionCache& cache) const;
 };
 
-struct VersionBitsCache
-{
-    ThresholdConditionCache caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS];
 
-    void Clear();
-};
-
-extern VersionBitsCache versionbitscache;
-
-void VersionBitsCachesClear();
-void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages);
-
-/** Get the BIP9 state for a given deployment at the current tip. */
+/** Get the BIP9 state for a given deployment at the current tip.
+ * LOCKs cs_main */
 ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
-/** Get the BIP9 state for a given deployment at the given block. */
-ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
-
-/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip. */
+/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip.
+ * LOCKs cs_main */
 BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
-/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip. */
+/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip.
+ * LOCKs cs_main */
 int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
-/**  Determine if a given deployment is active at the given block. */
-inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache) {
-    return VersionBitsState(pindex, params, pos, cache) == THRESHOLD_ACTIVE;
+
+/** Get the BIP9 state for a given deployment at the given block.
+ * Expects cs_main to be already locked */
+ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+/** Determine if a given deployment is active at the given block.
+ * Expects cs_main to be already locked */
+inline bool VersionBitsActive(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos) {
+    return VersionBitsState(pindex, params, pos) == THRESHOLD_ACTIVE;
 }
+
+/** Check for activation of unknown warnings
+ * Expects cs_main to be already locked */
+void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages);
+
+/** Clear Caches used for calculating BIP9 states
+ * Expects cs_main to be already locked */
+void VersionBitsCachesClear();
 
 #endif
