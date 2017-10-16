@@ -51,10 +51,14 @@ struct Params {
     uint256 nMinimumChainWork;
     uint256 defaultAssumeValid;
 
+    /** Determine if a given deployment is active at the given block.
+     * Expects cs_main to be already locked */
+    bool DeploymentActive(Consensus::DeploymentPos pos, const CBlockIndex* pindex) const;
     /** Check for activation of unknown warnings
      * Expects cs_main to be already locked */
     void CheckUnknownRules(const CBlockIndex* pindex, UnknownDeploymentWarning *warn) const;
 };
+
 } // namespace Consensus
 
 #endif // BITCOIN_CONSENSUS_PARAMS_H
