@@ -6,6 +6,7 @@
 #define BITCOIN_CONSENSUS_VERSIONBITS
 
 #include "chain.h"
+#include "chainparams.h"
 #include <map>
 
 /** What block version to use for new blocks (pre versionbits) */
@@ -76,5 +77,9 @@ ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::
 BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
 uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+void VersionBitsCachesClear();
+void CheckUnknownRules(const CBlockIndex* pindex, const CChainParams& chainParams, void (*DoWarning)(const std::string&), std::vector<std::string>& warningMessages);
+
 
 #endif
