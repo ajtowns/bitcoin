@@ -28,6 +28,10 @@ struct BIP9Deployment {
     int64_t nStartTime;
     /** Timeout/expiry MedianTime for the deployment attempt. */
     int64_t nTimeout;
+
+    inline bool Defined() const {
+        return nTimeout > 0;
+    }
 };
 
 } // namespace Consensus
