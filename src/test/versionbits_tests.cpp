@@ -224,8 +224,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         // overlap.)
         for (int j=i+1; j<(int) Consensus::MAX_VERSION_BITS_DEPLOYMENTS; j++) {
             if (VersionBitsMask(mainnetParams, (Consensus::DeploymentPos)j) == bitmask) {
-                BOOST_CHECK(mainnetParams.vDeployments[j].XnStartTime > mainnetParams.vDeployments[i].XnTimeout ||
-                        mainnetParams.vDeployments[i].XnStartTime > mainnetParams.vDeployments[j].XnTimeout);
+                BOOST_CHECK(mainnetParams.vDeployments[j].nStartTime > mainnetParams.vDeployments[i].nTimeout ||
+                        mainnetParams.vDeployments[i].nStartTime > mainnetParams.vDeployments[j].nTimeout);
             }
         }
     }
@@ -239,9 +239,9 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     const Consensus::Params &mainnetParams = chainParams->GetConsensus();
 
     // Use the TESTDUMMY deployment for testing purposes.
-    int64_t bit = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].Xbit;
-    int64_t nStartTime = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].XnStartTime;
-    int64_t nTimeout = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].XnTimeout;
+    int64_t bit = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit;
+    int64_t nStartTime = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime;
+    int64_t nTimeout = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout;
 
     assert(nStartTime < nTimeout);
 

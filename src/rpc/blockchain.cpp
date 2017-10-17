@@ -1093,10 +1093,10 @@ static UniValue BIP9SoftForkDesc(const Consensus::Params& consensusParams, Conse
     }
     if (THRESHOLD_STARTED == thresholdState)
     {
-        rv.push_back(Pair("bit", consensusParams.vDeployments[id].Xbit));
+        rv.push_back(Pair("bit", consensusParams.vDeployments[id].bit));
     }
-    rv.push_back(Pair("startTime", consensusParams.vDeployments[id].XnStartTime));
-    rv.push_back(Pair("timeout", consensusParams.vDeployments[id].XnTimeout));
+    rv.push_back(Pair("startTime", consensusParams.vDeployments[id].nStartTime));
+    rv.push_back(Pair("timeout", consensusParams.vDeployments[id].nTimeout));
     rv.push_back(Pair("since", VersionBitsTipStateSinceHeight(consensusParams, id)));
     if (THRESHOLD_STARTED == thresholdState)
     {
