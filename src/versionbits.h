@@ -113,11 +113,13 @@ inline bool Consensus::Params::DeploymentActivePrev(Consensus::DeploymentPos pos
             }
         }
         return false;
+    case MAX_VERSION_BITS_DEPLOYMENTS:
+        assert(0);
+        return false;
     default:
-         assert(pos < MAX_VERSION_BITS_DEPLOYMENTS);
-         return VersionBitsState(pindexPrev, *this, pos) == THRESHOLD_ACTIVE;
+        assert(0 <= pos && pos < MAX_VERSION_BITS_DEPLOYMENTS);
+        return VersionBitsState(pindexPrev, *this, pos) == THRESHOLD_ACTIVE;
     }
-    assert(0);
 }
 
 #endif
