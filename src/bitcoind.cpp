@@ -116,11 +116,13 @@ bool AppInit(int argc, char* argv[])
             return false;
         }
 
-        try {
-            gArgs.ReadConfigFile(gArgs.GetArg("-netconf", BITCOIN_NETCONF_FILENAME), true);
-        } catch (const std::exception& e) {
-            fprintf(stderr, "Error reading network configuration file: %s\n", e.what());
-            return false;
+        if (!gArgs.IsArgSet("-conf")) {
+            try {
+                gArgs.ReadConfigFile(BITCOIN_NETCONF_FILENAME, true);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "Error reading network configuration file: %s\n", e.what());
+                return false;
+            }
         }
 
         // Error out when loose non-argument tokens are encountered on command line

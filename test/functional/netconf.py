@@ -11,21 +11,11 @@ class NetConfTest(BitcoinTestFramework):
     def setup_chain(self):
         super().setup_chain()
 
-        with open(os.path.join(self.options.tmpdir, "node0", "regtest", "network.conf"), "w", encoding="utf8") as f:
-            f.write("uacomment=net\n")
-            f.write("maxmempool=111\n")
-
-        with open(os.path.join(self.options.tmpdir, "node0", "regtest", "alt-network.conf"), "w", encoding="utf8") as f:
-            f.write("uacomment=altnet\n")
-            f.write("uacomment=extra\n")
-            f.write("maxmempool=222\n")
-
-        with open(os.path.join(self.options.tmpdir, "node0", "bitcoin-altnet.conf"), 'a', encoding='utf8') as f:
+        with open(os.path.join(self.options.tmpdir, "node0", "bitcoin-alt.conf"), 'a', encoding='utf8') as f:
             for l in open(os.path.join(self.options.tmpdir, "node0", "bitcoin.conf")):
                 f.write(l)
             f.write("uacomment=mainalt\n")
-            f.write("netconf=alt-network.conf\n")
-            f.write("maxmempool=333\n")
+            f.write("maxmempool=222\n")
 
         with open(os.path.join(self.options.tmpdir, "node0", "bitcoin.conf"), 'a', encoding='utf8') as f:
             f.write("uacomment=main\n")
@@ -55,29 +45,41 @@ class NetConfTest(BitcoinTestFramework):
         #   order (command line, bitcoin.conf, network.conf). tested
         #   using uacomment sub-version.
 
-        # by default, loads bitcoin.conf and network.conf
+        # works without network.conf
+        self.check_subversion("main")
+        self.check_maxmempool(300)
+
+        with open(os.path.join(self.options.tmpdir, "node0", "regtest", "network.conf"), "w", encoding="utf8") as f:
+            f.write("uacomment=net\n")
+            f.write("maxmempool=111\n")
+
+        # by default, loads network.conf
+        self.restart_node(0)
         self.check_subversion("main", "net")
         self.check_maxmempool(111)
 
-        # if bitcoin.conf specifies a network conf, that gets loaded
-        self.restart_node(0, ["-conf=bitcoin-altnet.conf"])
-        self.check_subversion("mainalt", "altnet", "extra")
-        self.check_maxmempool(333)
-
-        # netconf on command line works
-        self.restart_node(0, ["-netconf=alt-network.conf"])
-        self.check_subversion("main", "altnet", "extra")
+        # if conf is specified, network.conf is not loaded
+        self.restart_node(0, ["-conf=bitcoin-alt.conf"])
+        self.check_subversion("mainalt")
         self.check_maxmempool(222)
 
-        # netconf on command line overrides specification in bitcoin.conf
-        self.restart_node(0, ["-conf=bitcoin-altnet.conf", "-netconf=network.conf"])
-        self.check_subversion("mainalt", "net")
-        self.check_maxmempool(333)
-
-        # if file doesn't exist, everything is fine
-        self.restart_node(0, ["-netconf=no-network.conf"])
+        # even if it's the same config file
+        self.restart_node(0, ["-conf=bitcoin.conf"])
         self.check_subversion("main")
         self.check_maxmempool(300)
+
+        # check network.conf doesn't override bitcoin.conf setting
+        with open(os.path.join(self.options.tmpdir, "node0", "bitcoin.conf"), 'a', encoding='utf8') as f:
+            f.write("maxmempool=333\n")
+
+        self.restart_node(0)
+        self.check_subversion("main", "net")
+        self.check_maxmempool(333)
+
+        # netconf on command line overrides specification in bitcoin.conf
+        self.restart_node(0, ["-uacomment=cmd", "-maxmempool=444"])
+        self.check_subversion("cmd", "main", "net")
+        self.check_maxmempool(444)
 
 if __name__ == '__main__':
     NetConfTest().main()

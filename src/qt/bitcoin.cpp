@@ -659,12 +659,14 @@ int main(int argc, char *argv[])
     // Re-initialize translations after changing application name (language in network-specific settings can be different)
     initTranslations(qtTranslatorBase, qtTranslator, translatorBase, translator);
 
-    try {
-        gArgs.ReadConfigFile(gArgs.GetArg("-netconf", BITCOIN_NETCONF_FILENAME), true);
-    } catch (const std::exception& e) {
-        QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
-            QObject::tr("Error: Cannot parse network configuration file: %1. Only use key=value syntax.").arg(e.what()));
-        return EXIT_FAILURE;
+    if (!gArgs.IsArgSet("-conf")) {
+        try {
+            gArgs.ReadConfigFile(BITCOIN_NETCONF_FILENAME, true);
+        } catch (const std::exception& e) {
+            QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
+                QObject::tr("Error: Cannot parse network configuration file: %1. Only use key=value syntax.").arg(e.what()));
+            return EXIT_FAILURE;
+        }
     }
 
 #ifdef ENABLE_WALLET
