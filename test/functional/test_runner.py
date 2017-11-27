@@ -159,6 +159,21 @@ EXTENDED_SCRIPTS = [
 # Place EXTENDED_SCRIPTS first since it has the 3 longest running tests
 ALL_SCRIPTS = EXTENDED_SCRIPTS + BASE_SCRIPTS
 
+def check_script_prefixes():
+    EXPECTED_VIOLATION_COUNT = 76
+    LEEWAY = 10
+
+    ok = {"feature", "interface", "mempool", "mining", "p2p", "rpc", "wallet"}
+    found = set(x.split("_",1)[0] for x in ALL_SCRIPTS if x != "example_test.py")
+    excess = found - ok
+    if len(excess) < EXPECTED_VIOLATION_COUNT:
+        print("{}HURRAY!{} Number of scripts violating naming convention reduced!".format(BOLD[1], BOLD[0]))
+        print("Consider reducing EXPECTED_VIOLATION_COUNT from %d to %d" % (EXPECTED_VIOLATION_COUNT, len(excess)))
+
+    assert len(excess) <= EXPECTED_VIOLATION_COUNT + LEEWAY, "Too many scripts not following naming convention! (%d found, expected: <= %d)" % (len(excess), EXPECTED_VIOLATION_COUNT)
+
+check_script_prefixes()
+
 NON_SCRIPTS = [
     # These are python files that live in the functional tests directory, but are not test scripts.
     "combine_logs.py",
