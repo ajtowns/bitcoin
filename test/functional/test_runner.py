@@ -59,16 +59,16 @@ BASE_SCRIPTS= [
     # vv Tests less than 5m vv
     'feature_block.py',
     'fundrawtransaction.py',
-    'p2p-compactblocks.py',
+    'p2p_compactblocks.py',
     'feature_segwit.py',
     # vv Tests less than 2m vv
     'wallet_basic.py',
     'wallet_accounts.py',
-    'p2p-segwit.py',
+    'p2p_segwit.py',
     'wallet_dump.py',
     'listtransactions.py',
     # vv Tests less than 60s vv
-    'sendheaders.py',
+    'p2p_sendheaders.py',
     'wallet_zapwallettxes.py',
     'wallet_importmulti.py',
     'mempool_limit.py',
@@ -95,17 +95,17 @@ BASE_SCRIPTS= [
     'multi_rpc.py',
     'feature_proxy.py',
     'signrawtransactions.py',
-    'disconnect_ban.py',
+    'p2p_disconnect_ban.py',
     'decodescript.py',
     'blockchain.py',
     'deprecated_rpc.py',
     'wallet_disable.py',
     'net.py',
     'wallet_keypool.py',
-    'p2p-mempool.py',
+    'p2p_mempool.py',
     'prioritise_transaction.py',
-    'invalidblockrequest.py',
-    'invalidtxrequest.py',
+    'p2p_invalid_block.py',
+    'p2p_invalid_tx.py',
     'feature_versionbits_warning.py',
     'preciousblock.py',
     'wallet_importprunedfunds.py',
@@ -116,16 +116,16 @@ BASE_SCRIPTS= [
     'wallet_bumpfee.py',
     'rpcnamedargs.py',
     'wallet_listsinceblock.py',
-    'p2p-leaktests.py',
+    'p2p_leak.py',
     'wallet_encryption.py',
     'feature_dersig.py',
     'feature_cltv.py',
     'uptime.py',
     'wallet_resendwallettransactions.py',
     'feature_minchainwork.py',
-    'p2p-fingerprint.py',
+    'p2p_fingerprint.py',
     'feature_uacomment.py',
-    'p2p-acceptblock.py',
+    'p2p_unrequested_blocks.py',
 ]
 
 EXTENDED_SCRIPTS = [
@@ -141,10 +141,10 @@ EXTENDED_SCRIPTS = [
     # vv Tests less than 2m vv
     'feature_bip68_sequence.py',
     'getblocktemplate_longpoll.py',
-    'p2p-timeouts.py',
+    'p2p_timeouts.py',
     # vv Tests less than 60s vv
     'feature_bip9_softforks.py',
-    'p2p-feefilter.py',
+    'p2p_feefilter.py',
     'rpcbind_test.py',
     # vv Tests less than 30s vv
     'feature_assumevalid.py',
@@ -160,7 +160,7 @@ EXTENDED_SCRIPTS = [
 ALL_SCRIPTS = EXTENDED_SCRIPTS + BASE_SCRIPTS
 
 def check_script_prefixes():
-    EXPECTED_VIOLATION_COUNT = 36
+    EXPECTED_VIOLATION_COUNT = 24
     LEEWAY = 10
 
     ok = {"feature", "interface", "mempool", "mining", "p2p", "rpc", "wallet"}
