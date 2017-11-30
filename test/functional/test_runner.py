@@ -57,10 +57,10 @@ BASE_SCRIPTS= [
     'wallet-hd.py',
     'walletbackup.py',
     # vv Tests less than 5m vv
-    'p2p-fullblocktest.py',
+    'feature_block.py',
     'fundrawtransaction.py',
     'p2p-compactblocks.py',
-    'segwit.py',
+    'feature_segwit.py',
     # vv Tests less than 2m vv
     'wallet.py',
     'wallet-accounts.py',
@@ -75,9 +75,9 @@ BASE_SCRIPTS= [
     'merkle_blocks.py',
     'receivedby.py',
     'abandonconflict.py',
-    'bip68-112-113-p2p.py',
+    'feature_csv_activation.py',
     'rawtransactions.py',
-    'reindex.py',
+    'feature_reindex.py',
     # vv Tests less than 30s vv
     'keypool-topup.py',
     'zmq_test.py',
@@ -93,7 +93,7 @@ BASE_SCRIPTS= [
     'multiwallet.py',
     'httpbasics.py',
     'multi_rpc.py',
-    'proxy_test.py',
+    'feature_proxy.py',
     'signrawtransactions.py',
     'disconnect_ban.py',
     'decodescript.py',
@@ -106,11 +106,11 @@ BASE_SCRIPTS= [
     'prioritise_transaction.py',
     'invalidblockrequest.py',
     'invalidtxrequest.py',
-    'p2p-versionbits-warning.py',
+    'feature_versionbits_warning.py',
     'preciousblock.py',
     'importprunedfunds.py',
     'signmessages.py',
-    'nulldummy.py',
+    'feature_nulldummy.py',
     'import-rescan.py',
     'mining.py',
     'bumpfee.py',
@@ -118,49 +118,49 @@ BASE_SCRIPTS= [
     'listsinceblock.py',
     'p2p-leaktests.py',
     'wallet-encryption.py',
-    'bipdersig-p2p.py',
-    'bip65-cltv-p2p.py',
+    'feature_dersig.py',
+    'feature_cltv.py',
     'uptime.py',
     'resendwallettransactions.py',
-    'minchainwork.py',
+    'feature_minchainwork.py',
     'p2p-fingerprint.py',
-    'uacomment.py',
+    'feature_uacomment.py',
     'p2p-acceptblock.py',
 ]
 
 EXTENDED_SCRIPTS = [
     # These tests are not run by the travis build process.
     # Longest test should go first, to favor running tests in parallel
-    'pruning.py',
+    'feature_pruning.py',
     # vv Tests less than 20m vv
-    'smartfees.py',
+    'feature_fee_estimation.py',
     # vv Tests less than 5m vv
-    'maxuploadtarget.py',
+    'feature_maxuploadtarget.py',
     'mempool_packages.py',
-    'dbcrash.py',
+    'feature_dbcrash.py',
     # vv Tests less than 2m vv
-    'bip68-sequence.py',
+    'feature_bip68_sequence.py',
     'getblocktemplate_longpoll.py',
     'p2p-timeouts.py',
     # vv Tests less than 60s vv
-    'bip9-softforks.py',
+    'feature_bip9_softforks.py',
     'p2p-feefilter.py',
     'rpcbind_test.py',
     # vv Tests less than 30s vv
-    'assumevalid.py',
+    'feature_assumevalid.py',
     'example_test.py',
     'txn_doublespend.py',
     'txn_clone.py --mineblock',
-    'notifications.py',
+    'feature_notifications.py',
     'invalidateblock.py',
-    'replace-by-fee.py',
+    'feature_rbf.py',
 ]
 
 # Place EXTENDED_SCRIPTS first since it has the 3 longest running tests
 ALL_SCRIPTS = EXTENDED_SCRIPTS + BASE_SCRIPTS
 
 def check_script_prefixes():
-    EXPECTED_VIOLATION_COUNT = 76
+    EXPECTED_VIOLATION_COUNT = 56
     LEEWAY = 10
 
     ok = {"feature", "interface", "mempool", "mining", "p2p", "rpc", "wallet"}
