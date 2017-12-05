@@ -604,6 +604,13 @@ class SegWitTest(BitcoinTestFramework):
             assert_equal(self.nodes[1].gettransaction(txid, True)["txid"], txid)
             assert_equal(self.nodes[1].listtransactions("*", 1, 0, True)[0]["txid"], txid)
 
+        # Test restarting with default regtest segwit activation (always active)
+        assert_equal(get_bip9_status(self.nodes[0], 'segwit')['status'], 'active')
+        self.stop_node(0)
+
+        self.log.info("Verify restart with segwit always active fails with error")
+        self.assert_start_raises_init_error(0, [], "Unable to rewind the database to a pre-fork state. You will need to redownload the blockchain.")
+
     def mine_and_test_listunspent(self, script_list, ismine):
         utxo = find_unspent(self.nodes[0], 50)
         tx = CTransaction()
