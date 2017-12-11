@@ -195,15 +195,28 @@ inline bool IsSwitchChar(char c)
 #endif
 }
 
+enum class ArgSelectivity {
+    DEFAULT_AND_NETWORK,
+    NETWORK_ONLY,
+};
+
 class ArgsManager
 {
 protected:
     mutable CCriticalSection cs_args;
     std::map<std::string, std::string> mapArgs;
     std::map<std::string, std::vector<std::string>> mapMultiArgs;
+    std::string strNetwork;
+    bool fMainNet = false;
+
+    bool GetArgInternal(std::string& result, const std::string& strArg, ArgSelectivity argsel) const;
+    std::string NetArg(const std::string& strArg) const;
+
 public:
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
+
+    void SelectNetwork(const std::string& strNetwork_, bool fMainNet_) { strNetwork = strNetwork_; fMainNet = fMainNet_; }
 
     /**
      * Return a vector of strings of the given argument
@@ -211,7 +224,7 @@ public:
      * @param strArg Argument to get (e.g. "-foo")
      * @return command-line arguments
      */
-    std::vector<std::string> GetArgs(const std::string& strArg) const;
+    std::vector<std::string> GetArgs(const std::string& strArg, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK) const;
 
     /**
      * Return true if the given argument has been manually set
@@ -219,7 +232,7 @@ public:
      * @param strArg Argument to get (e.g. "-foo")
      * @return true if the argument has been set
      */
-    bool IsArgSet(const std::string& strArg) const;
+    bool IsArgSet(const std::string& strArg, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK) const;
 
     /**
      * Return string argument or default value
@@ -228,7 +241,7 @@ public:
      * @param strDefault (e.g. "1")
      * @return command-line argument or default value
      */
-    std::string GetArg(const std::string& strArg, const std::string& strDefault) const;
+    std::string GetArg(const std::string& strArg, const std::string& strDefault, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK) const;
 
     /**
      * Return integer argument or default value
@@ -237,7 +250,7 @@ public:
      * @param nDefault (e.g. 1)
      * @return command-line argument (0 if invalid number) or default value
      */
-    int64_t GetArg(const std::string& strArg, int64_t nDefault) const;
+    int64_t GetArg(const std::string& strArg, int64_t nDefault, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK) const;
 
     /**
      * Return boolean argument or default value
@@ -246,7 +259,7 @@ public:
      * @param fDefault (true or false)
      * @return command-line argument or default value
      */
-    bool GetBoolArg(const std::string& strArg, bool fDefault) const;
+    bool GetBoolArg(const std::string& strArg, bool fDefault, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK) const;
 
     /**
      * Set an argument if it doesn't already have a value
@@ -255,7 +268,7 @@ public:
      * @param strValue Value (e.g. "1")
      * @return true if argument gets set, false if it already had a value
      */
-    bool SoftSetArg(const std::string& strArg, const std::string& strValue);
+    bool SoftSetArg(const std::string& strArg, const std::string& strValue, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK);
 
     /**
      * Set a boolean argument if it doesn't already have a value
@@ -264,11 +277,11 @@ public:
      * @param fValue Value (e.g. false)
      * @return true if argument gets set, false if it already had a value
      */
-    bool SoftSetBoolArg(const std::string& strArg, bool fValue);
+    bool SoftSetBoolArg(const std::string& strArg, bool fValue, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK);
 
     // Forces an arg setting. Called by SoftSetArg() if the arg hasn't already
     // been set. Also called directly in testing.
-    void ForceSetArg(const std::string& strArg, const std::string& strValue);
+    void ForceSetArg(const std::string& strArg, const std::string& strValue, ArgSelectivity argsel = ArgSelectivity::DEFAULT_AND_NETWORK);
 };
 
 extern ArgsManager gArgs;

@@ -435,65 +435,120 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
     }
 }
 
-std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
+std::string ArgsManager::NetArg(const std::string& strArg) const
 {
-    LOCK(cs_args);
-    auto it = mapMultiArgs.find(strArg);
-    if (it != mapMultiArgs.end()) return it->second;
-    return {};
+    if (strArg.length() > 1 && strArg[0] == '-')
+        return "-" + strNetwork + "." + strArg.substr(1);
+    else
+        return strNetwork + "." + strArg;
 }
 
-bool ArgsManager::IsArgSet(const std::string& strArg) const
+std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg, ArgSelectivity argsel) const
 {
     LOCK(cs_args);
-    return mapArgs.count(strArg);
+    std::vector<std::string> result = {};
+    if (fMainNet || argsel == ArgSelectivity::DEFAULT_AND_NETWORK) {
+         auto it = mapMultiArgs.find(strArg);
+         if (it != mapMultiArgs.end())
+             result.insert(result.end(), it->second.begin(), it->second.end());
+    }
+    if (!strNetwork.empty()) {
+         auto it = mapMultiArgs.find(NetArg(strArg));
+         if (it != mapMultiArgs.end())
+             result.insert(result.end(), it->second.begin(), it->second.end());
+    }
+    return result;
 }
 
-std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
+bool ArgsManager::IsArgSet(const std::string& strArg, ArgSelectivity argsel) const
 {
     LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return it->second;
-    return strDefault;
+    if (fMainNet || argsel == ArgSelectivity::DEFAULT_AND_NETWORK) {
+        if (mapArgs.count(strArg) > 0)
+            return true;
+    }
+    if (!strNetwork.empty()) {
+        if (mapArgs.count(NetArg(strArg)) > 0)
+            return true;
+    }
+    return false;
 }
 
-int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
+inline bool ArgsManager::GetArgInternal(std::string& result, const std::string& strArg, ArgSelectivity argsel) const
 {
     LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return atoi64(it->second);
-    return nDefault;
+    if (fMainNet || argsel == ArgSelectivity::DEFAULT_AND_NETWORK) {
+        auto it = mapArgs.find(strArg);
+        if (it != mapArgs.end()) {
+            result = it->second;
+            return true;
+        }
+    }
+    if (!strNetwork.empty()) {
+        auto it = mapArgs.find(NetArg(strArg));
+        if (it != mapArgs.end()) {
+            result = it->second;
+            return true;
+        }
+    }
+    return false;
 }
 
-bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
+std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault, ArgSelectivity argsel) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return InterpretBool(it->second);
-    return fDefault;
+    std::string res;
+    if (GetArgInternal(res, strArg, argsel))
+        return res;
+    else
+        return strDefault;
 }
 
-bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
+int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault, ArgSelectivity argsel) const
+{
+    std::string res;
+    if (GetArgInternal(res, strArg, argsel))
+        return atoi64(res);
+    else
+        return nDefault;
+}
+
+bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault, ArgSelectivity argsel) const
+{
+    std::string res;
+    if (GetArgInternal(res, strArg, argsel))
+        return InterpretBool(res);
+    else
+        return fDefault;
+}
+
+bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue, ArgSelectivity argsel)
 {
     LOCK(cs_args);
-    if (IsArgSet(strArg)) return false;
-    ForceSetArg(strArg, strValue);
+    if (IsArgSet(strArg, argsel)) return false;
+    ForceSetArg(strArg, strValue, argsel);
     return true;
 }
 
-bool ArgsManager::SoftSetBoolArg(const std::string& strArg, bool fValue)
+bool ArgsManager::SoftSetBoolArg(const std::string& strArg, bool fValue, ArgSelectivity argsel)
 {
     if (fValue)
-        return SoftSetArg(strArg, std::string("1"));
+        return SoftSetArg(strArg, std::string("1"), argsel);
     else
-        return SoftSetArg(strArg, std::string("0"));
+        return SoftSetArg(strArg, std::string("0"), argsel);
 }
 
-void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strValue)
+void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strValue, ArgSelectivity argsel)
 {
     LOCK(cs_args);
-    mapArgs[strArg] = strValue;
-    mapMultiArgs[strArg] = {strValue};
+    if (argsel == ArgSelectivity::DEFAULT_AND_NETWORK) {
+        mapArgs[strArg] = strValue;
+        mapMultiArgs[strArg] = {strValue};
+    } else if (argsel == ArgSelectivity::NETWORK_ONLY) {
+        assert(!strNetwork.empty());
+        const std::string strNetArg = NetArg(strArg);
+        mapArgs[strNetArg] = strValue;
+        mapMultiArgs[strNetArg] = {strValue};
+    }
 }
 
 
