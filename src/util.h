@@ -23,6 +23,7 @@
 #include <atomic>
 #include <exception>
 #include <map>
+#include <set>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -203,11 +204,23 @@ class ArgsManager
 {
 protected:
     mutable CCriticalSection cs_args;
-    std::map<std::string, std::string> mapArgs;
-    std::map<std::string, std::vector<std::string>> mapMultiArgs;
+    std::map<std::string, std::vector<std::string>> m_mapOverrideArgs;
+    std::map<std::string, std::vector<std::string>> m_mapConfigArgs;
+    std::string m_strNetwork;
+    std::set<std::string> m_setNetOnlyArgs;
+
+    bool GetArgInternal(std::string* result, const std::string& strArg) const;
+    std::string NetArg(const std::string& strArg) const;
+    bool GetNetArgHelper(const std::string& strNetArg) const;
+    inline bool IsNetOnlyArg(const std::string& strArg) const { return m_setNetOnlyArgs.count(strArg) != 0; }
+
 public:
+    ArgsManager();
+
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
+
+    void SelectNetwork(const std::string& strNetwork);
 
     /**
      * Return a vector of strings of the given argument

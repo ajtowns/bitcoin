@@ -100,13 +100,13 @@ BOOST_AUTO_TEST_CASE(util_DateTimeStrFormat)
 class TestArgsManager : public ArgsManager
 {
 public:
-    std::map<std::string, std::string>& GetMapArgs()
+    std::map<std::string, std::vector<std::string>>& GetMapOverrideArgs()
     {
-        return mapArgs;
+        return m_mapOverrideArgs;
     };
-    const std::map<std::string, std::vector<std::string> >& GetMapMultiArgs()
+    const std::map<std::string, std::vector<std::string>>& GetMapConfigArgs()
     {
-        return mapMultiArgs;
+        return m_mapConfigArgs;
     };
 };
 
@@ -116,38 +116,38 @@ BOOST_AUTO_TEST_CASE(util_ParseParameters)
     const char *argv_test[] = {"-ignored", "-a", "-b", "-ccc=argument", "-ccc=multiple", "f", "-d=e"};
 
     testArgs.ParseParameters(0, (char**)argv_test);
-    BOOST_CHECK(testArgs.GetMapArgs().empty() && testArgs.GetMapMultiArgs().empty());
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().empty() && testArgs.GetMapConfigArgs().empty());
 
     testArgs.ParseParameters(1, (char**)argv_test);
-    BOOST_CHECK(testArgs.GetMapArgs().empty() && testArgs.GetMapMultiArgs().empty());
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().empty() && testArgs.GetMapConfigArgs().empty());
 
     testArgs.ParseParameters(7, (char**)argv_test);
     // expectation: -ignored is ignored (program name argument),
     // -a, -b and -ccc end up in map, -d ignored because it is after
     // a non-option argument (non-GNU option parsing)
-    BOOST_CHECK(testArgs.GetMapArgs().size() == 3 && testArgs.GetMapMultiArgs().size() == 3);
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().size() == 3 && testArgs.GetMapConfigArgs().size() == 0);
     BOOST_CHECK(testArgs.IsArgSet("-a") && testArgs.IsArgSet("-b") && testArgs.IsArgSet("-ccc")
                 && !testArgs.IsArgSet("f") && !testArgs.IsArgSet("-d"));
-    BOOST_CHECK(testArgs.GetMapMultiArgs().count("-a") && testArgs.GetMapMultiArgs().count("-b") && testArgs.GetMapMultiArgs().count("-ccc")
-                && !testArgs.GetMapMultiArgs().count("f") && !testArgs.GetMapMultiArgs().count("-d"));
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().count("-a") && testArgs.GetMapOverrideArgs().count("-b") && testArgs.GetMapOverrideArgs().count("-ccc")
+                && !testArgs.GetMapOverrideArgs().count("f") && !testArgs.GetMapOverrideArgs().count("-d"));
 
-    BOOST_CHECK(testArgs.GetMapArgs()["-a"] == "" && testArgs.GetMapArgs()["-ccc"] == "multiple");
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-a"].front() == "" && testArgs.GetMapOverrideArgs()["-ccc"].back() == "multiple");
     BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2);
 }
 
 BOOST_AUTO_TEST_CASE(util_GetArg)
 {
     TestArgsManager testArgs;
-    testArgs.GetMapArgs().clear();
-    testArgs.GetMapArgs()["strtest1"] = "string...";
+    testArgs.GetMapOverrideArgs().clear();
+    testArgs.GetMapOverrideArgs()["strtest1"] = {"string..."};
     // strtest2 undefined on purpose
-    testArgs.GetMapArgs()["inttest1"] = "12345";
-    testArgs.GetMapArgs()["inttest2"] = "81985529216486895";
+    testArgs.GetMapOverrideArgs()["inttest1"] = {"12345"};
+    testArgs.GetMapOverrideArgs()["inttest2"] = {"81985529216486895"};
     // inttest3 undefined on purpose
-    testArgs.GetMapArgs()["booltest1"] = "";
+    testArgs.GetMapOverrideArgs()["booltest1"] = {""};
     // booltest2 undefined on purpose
-    testArgs.GetMapArgs()["booltest3"] = "0";
-    testArgs.GetMapArgs()["booltest4"] = "1";
+    testArgs.GetMapOverrideArgs()["booltest3"] = {"0"};
+    testArgs.GetMapOverrideArgs()["booltest4"] = {"1"};
 
     BOOST_CHECK_EQUAL(testArgs.GetArg("strtest1", "default"), "string...");
     BOOST_CHECK_EQUAL(testArgs.GetArg("strtest2", "default"), "default");
