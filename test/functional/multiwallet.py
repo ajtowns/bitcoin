@@ -16,7 +16,7 @@ class MultiWalletTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 1
-        self.extra_args = [['-wallet=w1', '-wallet=w2', '-wallet=w3', '-wallet=w']]
+        self.extra_args = [['-regtest.wallet=w1', '-regtest.wallet=w2', '-regtest.wallet=w3', '-regtest.wallet=w']]
 
     def run_test(self):
         assert_equal(set(self.nodes[0].listwallets()), {"w1", "w2", "w3", "w"})
@@ -24,20 +24,20 @@ class MultiWalletTest(BitcoinTestFramework):
         self.stop_node(0)
 
         # should not initialize if there are duplicate wallets
-        self.assert_start_raises_init_error(0, ['-wallet=w1', '-wallet=w1'], 'Error loading wallet w1. Duplicate -wallet filename specified.')
+        self.assert_start_raises_init_error(0, ['-regtest.wallet=w1', '-regtest.wallet=w1'], 'Error loading wallet w1. Duplicate -wallet filename specified.')
 
         # should not initialize if wallet file is a directory
         wallet_dir = os.path.join(self.options.tmpdir, 'node0', 'regtest', 'wallets')
         os.mkdir(os.path.join(wallet_dir, 'w11'))
-        self.assert_start_raises_init_error(0, ['-wallet=w11'], 'Error loading wallet w11. -wallet filename must be a regular file.')
+        self.assert_start_raises_init_error(0, ['-regtest.wallet=w11'], 'Error loading wallet w11. -wallet filename must be a regular file.')
 
         # should not initialize if one wallet is a copy of another
         shutil.copyfile(os.path.join(wallet_dir, 'w2'), os.path.join(wallet_dir, 'w22'))
-        self.assert_start_raises_init_error(0, ['-wallet=w2', '-wallet=w22'], 'duplicates fileid')
+        self.assert_start_raises_init_error(0, ['-regtest.wallet=w2', '-regtest.wallet=w22'], 'duplicates fileid')
 
         # should not initialize if wallet file is a symlink
         os.symlink(os.path.join(wallet_dir, 'w1'), os.path.join(wallet_dir, 'w12'))
-        self.assert_start_raises_init_error(0, ['-wallet=w12'], 'Error loading wallet w12. -wallet filename must be a regular file.')
+        self.assert_start_raises_init_error(0, ['-regtest.wallet=w12'], 'Error loading wallet w12. -wallet filename must be a regular file.')
 
         # should not initialize if the specified walletdir does not exist
         self.assert_start_raises_init_error(0, ['-walletdir=bad'], 'Error: Specified wallet directory "bad" does not exist.')
@@ -45,7 +45,7 @@ class MultiWalletTest(BitcoinTestFramework):
         # if wallets/ doesn't exist, datadir should be the default wallet dir
         wallet_dir2 = os.path.join(self.options.tmpdir, 'node0', 'regtest', 'walletdir')
         os.rename(wallet_dir, wallet_dir2)
-        self.start_node(0, ['-wallet=w4', '-wallet=w5'])
+        self.start_node(0, ['-regtest.wallet=w4', '-regtest.wallet=w5'])
         assert_equal(set(self.nodes[0].listwallets()), {"w4", "w5"})
         w5 = self.nodes[0].get_wallet_rpc("w5")
         w5.generate(1)
@@ -53,7 +53,7 @@ class MultiWalletTest(BitcoinTestFramework):
 
         # now if wallets/ exists again, but the rootdir is specified as the walletdir, w4 and w5 should still be loaded
         os.rename(wallet_dir2, wallet_dir)
-        self.start_node(0, ['-wallet=w4', '-wallet=w5', '-walletdir=' + os.path.join(self.options.tmpdir, 'node0', 'regtest')])
+        self.start_node(0, ['-regtest.wallet=w4', '-regtest.wallet=w5', '-walletdir=' + os.path.join(self.options.tmpdir, 'node0', 'regtest')])
         assert_equal(set(self.nodes[0].listwallets()), {"w4", "w5"})
         w5 = self.nodes[0].get_wallet_rpc("w5")
         w5_info = w5.getwalletinfo()
