@@ -103,11 +103,19 @@ public:
     std::map<std::string, std::vector<std::string>>& GetMapOverrideArgs()
     {
         return m_mapOverrideArgs;
-    };
-    const std::map<std::string, std::vector<std::string>>& GetMapConfigArgs()
+    }
+    std::map<std::string, std::vector<std::string>>& GetMapConfigArgs()
     {
         return m_mapConfigArgs;
-    };
+    }
+    std::set<std::string>& GetSetNetOnlyArgs()
+    {
+        return m_setNetOnlyArgs;
+    }
+    void CallReadConfigStream(const std::string& str) {
+        std::istringstream streamConfig(str);
+        ReadConfigStream(streamConfig);
+    }
 };
 
 BOOST_AUTO_TEST_CASE(util_ParseParameters)
@@ -133,6 +141,72 @@ BOOST_AUTO_TEST_CASE(util_ParseParameters)
 
     BOOST_CHECK(testArgs.GetMapOverrideArgs()["-a"].front() == "" && testArgs.GetMapOverrideArgs()["-ccc"].back() == "multiple");
     BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2);
+}
+
+static const char *str_config =
+  "a=\n"
+  "b=1\n"
+  "ccc=argument\n"
+  "ccc=multiple\n"
+  "d=e\n"
+  "nofff=1\n"
+  "noggg=0\n"
+  "section.ccc=seconly1\n"
+  "\n"
+  "[section]\n"
+  "ccc=seconly2\n"
+  "q=0\n"
+  "[other]\n"
+  "ccc=other\n"
+  "q=1\n"
+  "[section]\n"
+  "ccc=seconly3\n";
+
+BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
+{
+    TestArgsManager testArgs;
+
+    testArgs.CallReadConfigStream(str_config);
+    // expectation: a, b, cccc, d, fff, ggg end up in map
+    // so do: section.ccc and section.q, and other.ccc and other.q
+
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().size() == 0 && testArgs.GetMapConfigArgs().size() == 10);
+    BOOST_CHECK(testArgs.GetMapConfigArgs().count("-a") && testArgs.GetMapConfigArgs().count("-b") && testArgs.GetMapConfigArgs().count("-ccc")
+                && testArgs.GetMapConfigArgs().count("-d") && testArgs.GetMapConfigArgs().count("-fff") && testArgs.GetMapConfigArgs().count("-ggg"));
+    BOOST_CHECK(testArgs.GetMapConfigArgs().count("-section.ccc") && testArgs.GetMapConfigArgs().count("-section.q"));
+    BOOST_CHECK(testArgs.GetMapConfigArgs().count("-other.ccc") && testArgs.GetMapConfigArgs().count("-other.q"));
+
+    BOOST_CHECK(testArgs.IsArgSet("-a") && testArgs.IsArgSet("-b") && testArgs.IsArgSet("-ccc")
+                && testArgs.IsArgSet("-d") && testArgs.IsArgSet("-fff") && testArgs.IsArgSet("-ggg") && !testArgs.IsArgSet("-q"));
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-a"].front() == "");
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-ccc"].front() == "argument");
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-section.ccc"].front() == "seconly1");
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-section.q"].front() == "0");
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-other.ccc"].front() == "other");
+    BOOST_CHECK(testArgs.GetMapConfigArgs()["-other.q"].front() == "1");
+
+    BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2);
+
+    testArgs.SelectNetwork("section");
+    BOOST_CHECK(testArgs.IsArgSet("-a") && testArgs.IsArgSet("-b") && testArgs.IsArgSet("-ccc")
+                && testArgs.IsArgSet("-d") && testArgs.IsArgSet("-fff") && testArgs.IsArgSet("-ggg") && testArgs.IsArgSet("-q"));
+    BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 5);
+    BOOST_CHECK(testArgs.GetArg("-ccc","x") == "seconly1");
+    BOOST_CHECK(testArgs.GetArg("-q","x") == "0");
+
+    testArgs.SelectNetwork("other");
+    BOOST_CHECK(testArgs.IsArgSet("-a") && testArgs.IsArgSet("-b") && testArgs.IsArgSet("-ccc")
+                && testArgs.IsArgSet("-d") && testArgs.IsArgSet("-fff") && testArgs.IsArgSet("-ggg") && testArgs.IsArgSet("-q"));
+    BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 3);
+    BOOST_CHECK(testArgs.GetArg("-ccc","x") == "other");
+    BOOST_CHECK(testArgs.GetArg("-q","x") == "1");
+
+    testArgs.SelectNetwork("section");
+    testArgs.GetSetNetOnlyArgs().clear();
+    testArgs.GetSetNetOnlyArgs().insert("-ccc");
+    testArgs.GetSetNetOnlyArgs().insert("-d");
+    BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 3);
+    BOOST_CHECK(testArgs.GetArg("-d","x") == "x");
 }
 
 BOOST_AUTO_TEST_CASE(util_GetArg)
