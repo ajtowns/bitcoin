@@ -88,16 +88,3 @@ void SelectBaseParams(const std::string& chain)
     gArgs.SelectNetwork(chain);
 }
 
-std::string ChainNameFromCommandLine()
-{
-    bool fRegTest = gArgs.GetBoolArg("-regtest", false);
-    bool fTestNet = gArgs.GetBoolArg("-testnet", false);
-
-    if (fTestNet && fRegTest)
-        throw std::runtime_error("Invalid combination of -regtest and -testnet.");
-    if (fRegTest)
-        return CBaseChainParams::REGTEST;
-    if (fTestNet)
-        return CBaseChainParams::TESTNET;
-    return CBaseChainParams::MAIN;
-}

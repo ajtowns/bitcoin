@@ -728,6 +728,21 @@ void ArgsManager::ReadConfigFile(void)
     }
 }
 
+std::string ArgsManager::ChainNameFromCommandLine() const
+{
+    bool fRegTest = GetBoolArg("-regtest", false);
+    bool fTestNet = GetBoolArg("-testnet", false);
+
+    if (fTestNet && fRegTest)
+        throw std::runtime_error("Invalid combination of -regtest and -testnet.");
+    if (fRegTest)
+        return CBaseChainParams::REGTEST;
+    if (fTestNet)
+        return CBaseChainParams::TESTNET;
+    return CBaseChainParams::MAIN;
+}
+
+
 #ifndef WIN32
 fs::path GetPidFile()
 {
