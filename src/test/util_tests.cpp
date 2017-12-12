@@ -234,6 +234,55 @@ BOOST_AUTO_TEST_CASE(util_GetArg)
     BOOST_CHECK_EQUAL(testArgs.GetBoolArg("booltest4", false), true);
 }
 
+BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
+{
+    TestArgsManager testArgs;
+
+    const char* argv_testnet[] = {"cmd", "-testnet"};
+    const char* argv_regtest[] = {"cmd", "-regtest"};
+    const char* argv_test_no_reg[] = {"cmd", "-testnet", "-noregtest"};
+    const char* argv_both[] = {"cmd", "-testnet", "-regtest"};
+
+    // equivalent to "-testnet"
+    const char* testnetconf = "testnet=1\nregtest=0\n[test]\nregtest=1\n";
+    //std::istringstream streamConfig(netconfig);
+
+    testArgs.ParseParameters(0, (char**)argv_testnet);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "main");
+
+    testArgs.ParseParameters(2, (char**)argv_testnet);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(2, (char**)argv_regtest);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "regtest");
+
+    testArgs.ParseParameters(3, (char**)argv_test_no_reg);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(3, (char**)argv_both);
+    BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+
+    testArgs.ParseParameters(0, (char**)argv_testnet);
+    testArgs.CallReadConfigStream(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(2, (char**)argv_testnet);
+    testArgs.CallReadConfigStream(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(2, (char**)argv_regtest);
+    testArgs.CallReadConfigStream(testnetconf);
+    BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+
+    testArgs.ParseParameters(3, (char**)argv_test_no_reg);
+    testArgs.CallReadConfigStream(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(3, (char**)argv_both);
+    testArgs.CallReadConfigStream(testnetconf);
+    BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+}
+
 BOOST_AUTO_TEST_CASE(util_FormatMoney)
 {
     BOOST_CHECK_EQUAL(FormatMoney(0), "0.00");

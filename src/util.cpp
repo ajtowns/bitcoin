@@ -728,13 +728,25 @@ void ArgsManager::ReadConfigFile(void)
     }
 }
 
+bool ArgsManager::GetNetArgHelper(const std::string& strNetArg) const
+{
+    std::string v;
+    if (!GetArgHelper(&v, m_mapOverrideArgs, strNetArg, true)) {
+        if (!GetArgHelper(&v, m_mapConfigArgs, strNetArg)) {
+            return false;
+        }
+    }
+    return InterpretBool(v);
+}
+
 std::string ArgsManager::ChainNameFromCommandLine() const
 {
-    bool fRegTest = GetBoolArg("-regtest", false);
-    bool fTestNet = GetBoolArg("-testnet", false);
+    bool fRegTest = GetNetArgHelper("-regtest");
+    bool fTestNet = GetNetArgHelper("-testnet");
 
     if (fTestNet && fRegTest)
         throw std::runtime_error("Invalid combination of -regtest and -testnet.");
+
     if (fRegTest)
         return CBaseChainParams::REGTEST;
     if (fTestNet)
