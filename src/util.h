@@ -212,13 +212,14 @@ protected:
     bool GetArgInternal(std::string* result, const std::string& strArg) const;
     std::string NetArg(const std::string& strArg) const;
     bool GetNetArgHelper(const std::string& strNetArg) const;
+    void ReadConfigStream(std::istream& streamConfig);
     inline bool IsNetOnlyArg(const std::string& strArg) const { return m_setNetOnlyArgs.count(strArg) != 0; }
 
 public:
     ArgsManager();
 
     void ParseParameters(int argc, const char*const argv[]);
-    void ReadConfigFile(const std::string& confPath);
+    void ReadConfigFile(void);
 
     void SelectNetwork(const std::string& strNetwork);
 
