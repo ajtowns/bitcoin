@@ -450,11 +450,83 @@ static void InterpretNegativeSetting(std::string& strKey, std::string& strValue)
     }
 }
 
+/** Internal helper functions for ArgsManager */
+class ArgsManagerHelper {
+public:
+    typedef std::map<std::string, std::vector<std::string>> map_args;
+
+    /** Convert regular argument into the section-specific setting */
+    inline static std::string SectionArg(const ArgsManager& am, const std::string& strArg)
+    {
+        assert(strArg.length() > 1 && strArg[0] == '-');
+        return "-" + am.m_strSection + "." + strArg.substr(1);
+    }
+
+    /** Find arguments in a map and add them to a vector */
+    inline static void AddArgs(std::vector<std::string>& vRes, const map_args& mapArgs, const std::string& strArg)
+    {
+        auto it = mapArgs.find(strArg);
+        if (it != mapArgs.end()) {
+            vRes.insert(vRes.end(), it->second.begin(), it->second.end());
+        }
+    }
+
+    /** Return true/false if an argument is set in a map, and also
+     *  return the first (or last) of the possibly multiple values it has
+     */
+    static inline bool GetArgHelper(std::string* result, const map_args& mapArgs, const std::string& strArg, bool getLast = false)
+    {
+        auto it = mapArgs.find(strArg);
+
+        if (it == mapArgs.end() || it->second.empty()) {
+            return false;
+        }
+
+        if (result != nullptr) {
+            if (getLast) {
+                *result = it->second.back();
+            } else {
+                *result = it->second.front();
+            }
+        }
+
+        return true;
+    }
+
+    /* Get the string value of an argument, returning true if found, or
+     * false if not found.
+     */
+    static inline bool GetArg(const ArgsManager &am, std::string* result, const std::string& strArg)
+    {
+        LOCK(am.cs_args);
+
+        if (GetArgHelper(result, am.m_mapOverrideArgs, strArg, true)) {
+            return true;
+        }
+
+        if (!am.m_strSection.empty()) {
+            if (GetArgHelper(result, am.m_mapConfigArgs, SectionArg(am, strArg))) {
+                return true;
+            }
+        }
+
+        if (GetArgHelper(result, am.m_mapConfigArgs, strArg)) {
+            return true;
+        }
+
+        return false;
+    }
+};
+
+void ArgsManager::SelectConfigSection(const std::string& strSection)
+{
+    m_strSection = strSection;
+}
+
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
 {
     LOCK(cs_args);
-    mapArgs.clear();
-    mapMultiArgs.clear();
+    m_mapOverrideArgs.clear();
 
     for (int i = 1; i < argc; i++)
     {
@@ -481,47 +553,55 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
             str = str.substr(1);
         InterpretNegativeSetting(str, strValue);
 
-        mapArgs[str] = strValue;
-        mapMultiArgs[str].push_back(strValue);
+        m_mapOverrideArgs[str].push_back(strValue);
     }
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 {
+    std::vector<std::string> result = {};
+
     LOCK(cs_args);
-    auto it = mapMultiArgs.find(strArg);
-    if (it != mapMultiArgs.end()) return it->second;
-    return {};
+    ArgsManagerHelper::AddArgs(result, m_mapOverrideArgs, strArg);
+    if (!m_strSection.empty()) {
+        ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, ArgsManagerHelper::SectionArg(*this, strArg));
+    }
+    ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, strArg);
+    return result;
 }
 
 bool ArgsManager::IsArgSet(const std::string& strArg) const
 {
-    LOCK(cs_args);
-    return mapArgs.count(strArg);
+    return ArgsManagerHelper::GetArg(*this, nullptr, strArg);
 }
 
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return it->second;
-    return strDefault;
+    std::string res;
+    if (ArgsManagerHelper::GetArg(*this, &res, strArg)) {
+        return res;
+    } else {
+        return strDefault;
+    }
 }
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return atoi64(it->second);
-    return nDefault;
+    std::string res;
+    if (ArgsManagerHelper::GetArg(*this, &res, strArg)) {
+        return atoi64(res);
+    } else {
+        return nDefault;
+    }
 }
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return InterpretBool(it->second);
-    return fDefault;
+    std::string res;
+    if (ArgsManagerHelper::GetArg(*this, &res, strArg))
+        return InterpretBool(res);
+    else
+        return fDefault;
 }
 
 bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
@@ -543,8 +623,7 @@ bool ArgsManager::SoftSetBoolArg(const std::string& strArg, bool fValue)
 void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strValue)
 {
     LOCK(cs_args);
-    mapArgs[strArg] = strValue;
-    mapMultiArgs[strArg] = {strValue};
+    m_mapOverrideArgs[strArg] = {strValue};
 }
 
 
@@ -697,10 +776,11 @@ fs::path GetConfigFile(const std::string& confPath)
 
 void ArgsManager::ReadConfigStream(std::istream& streamConfig)
 {
-    if (!streamConfig.good())
-        return; // No bitcoin.conf file is OK
+    AssertLockNotHeld(cs_args);
 
-    {
+    if (!streamConfig.good()) {
+        return; // No bitcoin.conf file is OK
+    } else {
         LOCK(cs_args);
 
         std::set<std::string> setOptions;
@@ -712,16 +792,20 @@ void ArgsManager::ReadConfigStream(std::istream& streamConfig)
             std::string strKey = std::string("-") + it->string_key;
             std::string strValue = it->value[0];
             InterpretNegativeSetting(strKey, strValue);
-            if (mapArgs.count(strKey) == 0)
-                mapArgs[strKey] = strValue;
-            mapMultiArgs[strKey].push_back(strValue);
+            m_mapConfigArgs[strKey].push_back(strValue);
         }
     }
 }
 
 void ArgsManager::ReadConfigFile(const std::string& confPath)
 {
+    {
+        LOCK(cs_args);
+        m_mapConfigArgs.clear();
+    }
+
     fs::ifstream streamConfig(GetConfigFile(confPath));
+
     ReadConfigStream(streamConfig);
 
     // If datadir is changed in .conf file:

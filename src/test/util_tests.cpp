@@ -188,17 +188,21 @@ BOOST_AUTO_TEST_CASE(util_FormatISO8601Time)
 class TestArgsManager : public ArgsManager
 {
 public:
-    std::map<std::string, std::string>& GetMapArgs()
+    std::map<std::string, std::vector<std::string> >& GetMapOverrideArgs()
     {
-        return mapArgs;
-    };
-    const std::map<std::string, std::vector<std::string> >& GetMapMultiArgs()
+        return m_mapOverrideArgs;
+    }
+    std::map<std::string, std::vector<std::string> >& GetMapConfigArgs()
     {
-        return mapMultiArgs;
-    };
+        return m_mapConfigArgs;
+    }
     void ReadConfigString(const std::string strConfig)
     {
         std::istringstream streamConfig(strConfig);
+        {
+            LOCK(cs_args);
+            m_mapConfigArgs.clear();
+        }
         ReadConfigStream(streamConfig);
     }
 };
@@ -209,22 +213,26 @@ BOOST_AUTO_TEST_CASE(util_ParseParameters)
     const char *argv_test[] = {"-ignored", "-a", "-b", "-ccc=argument", "-ccc=multiple", "f", "-d=e"};
 
     testArgs.ParseParameters(0, (char**)argv_test);
-    BOOST_CHECK(testArgs.GetMapArgs().empty() && testArgs.GetMapMultiArgs().empty());
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().empty() && testArgs.GetMapConfigArgs().empty());
 
     testArgs.ParseParameters(1, (char**)argv_test);
-    BOOST_CHECK(testArgs.GetMapArgs().empty() && testArgs.GetMapMultiArgs().empty());
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().empty() && testArgs.GetMapConfigArgs().empty());
 
     testArgs.ParseParameters(7, (char**)argv_test);
     // expectation: -ignored is ignored (program name argument),
     // -a, -b and -ccc end up in map, -d ignored because it is after
     // a non-option argument (non-GNU option parsing)
-    BOOST_CHECK(testArgs.GetMapArgs().size() == 3 && testArgs.GetMapMultiArgs().size() == 3);
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().size() == 3 && testArgs.GetMapConfigArgs().empty());
     BOOST_CHECK(testArgs.IsArgSet("-a") && testArgs.IsArgSet("-b") && testArgs.IsArgSet("-ccc")
                 && !testArgs.IsArgSet("f") && !testArgs.IsArgSet("-d"));
-    BOOST_CHECK(testArgs.GetMapMultiArgs().count("-a") && testArgs.GetMapMultiArgs().count("-b") && testArgs.GetMapMultiArgs().count("-ccc")
-                && !testArgs.GetMapMultiArgs().count("f") && !testArgs.GetMapMultiArgs().count("-d"));
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().count("-a") && testArgs.GetMapOverrideArgs().count("-b") && testArgs.GetMapOverrideArgs().count("-ccc")
+                && !testArgs.GetMapOverrideArgs().count("f") && !testArgs.GetMapOverrideArgs().count("-d"));
 
-    BOOST_CHECK(testArgs.GetMapArgs()["-a"] == "" && testArgs.GetMapArgs()["-ccc"] == "multiple");
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-a"].size() == 1);
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-a"].front() == "");
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-ccc"].size() == 2);
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-ccc"].front() == "argument");
+    BOOST_CHECK(testArgs.GetMapOverrideArgs()["-ccc"].back() == "multiple");
     BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2);
 }
 
@@ -244,15 +252,15 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     testArgs.ReadConfigString(str_config);
     // expectation: a, b, ccc, d, fff, ggg end up in map
 
-    BOOST_CHECK(testArgs.GetMapArgs().size() == 6);
-    BOOST_CHECK(testArgs.GetMapMultiArgs().size() == 6);
+    BOOST_CHECK(testArgs.GetMapOverrideArgs().empty());
+    BOOST_CHECK(testArgs.GetMapConfigArgs().size() == 6);
 
-    BOOST_CHECK(testArgs.GetMapArgs().count("-a")
-                && testArgs.GetMapArgs().count("-b")
-                && testArgs.GetMapArgs().count("-ccc")
-                && testArgs.GetMapArgs().count("-d")
-                && testArgs.GetMapArgs().count("-fff")
-                && testArgs.GetMapArgs().count("-ggg")
+    BOOST_CHECK(testArgs.GetMapConfigArgs().count("-a")
+                && testArgs.GetMapConfigArgs().count("-b")
+                && testArgs.GetMapConfigArgs().count("-ccc")
+                && testArgs.GetMapConfigArgs().count("-d")
+                && testArgs.GetMapConfigArgs().count("-fff")
+                && testArgs.GetMapConfigArgs().count("-ggg")
                );
 
     BOOST_CHECK(testArgs.IsArgSet("-a")
@@ -299,16 +307,24 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
 BOOST_AUTO_TEST_CASE(util_GetArg)
 {
     TestArgsManager testArgs;
-    testArgs.GetMapArgs().clear();
-    testArgs.GetMapArgs()["strtest1"] = "string...";
+    testArgs.GetMapOverrideArgs().clear();
+    testArgs.GetMapOverrideArgs()["strtest1"] = {"string..."};
     // strtest2 undefined on purpose
-    testArgs.GetMapArgs()["inttest1"] = "12345";
-    testArgs.GetMapArgs()["inttest2"] = "81985529216486895";
+    testArgs.GetMapOverrideArgs()["inttest1"] = {"12345"};
+    testArgs.GetMapOverrideArgs()["inttest2"] = {"81985529216486895"};
     // inttest3 undefined on purpose
-    testArgs.GetMapArgs()["booltest1"] = "";
+    testArgs.GetMapOverrideArgs()["booltest1"] = {""};
     // booltest2 undefined on purpose
-    testArgs.GetMapArgs()["booltest3"] = "0";
-    testArgs.GetMapArgs()["booltest4"] = "1";
+    testArgs.GetMapOverrideArgs()["booltest3"] = {"0"};
+    testArgs.GetMapOverrideArgs()["booltest4"] = {"1"};
+
+    // priorities
+    testArgs.GetMapOverrideArgs()["pritest1"] = {"a", "b"};
+    testArgs.GetMapConfigArgs()["pritest2"] = {"a", "b"};
+    testArgs.GetMapOverrideArgs()["pritest3"] = {"a"};
+    testArgs.GetMapConfigArgs()["pritest3"] = {"b"};
+    testArgs.GetMapOverrideArgs()["pritest4"] = {"a","b"};
+    testArgs.GetMapConfigArgs()["pritest4"] = {"c","d"};
 
     BOOST_CHECK_EQUAL(testArgs.GetArg("strtest1", "default"), "string...");
     BOOST_CHECK_EQUAL(testArgs.GetArg("strtest2", "default"), "default");
@@ -319,6 +335,11 @@ BOOST_AUTO_TEST_CASE(util_GetArg)
     BOOST_CHECK_EQUAL(testArgs.GetBoolArg("booltest2", false), false);
     BOOST_CHECK_EQUAL(testArgs.GetBoolArg("booltest3", false), false);
     BOOST_CHECK_EQUAL(testArgs.GetBoolArg("booltest4", false), true);
+
+    BOOST_CHECK_EQUAL(testArgs.GetArg("pritest1", "default"), "b");
+    BOOST_CHECK_EQUAL(testArgs.GetArg("pritest2", "default"), "a");
+    BOOST_CHECK_EQUAL(testArgs.GetArg("pritest3", "default"), "a");
+    BOOST_CHECK_EQUAL(testArgs.GetArg("pritest4", "default"), "b");
 }
 
 BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
