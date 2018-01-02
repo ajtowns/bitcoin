@@ -224,6 +224,7 @@ protected:
     mutable CCriticalSection cs_args;
     std::map<std::string, std::string> mapArgs;
     std::map<std::string, std::vector<std::string>> mapMultiArgs;
+    void ReadConfigStream(std::istream& streamConfig);
 public:
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
