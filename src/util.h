@@ -219,9 +219,11 @@ inline bool IsSwitchChar(char c)
 class ArgsManager
 {
 protected:
+    friend class ArgsManagerHelper;
+
     mutable CCriticalSection cs_args;
-    std::map<std::string, std::string> mapArgs;
-    std::map<std::string, std::vector<std::string>> mapMultiArgs;
+    std::map<std::string, std::vector<std::string>> m_mapOverrideArgs;
+    std::map<std::string, std::vector<std::string>> m_mapConfigArgs;
     void ReadConfigStream(std::istream& streamConfig);
 public:
     void ParseParameters(int argc, const char*const argv[]);
