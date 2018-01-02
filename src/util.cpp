@@ -528,6 +528,20 @@ public:
 
         return false;
     }
+
+    /* Special test for -testnet and -regtest args, because we
+     * don't want to be confused by craziness like "[regtest] testnet=1"
+     */
+    static inline bool GetNetBoolArg(const ArgsManager &am, const std::string& strNetArg)
+    {
+        std::string v;
+        if (!GetArgHelper(&v, am.m_mapOverrideArgs, strNetArg, true)) {
+            if (!GetArgHelper(&v, am.m_mapConfigArgs, strNetArg, true)) {
+                return false; // not set
+            }
+        }
+        return InterpretBool(v); // is set, so evaluate
+    }
 };
 
 ArgsManager::ArgsManager(void) :
@@ -846,8 +860,8 @@ void ArgsManager::ReadConfigFile(const std::string& confPath)
 
 std::string ArgsManager::ChainNameFromCommandLine() const
 {
-    bool fRegTest = GetBoolArg("-regtest", false);
-    bool fTestNet = GetBoolArg("-testnet", false);
+    bool fRegTest = ArgsManagerHelper::GetNetBoolArg(*this, "-regtest");
+    bool fTestNet = ArgsManagerHelper::GetNetBoolArg(*this, "-testnet");
 
     if (fTestNet && fRegTest)
         throw std::runtime_error("Invalid combination of -regtest and -testnet.");
