@@ -224,10 +224,16 @@ protected:
     mutable CCriticalSection cs_args;
     std::map<std::string, std::vector<std::string>> m_mapOverrideArgs;
     std::map<std::string, std::vector<std::string>> m_mapConfigArgs;
+    std::string m_strSection;
     void ReadConfigStream(std::istream& streamConfig);
 public:
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
+
+    /**
+     * Select the network in use
+     */
+    void SelectConfigSection(const std::string& strSection);
 
     /**
      * Return a vector of strings of the given argument

@@ -440,6 +440,13 @@ class ArgsManagerHelper {
 public:
     typedef std::map<std::string, std::vector<std::string>> map_args;
 
+    /** Convert regular argument into the section-specific setting */
+    inline static std::string SectionArg(const ArgsManager& am, const std::string& strArg)
+    {
+        assert(strArg.length() > 1 && strArg[0] == '-');
+        return "-" + am.m_strSection + "." + strArg.substr(1);
+    }
+
     /** Find arguments in a map and add them to a vector */
     inline static void AddArgs(std::vector<std::string>& vRes, const map_args& mapArgs, const std::string& strArg)
     {
@@ -480,12 +487,22 @@ public:
         if (GetArgHelper(result, am.m_mapOverrideArgs, strArg, true))
             return true;
 
+        if (!am.m_strSection.empty()) {
+            if (GetArgHelper(result, am.m_mapConfigArgs, SectionArg(am, strArg)))
+                return true;
+        }
+
         if (GetArgHelper(result, am.m_mapConfigArgs, strArg))
             return true;
 
         return false;
     }
 };
+
+void ArgsManager::SelectConfigSection(const std::string& strSection)
+{
+    m_strSection = strSection;
+}
 
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
 {
@@ -527,6 +544,9 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 
     LOCK(cs_args);
     ArgsManagerHelper::AddArgs(result, m_mapOverrideArgs, strArg);
+    if (!m_strSection.empty()) {
+        ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, ArgsManagerHelper::SectionArg(*this, strArg));
+    }
     ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, strArg);
     return result;
 }
