@@ -647,14 +647,14 @@ fs::path GetConfigFile(const std::string& confPath)
     return AbsPathForConfigVal(fs::path(confPath), false);
 }
 
-void ArgsManager::ReadConfigFile(const std::string& confPath)
+void ArgsManager::ReadConfigStream(std::istream& streamConfig)
 {
-    fs::ifstream streamConfig(GetConfigFile(confPath));
     if (!streamConfig.good())
         return; // No bitcoin.conf file is OK
 
     {
         LOCK(cs_args);
+
         std::set<std::string> setOptions;
         setOptions.insert("*");
 
@@ -669,6 +669,13 @@ void ArgsManager::ReadConfigFile(const std::string& confPath)
             mapMultiArgs[strKey].push_back(strValue);
         }
     }
+}
+
+void ArgsManager::ReadConfigFile(const std::string& confPath)
+{
+    fs::ifstream streamConfig(GetConfigFile(confPath));
+    ReadConfigStream(streamConfig);
+
     // If datadir is changed in .conf file:
     ClearDatadirCache();
     if (!fs::is_directory(GetDataDir(false))) {
