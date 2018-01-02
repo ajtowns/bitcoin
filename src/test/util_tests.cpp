@@ -245,15 +245,24 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
        "ccc=multiple\n"
        "d=e\n"
        "nofff=1\n"
-       "noggg=0\n";
+       "noggg=0\n"
+       "sec1.ccc=extend1\n"
+       "\n"
+       "[sec1]\n"
+       "ccc=extend2\n"
+       "h=1\n"
+       "[sec2]\n"
+       "ccc=extend3\n"
+       "iii=2\n";
 
     TestArgsManager testArgs;
 
     testArgs.ReadConfigString(str_config);
     // expectation: a, b, ccc, d, fff, ggg end up in map
+    // so do sec1.ccc, sec1.h, sec2.ccc, sec2.iii
 
     BOOST_CHECK(testArgs.GetMapOverrideArgs().empty());
-    BOOST_CHECK(testArgs.GetMapConfigArgs().size() == 6);
+    BOOST_CHECK(testArgs.GetMapConfigArgs().size() == 10);
 
     BOOST_CHECK(testArgs.GetMapConfigArgs().count("-a")
                 && testArgs.GetMapConfigArgs().count("-b")
@@ -261,6 +270,11 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                 && testArgs.GetMapConfigArgs().count("-d")
                 && testArgs.GetMapConfigArgs().count("-fff")
                 && testArgs.GetMapConfigArgs().count("-ggg")
+               );
+    BOOST_CHECK(testArgs.GetMapConfigArgs().count("-sec1.ccc")
+                && testArgs.GetMapConfigArgs().count("-sec1.h")
+                && testArgs.GetMapConfigArgs().count("-sec2.ccc")
+                && testArgs.GetMapConfigArgs().count("-sec2.iii")
                );
 
     BOOST_CHECK(testArgs.IsArgSet("-a")
@@ -270,6 +284,8 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                 && testArgs.IsArgSet("-fff")
                 && testArgs.IsArgSet("-ggg")
                 && !testArgs.IsArgSet("-zzz")
+                && !testArgs.IsArgSet("-h")
+                && !testArgs.IsArgSet("-iii")
                );
 
     BOOST_CHECK(testArgs.GetArg("-a", "xxx") == ""
@@ -279,6 +295,8 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                 && testArgs.GetArg("-fff", "xxx") == "0"
                 && testArgs.GetArg("-ggg", "xxx") == "1"
                 && testArgs.GetArg("-zzz", "xxx") == "xxx"
+                && testArgs.GetArg("-h", "xxx") == "xxx"
+                && testArgs.GetArg("-iii", "xxx") == "xxx"
                );
 
     for (int i = 0; i < 2; i++) {
@@ -290,6 +308,8 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                      && !testArgs.GetBoolArg("-fff", def)
                      && testArgs.GetBoolArg("-ggg", def)
                      && testArgs.GetBoolArg("-zzz", def) == def
+                     && testArgs.GetBoolArg("-h", def) == def
+                     && testArgs.GetBoolArg("-iii", def) == def
                    );
     }
 
@@ -302,6 +322,47 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                 && testArgs.GetArgs("-fff").front() == "0");
     BOOST_CHECK(testArgs.GetArgs("-nofff").size() == 0);
     BOOST_CHECK(testArgs.GetArgs("-zzz").size() == 0);
+
+    // Test sections work
+    testArgs.SelectConfigSection("sec1");
+
+    // same as original
+    BOOST_CHECK(testArgs.GetArg("-a", "xxx") == ""
+                && testArgs.GetArg("-b", "xxx") == "1"
+                && testArgs.GetArg("-d", "xxx") == "e"
+                && testArgs.GetArg("-fff", "xxx") == "0"
+                && testArgs.GetArg("-ggg", "xxx") == "1"
+                && testArgs.GetArg("-zzz", "xxx") == "xxx"
+                && testArgs.GetArg("-iii", "xxx") == "xxx"
+               );
+    // section-specific setting
+    BOOST_CHECK(testArgs.GetArg("-h", "xxx") == "1");
+    // section takes priority for multiple values
+    BOOST_CHECK(testArgs.GetArg("-ccc", "xxx") == "extend1");
+    // check multiple values works
+    const std::vector<std::string> sec1_ccc_expected = {"extend1","extend2","argument","multiple"};
+    const auto& sec1_ccc_res = testArgs.GetArgs("-ccc");
+    BOOST_CHECK_EQUAL_COLLECTIONS(sec1_ccc_res.begin(), sec1_ccc_res.end(), sec1_ccc_expected.begin(), sec1_ccc_expected.end());
+
+    testArgs.SelectConfigSection("sec2");
+
+    // same as original
+    BOOST_CHECK(testArgs.GetArg("-a", "xxx") == ""
+                && testArgs.GetArg("-b", "xxx") == "1"
+                && testArgs.GetArg("-d", "xxx") == "e"
+                && testArgs.GetArg("-fff", "xxx") == "0"
+                && testArgs.GetArg("-ggg", "xxx") == "1"
+                && testArgs.GetArg("-zzz", "xxx") == "xxx"
+                && testArgs.GetArg("-h", "xxx") == "xxx"
+               );
+    // section-specific setting
+    BOOST_CHECK(testArgs.GetArg("-iii", "xxx") == "2");
+    // section takes priority for multiple values
+    BOOST_CHECK(testArgs.GetArg("-ccc", "xxx") == "extend3");
+    // check multiple values works
+    const std::vector<std::string> sec2_ccc_expected = {"extend3","argument","multiple"};
+    const auto& sec2_ccc_res = testArgs.GetArgs("-ccc");
+    BOOST_CHECK_EQUAL_COLLECTIONS(sec2_ccc_res.begin(), sec2_ccc_res.end(), sec2_ccc_expected.begin(), sec2_ccc_expected.end());
 }
 
 BOOST_AUTO_TEST_CASE(util_GetArg)
