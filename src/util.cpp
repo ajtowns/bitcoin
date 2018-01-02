@@ -438,6 +438,16 @@ static void InterpretNegativeSetting(std::string& strKey, std::string& strValue)
 /** Internal helper functions for ArgsManager */
 class ArgsManagerHelper {
 public:
+    inline static bool UseDefaultSection(const ArgsManager& am, const std::string& strArg)
+    {
+        if (am.m_strSection == CBaseChainParams::MAIN)
+            return true;
+        else if (am.m_setSectionOnlyArgs.count(strArg) == 0)
+            return true;
+        else
+            return false;
+    }
+
     typedef std::map<std::string, std::vector<std::string>> map_args;
 
     /** Convert regular argument into the section-specific setting */
@@ -492,12 +502,25 @@ public:
                 return true;
         }
 
-        if (GetArgHelper(result, am.m_mapConfigArgs, strArg))
-            return true;
+        if (UseDefaultSection(am, strArg)) {
+            if (GetArgHelper(result, am.m_mapConfigArgs, strArg))
+                return true;
+        }
 
         return false;
     }
 };
+
+ArgsManager::ArgsManager(void) :
+    m_setSectionOnlyArgs{
+      "-addnode", "-connect",
+      "-port", "-bind",
+      "-rpcport", "-rpcbind",
+      "-wallet",
+    }
+{
+    // nothing to do
+}
 
 void ArgsManager::SelectConfigSection(const std::string& strSection)
 {
@@ -543,11 +566,17 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
     std::vector<std::string> result = {};
 
     LOCK(cs_args);
+
     ArgsManagerHelper::AddArgs(result, m_mapOverrideArgs, strArg);
+
     if (!m_strSection.empty()) {
         ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, ArgsManagerHelper::SectionArg(*this, strArg));
     }
-    ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, strArg);
+
+    if (ArgsManagerHelper::UseDefaultSection(*this, strArg)) {
+        ArgsManagerHelper::AddArgs(result, m_mapConfigArgs, strArg);
+    }
+
     return result;
 }
 
