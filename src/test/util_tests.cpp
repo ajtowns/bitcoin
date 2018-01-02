@@ -196,6 +196,11 @@ public:
     {
         return mapMultiArgs;
     };
+    void ReadConfigString(const std::string strConfig)
+    {
+        std::istringstream streamConfig(strConfig);
+        ReadConfigStream(streamConfig);
+    }
 };
 
 BOOST_AUTO_TEST_CASE(util_ParseParameters)
@@ -221,6 +226,74 @@ BOOST_AUTO_TEST_CASE(util_ParseParameters)
 
     BOOST_CHECK(testArgs.GetMapArgs()["-a"] == "" && testArgs.GetMapArgs()["-ccc"] == "multiple");
     BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2);
+}
+
+BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
+{
+    const char *str_config =
+       "a=\n"
+       "b=1\n"
+       "ccc=argument\n"
+       "ccc=multiple\n"
+       "d=e\n"
+       "nofff=1\n"
+       "noggg=0\n";
+
+    TestArgsManager testArgs;
+
+    testArgs.ReadConfigString(str_config);
+    // expectation: a, b, ccc, d, fff, ggg end up in map
+
+    BOOST_CHECK(testArgs.GetMapArgs().size() == 6);
+    BOOST_CHECK(testArgs.GetMapMultiArgs().size() == 6);
+
+    BOOST_CHECK(testArgs.GetMapArgs().count("-a")
+                && testArgs.GetMapArgs().count("-b")
+                && testArgs.GetMapArgs().count("-ccc")
+                && testArgs.GetMapArgs().count("-d")
+                && testArgs.GetMapArgs().count("-fff")
+                && testArgs.GetMapArgs().count("-ggg")
+               );
+
+    BOOST_CHECK(testArgs.IsArgSet("-a")
+                && testArgs.IsArgSet("-b")
+                && testArgs.IsArgSet("-ccc")
+                && testArgs.IsArgSet("-d")
+                && testArgs.IsArgSet("-fff")
+                && testArgs.IsArgSet("-ggg")
+                && !testArgs.IsArgSet("-zzz")
+               );
+
+    BOOST_CHECK(testArgs.GetArg("-a", "xxx") == ""
+                && testArgs.GetArg("-b", "xxx") == "1"
+                && testArgs.GetArg("-ccc", "xxx") == "argument"
+                && testArgs.GetArg("-d", "xxx") == "e"
+                && testArgs.GetArg("-fff", "xxx") == "0"
+                && testArgs.GetArg("-ggg", "xxx") == "1"
+                && testArgs.GetArg("-zzz", "xxx") == "xxx"
+               );
+
+    for (int i = 0; i < 2; i++) {
+        bool def = (i > 0);
+        BOOST_CHECK(testArgs.GetBoolArg("-a", def)
+                     && testArgs.GetBoolArg("-b", def)
+                     && !testArgs.GetBoolArg("-ccc", def)
+                     && !testArgs.GetBoolArg("-d", def)
+                     && !testArgs.GetBoolArg("-fff", def)
+                     && testArgs.GetBoolArg("-ggg", def)
+                     && testArgs.GetBoolArg("-zzz", def) == def
+                   );
+    }
+
+    BOOST_CHECK(testArgs.GetArgs("-a").size() == 1
+                && testArgs.GetArgs("-a").front() == "");
+    BOOST_CHECK(testArgs.GetArgs("-ccc").size() == 2
+                && testArgs.GetArgs("-ccc").front() == "argument"
+                && testArgs.GetArgs("-ccc").back() == "multiple");
+    BOOST_CHECK(testArgs.GetArgs("-fff").size() == 1
+                && testArgs.GetArgs("-fff").front() == "0");
+    BOOST_CHECK(testArgs.GetArgs("-nofff").size() == 0);
+    BOOST_CHECK(testArgs.GetArgs("-zzz").size() == 0);
 }
 
 BOOST_AUTO_TEST_CASE(util_GetArg)
