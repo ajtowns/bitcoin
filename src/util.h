@@ -23,6 +23,7 @@
 #include <atomic>
 #include <exception>
 #include <map>
+#include <set>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -227,8 +228,12 @@ protected:
     std::map<std::string, std::vector<std::string>> m_mapOverrideArgs;
     std::map<std::string, std::vector<std::string>> m_mapConfigArgs;
     std::string m_strSection;
+    std::set<std::string> m_setSectionOnlyArgs;
+
     void ReadConfigStream(std::istream& streamConfig);
 public:
+    ArgsManager(void);
+
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
 
