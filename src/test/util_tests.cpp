@@ -330,6 +330,9 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     const char* argv_test_no_reg[] = {"cmd", "-testnet", "-noregtest"};
     const char* argv_both[] = {"cmd", "-testnet", "-regtest"};
 
+    // equivalent to "-testnet"
+    const char* testnetconf = "testnet=1\nregtest=0\n";
+
     testArgs.ParseParameters(0, (char**)argv_testnet);
     BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "main");
 
@@ -344,6 +347,27 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
 
     testArgs.ParseParameters(3, (char**)argv_both);
     BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+
+    testArgs.ParseParameters(0, (char**)argv_testnet);
+    testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(2, (char**)argv_testnet);
+    testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(2, (char**)argv_regtest);
+    testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+
+    testArgs.ParseParameters(3, (char**)argv_test_no_reg);
+    testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+
+    testArgs.ParseParameters(3, (char**)argv_both);
+    testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_THROW(testArgs.ChainNameFromCommandLine(), std::runtime_error);
+
 }
 
 BOOST_AUTO_TEST_CASE(util_FormatMoney)
