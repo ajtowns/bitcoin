@@ -447,7 +447,8 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     const char* argv_both[] = {"cmd", "-testnet", "-regtest"};
 
     // equivalent to "-testnet"
-    const char* testnetconf = "testnet=1\nregtest=0\n";
+    // regtest in testnet section is ignored
+    const char* testnetconf = "testnet=1\nregtest=0\n[test]\nregtest=1";
 
     testArgs.ParseParameters(0, (char**)argv_testnet);
     BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "main");
@@ -467,9 +468,15 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     testArgs.ParseParameters(0, (char**)argv_testnet);
     testArgs.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+    // check setting the ConfigSection to test (and thus making
+    // [test] regtest=1 potentially relevent) doesn't break things
+    testArgs.SelectConfigSection("test");
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
 
     testArgs.ParseParameters(2, (char**)argv_testnet);
     testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+    testArgs.SelectConfigSection("test");
     BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
 
     testArgs.ParseParameters(2, (char**)argv_regtest);
@@ -478,6 +485,8 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
 
     testArgs.ParseParameters(3, (char**)argv_test_no_reg);
     testArgs.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
+    testArgs.SelectConfigSection("test");
     BOOST_CHECK_EQUAL(testArgs.ChainNameFromCommandLine(), "test");
 
     testArgs.ParseParameters(3, (char**)argv_both);
