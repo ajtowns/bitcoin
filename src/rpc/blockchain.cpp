@@ -1685,27 +1685,15 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
         stats.count("medianfee") != 0 || stats.count("minfee") != 0 || stats.count("maxfee") != 0 ||
         stats.count("medianfeerate") != 0 || stats.count("minfeerate") != 0 || stats.count("maxfeerate") != 0;
 
-    const bool is_calculating_totalfee_required = stats.count("totalfee") != 0 || stats.count("avgfee") != 0 ||
-        stats.count("avgfeerate") != 0;
-
     for (const auto& tx : block.vtx) {
 
-        if (stats.count("outs") != 0 || stats.count("utxo_increase") != 0) {
-            outputs += tx->vout.size();
-        }
+        outputs += tx->vout.size();
+
         CAmount tx_total_out = 0;
         if (is_loop_outputs_required) {
-
             for (const CTxOut& out : tx->vout) {
-                if (stats.count("utxo_size_inc") != 0) {
-                    utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
-                }
-                if (stats.count("total_out") != 0 ||
-                    stats.count("totalfee") != 0 || stats.count("avgfee") != 0 || stats.count("avgfeerate") != 0 ||
-                    stats.count("medianfee") != 0 || stats.count("minfee") != 0 || stats.count("maxfee") != 0 ||
-                    stats.count("medianfeerate") != 0 || stats.count("minfeerate") != 0 || stats.count("maxfeerate") != 0) {
-                    tx_total_out += out.nValue;
-                }
+                utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+                tx_total_out += out.nValue;
             }
         }
 
@@ -1713,12 +1701,9 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
             continue;
         }
 
-        if (stats.count("total_out") != 0) {
-            total_out += tx_total_out;
-        }
-        if (stats.count("ins") != 0 || stats.count("utxo_increase") != 0) {
-            inputs += tx->vin.size(); // Don't count coinbase's fake input
-        }
+        total_out += tx_total_out;
+        inputs += tx->vin.size(); // Don't count coinbase's fake input
+
         int64_t tx_size = 0;
         if (is_calculating_size_required) {
 
@@ -1726,35 +1711,21 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
             if (stats.count("mediantxsize") != 0) {
                 txsize_array.push_back(tx_size);
             }
-            if (stats.count("total_size") != 0 || stats.count("avgtxsize") != 0) {
-                total_size += tx_size;
-            }
-            if (stats.count("mintxsize") != 0) {
-                mintxsize = std::min(mintxsize, tx_size);
-            }
-            if (stats.count("maxtxsize") != 0) {
-                maxtxsize = std::max(maxtxsize, tx_size);
-            }
+            total_size += tx_size;
+            mintxsize = std::min(mintxsize, tx_size);
+            maxtxsize = std::max(maxtxsize, tx_size);
         }
 
         int64_t weight = 0;
         if (is_calculating_weight_required) {
             weight = GetTransactionWeight(*tx);
-        }
-        if (stats.count("total_weight") != 0 || stats.count("avgfeerate") != 0) {
             total_weight += weight;
         }
 
         if (is_calculating_sw_required && tx->HasWitness()) {
-            if (stats.count("swtxs") != 0) {
-                ++swtxs;
-            }
-            if (stats.count("swtotal_size") != 0) {
-                swtotal_size += tx_size;
-            }
-            if (stats.count("swtotal_weight") != 0) {
-                swtotal_weight += weight;
-            }
+            ++swtxs;
+            swtotal_size += tx_size;
+            swtotal_weight += weight;
         }
 
         if (is_loop_inputs_required) {
@@ -1773,27 +1744,17 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
             if (stats.count("medianfee") != 0) {
                 fee_array.push_back(txfee);
             }
-            if (is_calculating_totalfee_required) {
-                totalfee += txfee;
-            }
-            if (stats.count("minfee") != 0) {
-                minfee = std::min(minfee, txfee);
-            }
-            if (stats.count("maxfee") != 0) {
-                maxfee = std::max(maxfee, txfee);
-            }
+            totalfee += txfee;
+            minfee = std::min(minfee, txfee);
+            maxfee = std::max(maxfee, txfee);
 
             // New feerate uses satoshis per virtual byte instead of per serialized byte
             CAmount feerate = CFeeRate(txfee, weight).GetTruncatedFee(WITNESS_SCALE_FACTOR);
             if (stats.count("medianfeerate") != 0) {
                 feerate_array.push_back(feerate);
             }
-            if (stats.count("minfeerate") != 0) {
-                minfeerate = std::min(minfeerate, feerate);
-            }
-            if (stats.count("maxfeerate") != 0) {
-                maxfeerate = std::max(maxfeerate, feerate);
-            }
+            minfeerate = std::min(minfeerate, feerate);
+            maxfeerate = std::max(maxfeerate, feerate);
         }
     }
 
