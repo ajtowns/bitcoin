@@ -1667,54 +1667,134 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
 
     CBlock block = GetBlockChecked(pindex);
 
+    const bool is_loop_outputs_required = stats.count("total_out") != 0 || stats.count("utxo_size_inc") != 0 ||
+        stats.count("totalfee") != 0 || stats.count("avgfee") != 0 || stats.count("avgfeerate") != 0 ||
+        stats.count("medianfee") != 0 || stats.count("minfee") != 0 || stats.count("maxfee") != 0 ||
+        stats.count("medianfeerate") != 0 || stats.count("minfeerate") != 0 || stats.count("maxfeerate") != 0;
+
+    const bool is_calculating_size_required = stats.count("mediantxsize") != 0 || stats.count("total_size") != 0 ||
+        stats.count("avgtxsize") != 0 || stats.count("mintxsize") != 0 || stats.count("maxtxsize") != 0 || stats.count("swtotal_size") != 0;
+
+    const bool is_calculating_weight_required = stats.count("total_weight") != 0 || stats.count("avgfeerate") != 0 ||
+        stats.count("swtotal_weight") != 0 || stats.count("medianfeerate_weight") != 0;
+
+    const bool is_calculating_sw_required = stats.count("swtxs") != 0 || stats.count("swtotal_size") != 0 ||
+        stats.count("swtotal_weight") != 0;
+
+    const bool is_loop_inputs_required = stats.count("totalfee") != 0 || stats.count("avgfee") != 0 || stats.count("avgfeerate") != 0 ||
+        stats.count("medianfee") != 0 || stats.count("minfee") != 0 || stats.count("maxfee") != 0 ||
+        stats.count("medianfeerate") != 0 || stats.count("minfeerate") != 0 || stats.count("maxfeerate") != 0;
+
+    const bool is_calculating_totalfee_required = stats.count("totalfee") != 0 || stats.count("avgfee") != 0 ||
+        stats.count("avgfeerate") != 0;
+
     for (const auto& tx : block.vtx) {
-        outputs += tx->vout.size();
+
+        if (stats.count("outs") != 0 || stats.count("utxo_increase") != 0) {
+            outputs += tx->vout.size();
+        }
         CAmount tx_total_out = 0;
-        for (const CTxOut& out : tx->vout) {
-            utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
-            tx_total_out += out.nValue;
+        if (is_loop_outputs_required) {
+
+            for (const CTxOut& out : tx->vout) {
+                if (stats.count("utxo_size_inc") != 0) {
+                    utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+                }
+                if (stats.count("total_out") != 0 ||
+                    stats.count("totalfee") != 0 || stats.count("avgfee") != 0 || stats.count("avgfeerate") != 0 ||
+                    stats.count("medianfee") != 0 || stats.count("minfee") != 0 || stats.count("maxfee") != 0 ||
+                    stats.count("medianfeerate") != 0 || stats.count("minfeerate") != 0 || stats.count("maxfeerate") != 0) {
+                    tx_total_out += out.nValue;
+                }
+            }
         }
 
         if (tx->IsCoinBase()) {
             continue;
         }
-        total_out += tx_total_out;
-        inputs += tx->vin.size(); // Don't count coinbase's fake input
-        int64_t tx_size = tx->GetTotalSize();
-        txsize_array.push_back(tx_size);
-        total_size += tx_size;
-        mintxsize = std::min(mintxsize, tx_size);
-        maxtxsize = std::max(maxtxsize, tx_size);
-        int64_t weight = GetTransactionWeight(*tx);
-        total_weight += weight;
 
-        if (tx->HasWitness()) {
-            ++swtxs;
-            swtotal_size += tx_size;
-            swtotal_weight += weight;
+        if (stats.count("total_out") != 0) {
+            total_out += tx_total_out;
+        }
+        if (stats.count("ins") != 0 || stats.count("utxo_increase") != 0) {
+            inputs += tx->vin.size(); // Don't count coinbase's fake input
+        }
+        int64_t tx_size = 0;
+        if (is_calculating_size_required) {
+
+            tx_size = tx->GetTotalSize();
+            if (stats.count("mediantxsize") != 0) {
+                txsize_array.push_back(tx_size);
+            }
+            if (stats.count("total_size") != 0 || stats.count("avgtxsize") != 0) {
+                total_size += tx_size;
+            }
+            if (stats.count("mintxsize") != 0) {
+                mintxsize = std::min(mintxsize, tx_size);
+            }
+            if (stats.count("maxtxsize") != 0) {
+                maxtxsize = std::max(maxtxsize, tx_size);
+            }
         }
 
-        CAmount tx_total_in = 0;
-        for (const CTxIn& in : tx->vin) {
-            CTransactionRef tx_in = GetTransactionChecked(in.prevout.hash);
-            CTxOut prevoutput = tx_in->vout[in.prevout.n];
-
-            tx_total_in += prevoutput.nValue;
-            utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+        int64_t weight = 0;
+        if (is_calculating_weight_required) {
+            weight = GetTransactionWeight(*tx);
         }
-        CAmount txfee = tx_total_in - tx_total_out;
-        assert(MoneyRange(txfee));
-        fee_array.push_back(txfee);
-        totalfee += txfee;
-        minfee = std::min(minfee, txfee);
-        maxfee = std::max(maxfee, txfee);
+        if (stats.count("total_weight") != 0 || stats.count("avgfeerate") != 0) {
+            total_weight += weight;
+        }
 
-        // New feerate uses satoshis per virtual byte instead of per serialized byte
-        CAmount feerate = CFeeRate(txfee, weight).GetTruncatedFee(WITNESS_SCALE_FACTOR);
-        feerate_array.push_back(feerate);
+        if (is_calculating_sw_required && tx->HasWitness()) {
+            if (stats.count("swtxs") != 0) {
+                ++swtxs;
+            }
+            if (stats.count("swtotal_size") != 0) {
+                swtotal_size += tx_size;
+            }
+            if (stats.count("swtotal_weight") != 0) {
+                swtotal_weight += weight;
+            }
+        }
 
-        minfeerate = std::min(minfeerate, feerate);
-        maxfeerate = std::max(maxfeerate, feerate);
+        if (is_loop_inputs_required) {
+
+            CAmount tx_total_in = 0;
+            for (const CTxIn& in : tx->vin) {
+                CTransactionRef tx_in = GetTransactionChecked(in.prevout.hash);
+                CTxOut prevoutput = tx_in->vout[in.prevout.n];
+
+                tx_total_in += prevoutput.nValue;
+                utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+            }
+
+            CAmount txfee = tx_total_in - tx_total_out;
+            assert(MoneyRange(txfee));
+            if (stats.count("medianfee") != 0) {
+                fee_array.push_back(txfee);
+            }
+            if (is_calculating_totalfee_required) {
+                totalfee += txfee;
+            }
+            if (stats.count("minfee") != 0) {
+                minfee = std::min(minfee, txfee);
+            }
+            if (stats.count("maxfee") != 0) {
+                maxfee = std::max(maxfee, txfee);
+            }
+
+            // New feerate uses satoshis per virtual byte instead of per serialized byte
+            CAmount feerate = CFeeRate(txfee, weight).GetTruncatedFee(WITNESS_SCALE_FACTOR);
+            if (stats.count("medianfeerate") != 0) {
+                feerate_array.push_back(feerate);
+            }
+            if (stats.count("minfeerate") != 0) {
+                minfeerate = std::min(minfeerate, feerate);
+            }
+            if (stats.count("maxfeerate") != 0) {
+                maxfeerate = std::max(maxfeerate, feerate);
+            }
+        }
     }
 
     for (const std::string& stat : stats) {
@@ -1829,7 +1909,7 @@ UniValue getblockstats(const JSONRPCRequest& request)
             "  \"txs\": xxxxx,             (numeric) The number of transactions (excluding coinbase).\n"
             "  \"swtxs\": xxxxx,           (numeric) The number of segwit transactions.\n"
             "  \"ins\": xxxxx,             (numeric) The number of inputs (excluding coinbase).\n"
-            "  \"outs\": xxxxx,            (numeric) The number of outputs (including coinbase).\n"
+            "  \"outs\": xxxxx,            (numeric) The number of outputs.\n"
             "  \"subsidy\": xxxxx,         (numeric) The block subsidy.\n"
             "  \"totalfee\": xxxxx,        (numeric) The fee total.\n"
             "  \"utxo_increase\": xxxxx,   (numeric) The increase/decrease in the number of unspent outputs.\n"
