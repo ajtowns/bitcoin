@@ -1642,7 +1642,7 @@ static T CalculateTruncatedMedian(std::vector<T>& scores)
 // outpoint (needed for the utxo index) + nHeight + fCoinBase
 static const size_t PER_UTXO_OVERHEAD = sizeof(COutPoint) + sizeof(uint32_t) + sizeof(bool);
 
-static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pindex, const std::set<std::string>& stats)
+static std::map<std::string, UniValue> GetBlockStatsMap(const CBlock& block, const CBlockIndex* pindex, const std::set<std::string>& stats)
 {
     std::map<std::string, UniValue> map_stats;
     int64_t inputs = 0;
@@ -1664,8 +1664,6 @@ static std::map<std::string, UniValue> GetBlockStatsMap(const CBlockIndex* pinde
     int64_t mintxsize = MAX_BLOCK_SERIALIZED_SIZE;
     int64_t maxtxsize = 0;
     std::vector<int64_t> txsize_array;
-
-    CBlock block = GetBlockChecked(pindex);
 
     const bool is_loop_outputs_required = stats.count("total_out") != 0 || stats.count("utxo_size_inc") != 0 ||
         stats.count("totalfee") != 0 || stats.count("avgfee") != 0 || stats.count("avgfeerate") != 0 ||
@@ -1927,7 +1925,10 @@ UniValue getblockstats(const JSONRPCRequest& request)
         stats = valid_stats;
     }
 
-    std::map<std::string, UniValue> map_stats = GetBlockStatsMap(chainActive[height], stats);
+    const CBlockIndex* pblockindex = chainActive[height];
+    const CBlock block = GetBlockChecked(pblockindex);
+    std::map<std::string, UniValue> map_stats = GetBlockStatsMap(block, pblockindex, stats);
+
     UniValue ret(UniValue::VOBJ);
     for (const std::string stat : stats) {
         ret.push_back(Pair(stat, map_stats[stat]));
