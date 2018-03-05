@@ -232,7 +232,7 @@ protected:
 
     void ReadConfigStream(std::istream& streamConfig);
 public:
-    ArgsManager(void);
+    ArgsManager();
 
     void ParseParameters(int argc, const char*const argv[]);
     void ReadConfigFile(const std::string& confPath);
