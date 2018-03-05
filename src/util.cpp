@@ -464,45 +464,48 @@ public:
     /** Return true/false if an argument is set in a map, and also
      *  return the first (or last) of the possibly multiple values it has
      */
-    static inline bool GetArgHelper(std::string* result, const map_args& mapArgs, const std::string& strArg, bool getLast = false)
+    static inline std::pair<bool,std::string> GetArgHelper(const map_args& mapArgs, const std::string& strArg, bool getLast = false)
     {
         auto it = mapArgs.find(strArg);
 
         if (it == mapArgs.end() || it->second.empty())
-            return false;
+            return std::make_pair(false, std::string());
 
-        if (result != nullptr) {
-            if (getLast) {
-                *result = it->second.back();
-            } else {
-                *result = it->second.front();
-            }
+        if (getLast) {
+            return std::make_pair(true, it->second.back());
+        } else {
+            return std::make_pair(true, it->second.front());
         }
-
-        return true;
     }
 
     /* Get the string value of an argument, returning true if found, or
      * false if not found.
      */
-    static inline bool GetArg(const ArgsManager &am, std::string* result, const std::string& strArg)
+    static inline std::pair<bool,std::string> GetArg(const ArgsManager &am, const std::string& strArg)
     {
         LOCK(am.cs_args);
+	std::pair<bool,std::string> found_result(false, std::string());
 
-        if (GetArgHelper(result, am.m_mapOverrideArgs, strArg, true))
-            return true;
+	found_result = GetArgHelper(am.m_mapOverrideArgs, strArg, true);
+	if (found_result.first) {
+	    return found_result;
+	}
 
         if (!am.m_strSection.empty()) {
-            if (GetArgHelper(result, am.m_mapConfigArgs, SectionArg(am, strArg)))
-                return true;
+            found_result = GetArgHelper(am.m_mapConfigArgs, SectionArg(am, strArg));
+	    if (found_result.first) {
+	        return found_result;
+	    }
         }
 
         if (UseDefaultSection(am, strArg)) {
-            if (GetArgHelper(result, am.m_mapConfigArgs, strArg))
-                return true;
+	    found_result = GetArgHelper(am.m_mapConfigArgs, strArg);
+            if (found_result.first) {
+                return found_result;
+	    }
         }
 
-        return false;
+        return found_result;
     }
 
     /* Special test for -testnet and -regtest args, because we
@@ -510,13 +513,15 @@ public:
      */
     static inline bool GetNetBoolArg(const ArgsManager &am, const std::string& strNetArg)
     {
-        std::string v;
-        if (!GetArgHelper(&v, am.m_mapOverrideArgs, strNetArg, true)) {
-            if (!GetArgHelper(&v, am.m_mapConfigArgs, strNetArg, true)) {
+	std::pair<bool,std::string> found_result(false,std::string());
+        found_result = GetArgHelper(am.m_mapOverrideArgs, strNetArg, true);
+	if (!found_result.first) {
+            found_result = GetArgHelper(am.m_mapConfigArgs, strNetArg, true);
+	    if (!found_result.first) {
                 return false; // not set
             }
         }
-        return InterpretBool(v); // is set, so evaluate
+        return InterpretBool(found_result.second); // is set, so evaluate
     }
 };
 
@@ -591,34 +596,37 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 
 bool ArgsManager::IsArgSet(const std::string& strArg) const
 {
-    return ArgsManagerHelper::GetArg(*this, nullptr, strArg);
+    return ArgsManagerHelper::GetArg(*this, strArg).first;
 }
 
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
-    std::string res;
-    if (ArgsManagerHelper::GetArg(*this, &res, strArg))
-        return res;
-    else
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return found_res.second;
+    } else {
         return strDefault;
+    }
 }
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
-    std::string res;
-    if (ArgsManagerHelper::GetArg(*this, &res, strArg))
-        return atoi64(res);
-    else
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return atoi64(found_res.second);
+    } else {
         return nDefault;
+    }
 }
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
-    std::string res;
-    if (ArgsManagerHelper::GetArg(*this, &res, strArg))
-        return InterpretBool(res);
-    else
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return InterpretBool(found_res.second);
+    } else {
         return fDefault;
+    }
 }
 
 bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
