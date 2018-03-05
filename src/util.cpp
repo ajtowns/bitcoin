@@ -440,12 +440,7 @@ class ArgsManagerHelper {
 public:
     inline static bool UseDefaultSection(const ArgsManager& am, const std::string& strArg)
     {
-        if (am.m_strSection == CBaseChainParams::MAIN)
-            return true;
-        else if (am.m_setSectionOnlyArgs.count(strArg) == 0)
-            return true;
-        else
-            return false;
+        return (am.m_strSection == CBaseChainParams::MAIN || am.m_setSectionOnlyArgs.count(strArg) == 0);
     }
 
     typedef std::map<std::string, std::vector<std::string>> map_args;
