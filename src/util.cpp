@@ -454,9 +454,60 @@ static bool InterpretBool(const std::string& strValue)
     return (atoi(strValue) != 0);
 }
 
+/** Internal helper functions for ArgsManager */
 struct ArgsManagerHelper {
+    typedef std::map<std::string, std::vector<std::string>> MapArgs;
+
     // Munge -nofoo into -foo=0 and track the value as negated.
     static void InterpretNegatedOption(ArgsManager& am, std::string &key, std::string &val);
+
+    /** Find arguments in a map and add them to a vector */
+    inline static void AddArgs(std::vector<std::string>& res, const MapArgs& map_args, const std::string& arg)
+    {
+        auto it = map_args.find(arg);
+        if (it != map_args.end()) {
+            res.insert(res.end(), it->second.begin(), it->second.end());
+        }
+    }
+
+    /** Return true/false if an argument is set in a map, and also
+     *  return the first (or last) of the possibly multiple values it has
+     */
+    static inline std::pair<bool,std::string> GetArgHelper(const MapArgs& map_args, const std::string& arg, bool getLast = false)
+    {
+        auto it = map_args.find(arg);
+
+        if (it == map_args.end() || it->second.empty()) {
+            return std::make_pair(false, std::string());
+        }
+
+        if (getLast) {
+            return std::make_pair(true, it->second.back());
+        } else {
+            return std::make_pair(true, it->second.front());
+        }
+    }
+
+    /* Get the string value of an argument, returning true if found, or
+     * false if not found.
+     */
+    static inline std::pair<bool,std::string> GetArg(const ArgsManager &am, const std::string& arg)
+    {
+        LOCK(am.cs_args);
+        std::pair<bool,std::string> found_result(false, std::string());
+
+        found_result = GetArgHelper(am.m_override_args, arg, true);
+        if (found_result.first) {
+            return found_result;
+        }
+
+        found_result = GetArgHelper(am.m_config_args, arg);
+        if (found_result.first) {
+            return found_result;
+        }
+
+        return found_result;
+    }
 };
 
 /**
@@ -489,8 +540,7 @@ void ArgsManagerHelper::InterpretNegatedOption(ArgsManager& am, std::string& key
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
 {
     LOCK(cs_args);
-    mapArgs.clear();
-    mapMultiArgs.clear();
+    m_override_args.clear();
     m_negated_args.clear();
 
     for (int i = 1; i < argc; i++) {
@@ -517,23 +567,23 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
         // Transform -nofoo to -foo=0
         ArgsManagerHelper::InterpretNegatedOption(*this, key, val);
 
-        mapArgs[key] = val;
-        mapMultiArgs[key].push_back(val);
+        m_override_args[key].push_back(val);
     }
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 {
+    std::vector<std::string> result = {};
+
     LOCK(cs_args);
-    auto it = mapMultiArgs.find(strArg);
-    if (it != mapMultiArgs.end()) return it->second;
-    return {};
+    ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
+    ArgsManagerHelper::AddArgs(result, m_config_args, strArg);
+    return result;
 }
 
 bool ArgsManager::IsArgSet(const std::string& strArg) const
 {
-    LOCK(cs_args);
-    return mapArgs.count(strArg);
+    return ArgsManagerHelper::GetArg(*this, strArg).first;
 }
 
 bool ArgsManager::IsArgNegated(const std::string& strArg) const
@@ -544,26 +594,32 @@ bool ArgsManager::IsArgNegated(const std::string& strArg) const
 
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return it->second;
-    return strDefault;
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return found_res.second;
+    } else {
+        return strDefault;
+    }
 }
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return atoi64(it->second);
-    return nDefault;
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return atoi64(found_res.second);
+    } else {
+        return nDefault;
+    }
 }
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
-    LOCK(cs_args);
-    auto it = mapArgs.find(strArg);
-    if (it != mapArgs.end()) return InterpretBool(it->second);
-    return fDefault;
+    std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
+    if (found_res.first) {
+        return InterpretBool(found_res.second);
+    } else {
+        return fDefault;
+    }
 }
 
 bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
@@ -585,8 +641,7 @@ bool ArgsManager::SoftSetBoolArg(const std::string& strArg, bool fValue)
 void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strValue)
 {
     LOCK(cs_args);
-    mapArgs[strArg] = strValue;
-    mapMultiArgs[strArg] = {strValue};
+    m_override_args[strArg] = {strValue};
 }
 
 bool HelpRequested(const ArgsManager& args)
@@ -754,14 +809,17 @@ void ArgsManager::ReadConfigStream(std::istream& stream)
         std::string strKey = std::string("-") + it->string_key;
         std::string strValue = it->value[0];
         ArgsManagerHelper::InterpretNegatedOption(*this, strKey, strValue);
-        if (mapArgs.count(strKey) == 0)
-            mapArgs[strKey] = strValue;
-        mapMultiArgs[strKey].push_back(strValue);
+        m_config_args[strKey].push_back(strValue);
     }
 }
 
 void ArgsManager::ReadConfigFile(const std::string& confPath)
 {
+    {
+        LOCK(cs_args);
+        m_config_args.clear();
+    }
+
     fs::ifstream stream(GetConfigFile(confPath));
 
     // ok to not have a config file
