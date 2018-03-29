@@ -458,6 +458,13 @@ static bool InterpretBool(const std::string& strValue)
 struct ArgsManagerHelper {
     typedef std::map<std::string, std::vector<std::string>> MapArgs;
 
+    /** Determine whether to use config settings in the default section,
+     *  See also comments around ArgsManager::ArgsManager() below. */
+    inline static bool UseDefaultSection(const ArgsManager& am, const std::string& arg)
+    {
+        return (am.m_section == CBaseChainParams::MAIN || am.m_section_only_args.count(arg) == 0);
+    }
+
     /** Convert regular argument into the section-specific setting */
     inline static std::string SectionArg(const ArgsManager& am, const std::string& arg)
     {
@@ -512,9 +519,11 @@ struct ArgsManagerHelper {
             }
         }
 
-        found_result = GetArgHelper(am.m_config_args, arg);
-        if (found_result.first) {
-            return found_result;
+        if (UseDefaultSection(am, arg)) {
+            found_result = GetArgHelper(am.m_config_args, arg);
+            if (found_result.first) {
+                return found_result;
+            }
         }
 
         return found_result;
@@ -553,6 +562,22 @@ static bool InterpretNegatedOption(std::string& key, std::string& val)
         }
     }
     return false;
+}
+
+ArgsManager::ArgsManager() :
+    /* These options would cause cross-contamination if values for
+     * mainnet were used while running on regtest/testnet (or vice-versa).
+     * Setting them as section_only_args ensures that sharing a config file
+     * between mainnet and regtest/testnet won't cause problems due to these
+     * parameters by accident. */
+    m_section_only_args{
+      "-addnode", "-connect",
+      "-port", "-bind",
+      "-rpcport", "-rpcbind",
+      "-wallet",
+    }
+{
+    // nothing to do
 }
 
 void ArgsManager::SelectConfigSection(const std::string& section)
@@ -600,11 +625,17 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
     std::vector<std::string> result = {};
 
     LOCK(cs_args);
+
     ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
+
     if (!m_section.empty()) {
         ArgsManagerHelper::AddArgs(result, m_config_args, ArgsManagerHelper::SectionArg(*this, strArg));
     }
-    ArgsManagerHelper::AddArgs(result, m_config_args, strArg);
+
+    if (ArgsManagerHelper::UseDefaultSection(*this, strArg)) {
+        ArgsManagerHelper::AddArgs(result, m_config_args, strArg);
+    }
+
     return result;
 }
 
