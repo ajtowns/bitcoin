@@ -305,6 +305,12 @@ public:
     // been set. Also called directly in testing.
     void ForceSetArg(const std::string& strArg, const std::string& strValue);
 
+    /**
+     * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.
+     * @return CBaseChainParams::MAX_NETWORK_TYPES if an invalid combination is given. CBaseChainParams::MAIN by default.
+     */
+    std::string ChainNameFromCommandLine() const;
+
 private:
 
     // Munge -nofoo into -foo=0 and track the value as negated.
