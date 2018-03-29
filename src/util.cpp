@@ -580,6 +580,34 @@ ArgsManager::ArgsManager() :
     // nothing to do
 }
 
+void ArgsManager::WarnForSectionOnlyArgs()
+{
+    // if there's no section selected, don't worry
+    if (m_section.empty()) return;
+
+    for (const auto& arg : m_section_only_args) {
+        // if it's okay to use the default section for this chain, don't worry
+        if (ArgsManagerHelper::UseDefaultSection(*this, arg)) return;
+
+        std::pair<bool, std::string> found_result;
+
+        // if this option is overridden it's fine
+        found_result = ArgsManagerHelper::GetArgHelper(m_override_args, arg);
+        if (found_result.first) continue;
+
+        // if there's a section-specific value for this option, it's fine
+        found_result = ArgsManagerHelper::GetArgHelper(m_config_args, ArgsManagerHelper::SectionArg(*this, arg));
+        if (found_result.first) continue;
+
+        // if there isn't a default value for this option, it's fine
+        found_result = ArgsManagerHelper::GetArgHelper(m_config_args, arg);
+        if (!found_result.first) continue;
+
+        // otherwise, issue a warning
+        LogPrintf("Warning: Config setting for %s only applied on %s network when in [%s] section.\n", arg, m_section, m_section);
+    }
+}
+
 void ArgsManager::SelectConfigSection(const std::string& section)
 {
     m_section = section;
