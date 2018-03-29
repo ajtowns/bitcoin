@@ -509,7 +509,8 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     const char* argv_both[] = {"cmd", "-testnet", "-regtest"};
 
     // equivalent to "-testnet"
-    const char* testnetconf = "testnet=1\nregtest=0\n";
+    // regtest in testnet section is ignored
+    const char* testnetconf = "testnet=1\nregtest=0\n[test]\nregtest=1";
 
     test_args.ParseParameters(0, (char**)argv_testnet);
     BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "main");
@@ -523,20 +524,29 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     test_args.ParseParameters(3, (char**)argv_test_no_reg);
     BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
 
-    test_args.ParseParameters(3, (char**)argv_both);
-    BOOST_CHECK_THROW(test_args.ChainNameFromCommandLine(), std::runtime_error);
-
     test_args.ParseParameters(0, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+    // check setting the ConfigSection to test (and thus making
+    // [test] regtest=1 potentially relevent) doesn't break things
+    test_args.SelectConfigSection("test");
+    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+
+    test_args.ParseParameters(2, (char**)argv_testnet);
+    test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+    test_args.SelectConfigSection("test");
     BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
 
     test_args.ParseParameters(2, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
 
-    test_args.ParseParameters(2, (char**)argv_regtest);
+    test_args.ParseParameters(3, (char**)argv_test_no_reg);
     test_args.ReadConfigString(testnetconf);
-    BOOST_CHECK_THROW(test_args.ChainNameFromCommandLine(), std::runtime_error);
+    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+    test_args.SelectConfigSection("test");
+    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
 
     test_args.ParseParameters(3, (char**)argv_test_no_reg);
     test_args.ReadConfigString(testnetconf);
