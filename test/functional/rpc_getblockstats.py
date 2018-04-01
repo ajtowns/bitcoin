@@ -62,7 +62,7 @@ class GetblockstatsTest(BitcoinTestFramework):
         parser.add_option("--gen-test-data", dest="gen_test_data",
                           default=False, action="store_true",
                           help="Generate test data")
-        parser.add_option("--test-data", dest="test_data", 
+        parser.add_option("--test-data", dest="test_data",
                           default="data/rpc_getblockstats.json",
                           action="store", metavar="FILE",
                           help="Test data file")
