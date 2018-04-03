@@ -454,6 +454,11 @@ static bool InterpretBool(const std::string& strValue)
     return (atoi(strValue) != 0);
 }
 
+struct ArgsManagerHelper {
+    // Munge -nofoo into -foo=0 and track the value as negated.
+    static void InterpretNegatedOption(ArgsManager& am, std::string &key, std::string &val);
+};
+
 /**
  * Interpret -nofoo as if the user supplied -foo=0.
  *
@@ -463,7 +468,7 @@ static bool InterpretBool(const std::string& strValue)
  * options that are not normally boolean (e.g. using -nodebuglogfile to request
  * that debug log output is not sent to any file at all).
  */
-void ArgsManager::InterpretNegatedOption(std::string& key, std::string& val)
+void ArgsManagerHelper::InterpretNegatedOption(ArgsManager& am, std::string& key, std::string& val)
 {
     if (key.substr(0, 3) == "-no") {
         bool bool_val = InterpretBool(val);
@@ -472,12 +477,12 @@ void ArgsManager::InterpretNegatedOption(std::string& key, std::string& val)
             LogPrintf("Warning: parsed potentially confusing double-negative %s=%s\n", key, val);
         }
         key.erase(1, 2);
-        m_negated_args.insert(key);
+        am.m_negated_args.insert(key);
         val = bool_val ? "0" : "1";
     } else {
         // In an invocation like "bitcoind -nofoo -foo" we want to unmark -foo
         // as negated when we see the second option.
-        m_negated_args.erase(key);
+        am.m_negated_args.erase(key);
     }
 }
 
@@ -510,7 +515,7 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
             key.erase(0, 1);
 
         // Transform -nofoo to -foo=0
-        InterpretNegatedOption(key, val);
+        ArgsManagerHelper::InterpretNegatedOption(*this, key, val);
 
         mapArgs[key] = val;
         mapMultiArgs[key].push_back(val);
@@ -748,7 +753,7 @@ void ArgsManager::ReadConfigStream(std::istream& stream)
         // Don't overwrite existing settings so command line settings override bitcoin.conf
         std::string strKey = std::string("-") + it->string_key;
         std::string strValue = it->value[0];
-        InterpretNegatedOption(strKey, strValue);
+        ArgsManagerHelper::InterpretNegatedOption(*this, strKey, strValue);
         if (mapArgs.count(strKey) == 0)
             mapArgs[strKey] = strValue;
         mapMultiArgs[strKey].push_back(strValue);

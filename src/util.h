@@ -222,6 +222,8 @@ inline bool IsSwitchChar(char c)
 class ArgsManager
 {
 protected:
+    friend class ArgsManagerHelper;
+
     mutable CCriticalSection cs_args;
     std::map<std::string, std::string> mapArgs;
     std::map<std::string, std::vector<std::string>> mapMultiArgs;
@@ -312,11 +314,6 @@ public:
      * @return CBaseChainParams::MAX_NETWORK_TYPES if an invalid combination is given. CBaseChainParams::MAIN by default.
      */
     std::string ChainNameFromCommandLine() const;
-
-private:
-
-    // Munge -nofoo into -foo=0 and track the value as negated.
-    void InterpretNegatedOption(std::string &key, std::string &val);
 };
 
 extern ArgsManager gArgs;
