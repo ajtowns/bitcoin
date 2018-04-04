@@ -737,7 +737,6 @@ fs::path GetConfigFile(const std::string& confPath)
 
 void ArgsManager::ReadConfigStream(std::istream& stream)
 {
-    // assert(streamConfig.good());
     LOCK(cs_args);
 
     std::set<std::string> setOptions;
