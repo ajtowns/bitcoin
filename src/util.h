@@ -309,7 +309,7 @@ public:
 
     /**
      * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.
-     * @return CBaseChainParams::MAX_NETWORK_TYPES if an invalid combination is given. CBaseChainParams::MAIN by default.
+     * @return CBaseChainParams::MAIN by default; raises runtime error if an invalid combination is given.
      */
     std::string ChainNameFromCommandLine() const;
 
