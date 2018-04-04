@@ -316,7 +316,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
        "d=e\n"
        "nofff=1\n"
        "noggg=0\n"
-       "h=1\n"    // negated edge cases in config behave very oddly
+       "h=1\n"
        "noh=1\n"
        "noi=1\n"
        "i=1\n";
@@ -324,7 +324,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     TestArgsManager test_args;
 
     test_args.ReadConfigString(str_config);
-    // expectation: a, b, ccc, d, fff, ggg end up in map
+    // expectation: a, b, ccc, d, fff, ggg, h, i end up in map
 
     BOOST_CHECK(test_args.GetMapArgs().size() == 8);
     BOOST_CHECK(test_args.GetMapMultiArgs().size() == 8);
@@ -361,8 +361,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
                 && test_args.GetArg("-zzz", "xxx") == "xxx"
                );
 
-    for (int i = 0; i < 2; i++) {
-        bool def = (i > 0);
+    for (bool def : {false, true}) {
         BOOST_CHECK(test_args.GetBoolArg("-a", def)
                      && test_args.GetBoolArg("-b", def)
                      && !test_args.GetBoolArg("-ccc", def)
@@ -377,12 +376,17 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
 
     BOOST_CHECK(test_args.GetArgs("-a").size() == 1
                 && test_args.GetArgs("-a").front() == "");
+    BOOST_CHECK(test_args.GetArgs("-b").size() == 1
+                && test_args.GetArgs("-b").front() == "1");
     BOOST_CHECK(test_args.GetArgs("-ccc").size() == 2
                 && test_args.GetArgs("-ccc").front() == "argument"
                 && test_args.GetArgs("-ccc").back() == "multiple");
     BOOST_CHECK(test_args.GetArgs("-fff").size() == 1
                 && test_args.GetArgs("-fff").front() == "0");
     BOOST_CHECK(test_args.GetArgs("-nofff").size() == 0);
+    BOOST_CHECK(test_args.GetArgs("-ggg").size() == 1
+                && test_args.GetArgs("-ggg").front() == "1");
+    BOOST_CHECK(test_args.GetArgs("-noggg").size() == 0);
     BOOST_CHECK(test_args.GetArgs("-h").size() == 2
                 && test_args.GetArgs("-h").front() == "1"
                 && test_args.GetArgs("-h").back() == "0");
