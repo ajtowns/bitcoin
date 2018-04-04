@@ -458,6 +458,13 @@ static bool InterpretBool(const std::string& strValue)
 struct ArgsManagerHelper {
     typedef std::map<std::string, std::vector<std::string>> MapArgs;
 
+    /** Convert regular argument into the section-specific setting */
+    inline static std::string SectionArg(const ArgsManager& am, const std::string& arg)
+    {
+        assert(arg.length() > 1 && arg[0] == '-');
+        return "-" + am.m_section + "." + arg.substr(1);
+    }
+
     /** Find arguments in a map and add them to a vector */
     inline static void AddArgs(std::vector<std::string>& res, const MapArgs& map_args, const std::string& arg)
     {
@@ -498,6 +505,13 @@ struct ArgsManagerHelper {
             return found_result;
         }
 
+        if (!am.m_section.empty()) {
+            found_result = GetArgHelper(am.m_config_args, SectionArg(am, arg));
+            if (found_result.first) {
+                return found_result;
+            }
+        }
+
         found_result = GetArgHelper(am.m_config_args, arg);
         if (found_result.first) {
             return found_result;
@@ -531,6 +545,11 @@ static bool InterpretNegatedOption(std::string& key, std::string& val)
         }
     }
     return false;
+}
+
+void ArgsManager::SelectConfigSection(const std::string& section)
+{
+    m_section = section;
 }
 
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
@@ -574,6 +593,9 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 
     LOCK(cs_args);
     ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
+    if (!m_section.empty()) {
+        ArgsManagerHelper::AddArgs(result, m_config_args, ArgsManagerHelper::SectionArg(*this, strArg));
+    }
     ArgsManagerHelper::AddArgs(result, m_config_args, strArg);
     return result;
 }
