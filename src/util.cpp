@@ -460,6 +460,13 @@ class ArgsManagerHelper {
 public:
     typedef std::map<std::string, std::vector<std::string>> MapArgs;
 
+    /** Convert regular argument into the section-specific setting */
+    inline static std::string SectionArg(const ArgsManager& am, const std::string& arg)
+    {
+        assert(arg.length() > 1 && arg[0] == '-');
+        return "-" + am.m_section + "." + arg.substr(1);
+    }
+
     /** Find arguments in a map and add them to a vector */
     inline static void AddArgs(std::vector<std::string>& res, const MapArgs& map_args, const std::string& arg)
     {
@@ -500,6 +507,13 @@ public:
             return found_result;
         }
 
+        if (!am.m_section.empty()) {
+            found_result = GetArgHelper(am.m_config_args, SectionArg(am, arg));
+            if (found_result.first) {
+                return found_result;
+            }
+        }
+
         found_result = GetArgHelper(am.m_config_args, arg);
         if (found_result.first) {
             return found_result;
@@ -520,9 +534,17 @@ public:
  */
 static bool InterpretNegatedOption(std::string& key, std::string& val)
 {
-    if (key.substr(0, 3) == "-no") {
+    assert(key[0] == '-');
+
+    size_t option_index = key.find('.');
+    if (option_index == std::string::npos) {
+        option_index = 1;
+    } else {
+        ++option_index;
+    }
+    if (key.substr(option_index, 2) == "no") {
         bool bool_val = InterpretBool(val);
-        key.erase(1, 2);
+        key.erase(option_index, 2);
         if (!bool_val ) {
             // Double negatives like -nofoo=0 are supported (but discouraged)
             LogPrintf("Warning: parsed potentially confusing double-negative %s=%s\n", key, val);
@@ -533,6 +555,11 @@ static bool InterpretNegatedOption(std::string& key, std::string& val)
         }
     }
     return false;
+}
+
+void ArgsManager::SelectConfigSection(const std::string& section)
+{
+    m_section = section;
 }
 
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
@@ -577,6 +604,9 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 
     LOCK(cs_args);
     ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
+    if (!m_section.empty()) {
+        ArgsManagerHelper::AddArgs(result, m_config_args, ArgsManagerHelper::SectionArg(*this, strArg));
+    }
     ArgsManagerHelper::AddArgs(result, m_config_args, strArg);
     return result;
 }
@@ -593,6 +623,11 @@ bool ArgsManager::IsArgNegated(const std::string& strArg) const
 
     const auto& ov = m_override_args.find(strArg);
     if (ov != m_override_args.end()) return ov->second.empty();
+
+    if (!m_section.empty()) {
+        const auto& cfs = m_config_args.find(ArgsManagerHelper::SectionArg(*this, strArg));
+        if (cfs != m_config_args.end()) return cfs->second.empty();
+    }
 
     const auto& cf = m_config_args.find(strArg);
     if (cf != m_config_args.end()) return cf->second.empty();
