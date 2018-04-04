@@ -518,29 +518,27 @@ public:
  * options that are not normally boolean (e.g. using -nodebuglogfile to request
  * that debug log output is not sent to any file at all).
  */
-void ArgsManager::InterpretNegatedOption(std::string& key, std::string& val)
+static bool InterpretNegatedOption(std::string& key, std::string& val)
 {
     if (key.substr(0, 3) == "-no") {
         bool bool_val = InterpretBool(val);
+        key.erase(1, 2);
         if (!bool_val ) {
             // Double negatives like -nofoo=0 are supported (but discouraged)
             LogPrintf("Warning: parsed potentially confusing double-negative %s=%s\n", key, val);
+            val = "1";
+        } else {
+            val = "0";
+            return true;
         }
-        key.erase(1, 2);
-        m_negated_args.insert(key);
-        val = bool_val ? "0" : "1";
-    } else {
-        // In an invocation like "bitcoind -nofoo -foo" we want to unmark -foo
-        // as negated when we see the second option.
-        m_negated_args.erase(key);
     }
+    return false;
 }
 
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
 {
     LOCK(cs_args);
     m_override_args.clear();
-    m_negated_args.clear();
 
     for (int i = 1; i < argc; i++) {
         std::string key(argv[i]);
@@ -564,15 +562,18 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
             key.erase(0, 1);
 
         // Transform -nofoo to -foo=0
-        InterpretNegatedOption(key, val);
-
-        m_override_args[key].push_back(val);
+        if (InterpretNegatedOption(key, val)) {
+            m_override_args[key].clear();
+        } else {
+            m_override_args[key].push_back(val);
+        }
     }
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 {
     std::vector<std::string> result = {};
+    if (IsArgNegated(strArg)) return result; // special case
 
     LOCK(cs_args);
     ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
@@ -582,17 +583,26 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 
 bool ArgsManager::IsArgSet(const std::string& strArg) const
 {
+    if (IsArgNegated(strArg)) return true; // special case
     return ArgsManagerHelper::GetArg(*this, strArg).first;
 }
 
 bool ArgsManager::IsArgNegated(const std::string& strArg) const
 {
     LOCK(cs_args);
-    return m_negated_args.find(strArg) != m_negated_args.end();
+
+    const auto& ov = m_override_args.find(strArg);
+    if (ov != m_override_args.end()) return ov->second.empty();
+
+    const auto& cf = m_config_args.find(strArg);
+    if (cf != m_config_args.end()) return cf->second.empty();
+
+    return false;
 }
 
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
+    if (IsArgNegated(strArg)) return "0";
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
     if (found_res.first) {
         return found_res.second;
@@ -603,6 +613,7 @@ std::string ArgsManager::GetArg(const std::string& strArg, const std::string& st
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
+    if (IsArgNegated(strArg)) return 0;
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
     if (found_res.first) {
         return atoi64(found_res.second);
@@ -613,6 +624,7 @@ int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
+    if (IsArgNegated(strArg)) return false;
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
     if (found_res.first) {
         return InterpretBool(found_res.second);
@@ -806,8 +818,11 @@ void ArgsManager::ReadConfigStream(std::istream& stream)
         // Don't overwrite existing settings so command line settings override bitcoin.conf
         std::string strKey = std::string("-") + it->string_key;
         std::string strValue = it->value[0];
-        InterpretNegatedOption(strKey, strValue);
-        m_config_args[strKey].push_back(strValue);
+        if (InterpretNegatedOption(strKey, strValue)) {
+            m_config_args[strKey].clear();
+        } else {
+            m_config_args[strKey].push_back(strValue);
+        }
     }
 }
 
