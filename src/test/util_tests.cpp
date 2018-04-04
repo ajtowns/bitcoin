@@ -187,6 +187,7 @@ BOOST_AUTO_TEST_CASE(util_FormatISO8601Time)
 
 struct TestArgsManager : public ArgsManager
 {
+    TestArgsManager() { m_section_only_args.clear(); }
     std::map<std::string, std::vector<std::string> >& GetOverrideArgs() { return m_override_args; }
     std::map<std::string, std::vector<std::string> >& GetConfigArgs() { return m_config_args; }
     void ReadConfigString(const std::string str_config)
@@ -197,6 +198,11 @@ struct TestArgsManager : public ArgsManager
             m_config_args.clear();
         }
         ReadConfigStream(streamConfig);
+    }
+    void SetSectionOnlyArg(const std::string arg)
+    {
+        LOCK(cs_args);
+        m_section_only_args.insert(arg);
     }
 };
 
@@ -328,6 +334,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
        "\n"
        "[sec1]\n"
        "ccc=extend2\n"
+       "d=eee\n"
        "h=1\n"
        "[sec2]\n"
        "ccc=extend3\n"
@@ -337,10 +344,10 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
 
     test_args.ReadConfigString(str_config);
     // expectation: a, b, ccc, d, fff, ggg, h, i end up in map
-    // so do sec1.ccc, sec1.h, sec2.ccc, sec2.iii
+    // so do sec1.ccc, sec1.d, sec1.h, sec2.ccc, sec2.iii
 
     BOOST_CHECK(test_args.GetOverrideArgs().empty());
-    BOOST_CHECK(test_args.GetConfigArgs().size() == 12);
+    BOOST_CHECK(test_args.GetConfigArgs().size() == 13);
 
     BOOST_CHECK(test_args.GetConfigArgs().count("-a")
                 && test_args.GetConfigArgs().count("-b")
@@ -430,12 +437,13 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     // same as original
     BOOST_CHECK(test_args.GetArg("-a", "xxx") == ""
                 && test_args.GetArg("-b", "xxx") == "1"
-                && test_args.GetArg("-d", "xxx") == "e"
                 && test_args.GetArg("-fff", "xxx") == "0"
                 && test_args.GetArg("-ggg", "xxx") == "1"
                 && test_args.GetArg("-zzz", "xxx") == "xxx"
                 && test_args.GetArg("-iii", "xxx") == "xxx"
                );
+    // d is overridden
+    BOOST_CHECK(test_args.GetArg("-d", "xxx") == "eee");
     // section-specific setting
     BOOST_CHECK(test_args.GetArg("-h", "xxx") == "1");
     // section takes priority for multiple values
@@ -464,6 +472,29 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     const std::vector<std::string> sec2_ccc_expected = {"extend3","argument","multiple"};
     const auto& sec2_ccc_res = test_args.GetArgs("-ccc");
     BOOST_CHECK_EQUAL_COLLECTIONS(sec2_ccc_res.begin(), sec2_ccc_res.end(), sec2_ccc_expected.begin(), sec2_ccc_expected.end());
+
+    // Test section only options
+
+    test_args.SetSectionOnlyArg("-d");
+    test_args.SetSectionOnlyArg("-ccc");
+    test_args.SetSectionOnlyArg("-h");
+
+    test_args.SelectConfigSection(CBaseChainParams::MAIN);
+    BOOST_CHECK(test_args.GetArg("-d", "xxx") == "e");
+    BOOST_CHECK(test_args.GetArgs("-ccc").size() == 2);
+    BOOST_CHECK(test_args.GetArg("-h", "xxx") == "0");
+
+    test_args.SelectConfigSection("sec1");
+    BOOST_CHECK(test_args.GetArg("-d", "xxx") == "eee");
+    BOOST_CHECK(test_args.GetArgs("-d").size() == 1);
+    BOOST_CHECK(test_args.GetArgs("-ccc").size() == 2);
+    BOOST_CHECK(test_args.GetArg("-h", "xxx") == "1");
+
+    test_args.SelectConfigSection("sec2");
+    BOOST_CHECK(test_args.GetArg("-d", "xxx") == "xxx");
+    BOOST_CHECK(test_args.GetArgs("-d").size() == 0);
+    BOOST_CHECK(test_args.GetArgs("-ccc").size() == 1);
+    BOOST_CHECK(test_args.GetArg("-h", "xxx") == "0");
 }
 
 BOOST_AUTO_TEST_CASE(util_GetArg)
