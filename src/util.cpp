@@ -770,7 +770,7 @@ void ArgsManager::ReadConfigFile(const std::string& confPath)
     }
 }
 
-std::string ArgsManager::ChainNameFromCommandLine() const
+std::string ArgsManager::GetChainName() const
 {
     bool fRegTest = GetBoolArg("-regtest", false);
     bool fTestNet = GetBoolArg("-testnet", false);

@@ -311,7 +311,7 @@ public:
      * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.
      * @return CBaseChainParams::MAIN by default; raises runtime error if an invalid combination is given.
      */
-    std::string ChainNameFromCommandLine() const;
+    std::string GetChainName() const;
 
 private:
 
