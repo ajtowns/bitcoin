@@ -433,7 +433,7 @@ BOOST_AUTO_TEST_CASE(util_GetArg)
     BOOST_CHECK_EQUAL(testArgs.GetBoolArg("booltest4", false), true);
 }
 
-BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
+BOOST_AUTO_TEST_CASE(util_GetChainName)
 {
     TestArgsManager test_args;
 
@@ -446,19 +446,19 @@ BOOST_AUTO_TEST_CASE(util_ChainNameFromCommandLine)
     const char* testnetconf = "testnet=1\nregtest=0\n";
 
     test_args.ParseParameters(0, (char**)argv_testnet);
-    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "main");
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "main");
 
     test_args.ParseParameters(2, (char**)argv_testnet);
-    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(2, (char**)argv_regtest);
-    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "regtest");
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "regtest");
 
     test_args.ParseParameters(3, (char**)argv_test_no_reg);
-    BOOST_CHECK_EQUAL(test_args.ChainNameFromCommandLine(), "test");
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(3, (char**)argv_both);
-    BOOST_CHECK_THROW(test_args.ChainNameFromCommandLine(), std::runtime_error);
+    BOOST_CHECK_THROW(test_args.GetChainName(), std::runtime_error);
 
     test_args.ParseParameters(0, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
