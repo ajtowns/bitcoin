@@ -293,7 +293,6 @@ BOOST_AUTO_TEST_CASE(util_GetBoolArgEdgeCases)
     BOOST_CHECK(!testArgs.IsArgNegated("-foo"));
     BOOST_CHECK(testArgs.GetArg("-foo", "xxx") == "1");
 
-    // A double negative is a positive.
     // A double negative is a positive, and does not count as negated.
     BOOST_CHECK(!testArgs.IsArgNegated("-bar"));
     BOOST_CHECK(testArgs.GetArg("-bar", "xxx") == "1");
