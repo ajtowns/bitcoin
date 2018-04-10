@@ -664,7 +664,7 @@ void ArgsManager::ParseParameters(int argc, const char* const argv[])
         if (key.length() > 1 && key[1] == '-')
             key.erase(0, 1);
 
-        // Transform -nofoo to -foo=0
+        // Check for -nofoo
         if (InterpretNegatedOption(key, val)) {
             m_override_args[key].clear();
         } else {
@@ -932,7 +932,6 @@ void ArgsManager::ReadConfigStream(std::istream& stream)
 
     for (boost::program_options::detail::config_file_iterator it(stream, setOptions), end; it != end; ++it)
     {
-        // Don't overwrite existing settings so command line settings override bitcoin.conf
         std::string strKey = std::string("-") + it->string_key;
         std::string strValue = it->value[0];
         if (InterpretNegatedOption(strKey, strValue)) {
