@@ -501,19 +501,26 @@ public:
         }
     }
 
-    /* Get the string value of an argument, returning true if found, or
-     * false if not found.
+    /* Get the string value of an argument, returning a pair of a boolean
+     * indicating the argument was found, and the value for the argument
+     * if it was found (or the empty string if not found).
      */
     static inline std::pair<bool,std::string> GetArg(const ArgsManager &am, const std::string& arg)
     {
         LOCK(am.cs_args);
         std::pair<bool,std::string> found_result(false, std::string());
 
+        // We pass "true" to GetArgHelper in order to return the last
+        // argument value seen from the command line (so "bitcoind -foo=bar
+        // -foo=baz" gives GetArg(am,"foo")=={true,"baz"}
         found_result = GetArgHelper(am.m_override_args, arg, true);
         if (found_result.first) {
             return found_result;
         }
 
+        // But in contrast we return the first argument seen in a config file,
+        // so "foo=bar \n foo=baz" in the config file gives
+        // GetArg(am,"foo")={true,"bar"}
         if (!am.m_section.empty()) {
             found_result = GetArgHelper(am.m_config_args, SectionArg(am, arg));
             if (found_result.first) {
