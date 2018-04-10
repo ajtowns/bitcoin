@@ -558,8 +558,20 @@ public:
 /**
  * Interpret -nofoo as if the user supplied -foo=0.
  *
- * This method also tracks when the -no form was supplied, and treats "-foo" as
- * a negated option when this happens. This can be later checked using the
+ * This method also tracks when the -no form was supplied, and if so,
+ * checks whether there was a double-negative (-nofoo=0 -> -foo=1).
+ *
+ * If there was not a double negative, it removes the "no" from the key,
+ * and returns true, indicating the caller should clear the args vector 
+ * to indicate a negated option.
+ *
+ * If there was a double negative, it removes "no" from the key, sets the
+ * value to "1" and returns false.
+ *
+ * If there was no "no", it leaves key and value untouched and returns
+ * false.
+ *
+ * Where an option was negated can be later checked using the
  * IsArgNegated() method. One use case for this is to have a way to disable
  * options that are not normally boolean (e.g. using -nodebuglogfile to request
  * that debug log output is not sent to any file at all).
@@ -582,7 +594,6 @@ static bool InterpretNegatedOption(std::string& key, std::string& val)
             LogPrintf("Warning: parsed potentially confusing double-negative %s=%s\n", key, val);
             val = "1";
         } else {
-            val = "0";
             return true;
         }
     }
