@@ -721,33 +721,24 @@ std::string ArgsManager::GetArg(const std::string& strArg, const std::string& st
 {
     if (IsArgNegated(strArg)) return "0";
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
-    if (found_res.first) {
-        return found_res.second;
-    } else {
-        return strDefault;
-    }
+    if (found_res.first) return found_res.second;
+    return strDefault;
 }
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
     if (IsArgNegated(strArg)) return 0;
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
-    if (found_res.first) {
-        return atoi64(found_res.second);
-    } else {
-        return nDefault;
-    }
+    if (found_res.first) return atoi64(found_res.second);
+    return nDefault;
 }
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
     if (IsArgNegated(strArg)) return false;
     std::pair<bool,std::string> found_res = ArgsManagerHelper::GetArg(*this, strArg);
-    if (found_res.first) {
-        return InterpretBool(found_res.second);
-    } else {
-        return fDefault;
-    }
+    if (found_res.first) return InterpretBool(found_res.second);
+    return fDefault;
 }
 
 bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
