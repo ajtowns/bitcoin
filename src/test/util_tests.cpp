@@ -565,28 +565,40 @@ BOOST_AUTO_TEST_CASE(util_GetChainName)
     test_args.ParseParameters(0, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    // check setting the config network to test (and thus making
+
+    test_args.ParseParameters(2, (char**)argv_testnet);
+    test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
+
+    test_args.ParseParameters(2, (char**)argv_regtest);
+    test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_THROW(test_args.GetChainName(), std::runtime_error);
+
+    test_args.ParseParameters(3, (char**)argv_test_no_reg);
+    test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
+
+    test_args.ParseParameters(3, (char**)argv_both);
+    test_args.ReadConfigString(testnetconf);
+    BOOST_CHECK_THROW(test_args.GetChainName(), std::runtime_error);
+
+    // check setting the network to test (and thus making
     // [test] regtest=1 potentially relevent) doesn't break things
     test_args.SelectConfigNetwork("test");
+
+    test_args.ParseParameters(0, (char**)argv_testnet);
+    test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(2, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    test_args.SelectConfigNetwork("test");
-    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
-    test_args.ParseParameters(2, (char**)argv_testnet);
+    test_args.ParseParameters(2, (char**)argv_regtest);
     test_args.ReadConfigString(testnetconf);
-    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
+    BOOST_CHECK_THROW(test_args.GetChainName(), std::runtime_error);
 
-    test_args.ParseParameters(3, (char**)argv_test_no_reg);
-    test_args.ReadConfigString(testnetconf);
-    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    test_args.SelectConfigNetwork("test");
-    BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-
-    test_args.ParseParameters(3, (char**)argv_test_no_reg);
+    test_args.ParseParameters(2, (char**)argv_test_no_reg);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
