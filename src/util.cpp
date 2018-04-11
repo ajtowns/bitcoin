@@ -562,7 +562,7 @@ public:
  * checks whether there was a double-negative (-nofoo=0 -> -foo=1).
  *
  * If there was not a double negative, it removes the "no" from the key,
- * and returns true, indicating the caller should clear the args vector 
+ * and returns true, indicating the caller should clear the args vector
  * to indicate a negated option.
  *
  * If there was a double negative, it removes "no" from the key, sets the
