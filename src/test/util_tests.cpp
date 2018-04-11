@@ -187,7 +187,7 @@ BOOST_AUTO_TEST_CASE(util_FormatISO8601Time)
 
 struct TestArgsManager : public ArgsManager
 {
-    TestArgsManager() { m_section_only_args.clear(); }
+    TestArgsManager() { m_network_only_args.clear(); }
     std::map<std::string, std::vector<std::string> >& GetOverrideArgs() { return m_override_args; }
     std::map<std::string, std::vector<std::string> >& GetConfigArgs() { return m_config_args; }
     void ReadConfigString(const std::string str_config)
@@ -199,10 +199,10 @@ struct TestArgsManager : public ArgsManager
         }
         ReadConfigStream(streamConfig);
     }
-    void SetSectionOnlyArg(const std::string arg)
+    void SetNetworkOnlyArg(const std::string arg)
     {
         LOCK(cs_args);
-        m_section_only_args.insert(arg);
+        m_network_only_args.insert(arg);
     }
 };
 
@@ -431,7 +431,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     BOOST_CHECK(!test_args.IsArgNegated("-zzz"));
 
     // Test sections work
-    test_args.SelectConfigSection("sec1");
+    test_args.SelectConfigNetwork("sec1");
 
     // same as original
     BOOST_CHECK(test_args.GetArg("-a", "xxx") == ""
@@ -452,7 +452,7 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     const auto& sec1_ccc_res = test_args.GetArgs("-ccc");
     BOOST_CHECK_EQUAL_COLLECTIONS(sec1_ccc_res.begin(), sec1_ccc_res.end(), sec1_ccc_expected.begin(), sec1_ccc_expected.end());
 
-    test_args.SelectConfigSection("sec2");
+    test_args.SelectConfigNetwork("sec2");
 
     // same as original
     BOOST_CHECK(test_args.GetArg("-a", "xxx") == ""
@@ -474,22 +474,22 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
 
     // Test section only options
 
-    test_args.SetSectionOnlyArg("-d");
-    test_args.SetSectionOnlyArg("-ccc");
-    test_args.SetSectionOnlyArg("-h");
+    test_args.SetNetworkOnlyArg("-d");
+    test_args.SetNetworkOnlyArg("-ccc");
+    test_args.SetNetworkOnlyArg("-h");
 
-    test_args.SelectConfigSection(CBaseChainParams::MAIN);
+    test_args.SelectConfigNetwork(CBaseChainParams::MAIN);
     BOOST_CHECK(test_args.GetArg("-d", "xxx") == "e");
     BOOST_CHECK(test_args.GetArgs("-ccc").size() == 2);
     BOOST_CHECK(test_args.GetArg("-h", "xxx") == "0");
 
-    test_args.SelectConfigSection("sec1");
+    test_args.SelectConfigNetwork("sec1");
     BOOST_CHECK(test_args.GetArg("-d", "xxx") == "eee");
     BOOST_CHECK(test_args.GetArgs("-d").size() == 1);
     BOOST_CHECK(test_args.GetArgs("-ccc").size() == 2);
     BOOST_CHECK(test_args.GetArg("-h", "xxx") == "1");
 
-    test_args.SelectConfigSection("sec2");
+    test_args.SelectConfigNetwork("sec2");
     BOOST_CHECK(test_args.GetArg("-d", "xxx") == "xxx");
     BOOST_CHECK(test_args.GetArgs("-d").size() == 0);
     BOOST_CHECK(test_args.GetArgs("-ccc").size() == 1);
@@ -565,15 +565,15 @@ BOOST_AUTO_TEST_CASE(util_GetChainName)
     test_args.ParseParameters(0, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    // check setting the ConfigSection to test (and thus making
+    // check setting the config network to test (and thus making
     // [test] regtest=1 potentially relevent) doesn't break things
-    test_args.SelectConfigSection("test");
+    test_args.SelectConfigNetwork("test");
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(2, (char**)argv_testnet);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    test_args.SelectConfigSection("test");
+    test_args.SelectConfigNetwork("test");
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(2, (char**)argv_testnet);
@@ -583,7 +583,7 @@ BOOST_AUTO_TEST_CASE(util_GetChainName)
     test_args.ParseParameters(3, (char**)argv_test_no_reg);
     test_args.ReadConfigString(testnetconf);
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
-    test_args.SelectConfigSection("test");
+    test_args.SelectConfigNetwork("test");
     BOOST_CHECK_EQUAL(test_args.GetChainName(), "test");
 
     test_args.ParseParameters(3, (char**)argv_test_no_reg);

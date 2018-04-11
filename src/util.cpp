@@ -464,14 +464,14 @@ public:
      *  See also comments around ArgsManager::ArgsManager() below. */
     static inline bool UseDefaultSection(const ArgsManager& am, const std::string& arg)
     {
-        return (am.m_section == CBaseChainParams::MAIN || am.m_section_only_args.count(arg) == 0);
+        return (am.m_network == CBaseChainParams::MAIN || am.m_network_only_args.count(arg) == 0);
     }
 
-    /** Convert regular argument into the section-specific setting */
-    static inline std::string SectionArg(const ArgsManager& am, const std::string& arg)
+    /** Convert regular argument into the network-specific setting */
+    static inline std::string NetworkArg(const ArgsManager& am, const std::string& arg)
     {
         assert(arg.length() > 1 && arg[0] == '-');
-        return "-" + am.m_section + "." + arg.substr(1);
+        return "-" + am.m_network + "." + arg.substr(1);
     }
 
     /** Find arguments in a map and add them to a vector */
@@ -521,8 +521,8 @@ public:
         // But in contrast we return the first argument seen in a config file,
         // so "foo=bar \n foo=baz" in the config file gives
         // GetArg(am,"foo")={true,"bar"}
-        if (!am.m_section.empty()) {
-            found_result = GetArgHelper(am.m_config_args, SectionArg(am, arg));
+        if (!am.m_network.empty()) {
+            found_result = GetArgHelper(am.m_config_args, NetworkArg(am, arg));
             if (found_result.first) {
                 return found_result;
             }
@@ -606,7 +606,7 @@ ArgsManager::ArgsManager() :
      * Setting them as section_only_args ensures that sharing a config file
      * between mainnet and regtest/testnet won't cause problems due to these
      * parameters by accident. */
-    m_section_only_args{
+    m_network_only_args{
       "-addnode", "-connect",
       "-port", "-bind",
       "-rpcport", "-rpcbind",
@@ -619,9 +619,9 @@ ArgsManager::ArgsManager() :
 void ArgsManager::WarnForSectionOnlyArgs()
 {
     // if there's no section selected, don't worry
-    if (m_section.empty()) return;
+    if (m_network.empty()) return;
 
-    for (const auto& arg : m_section_only_args) {
+    for (const auto& arg : m_network_only_args) {
         // if it's okay to use the default section for this chain, don't worry
         if (ArgsManagerHelper::UseDefaultSection(*this, arg)) return;
 
@@ -631,8 +631,8 @@ void ArgsManager::WarnForSectionOnlyArgs()
         found_result = ArgsManagerHelper::GetArgHelper(m_override_args, arg);
         if (found_result.first) continue;
 
-        // if there's a section-specific value for this option, it's fine
-        found_result = ArgsManagerHelper::GetArgHelper(m_config_args, ArgsManagerHelper::SectionArg(*this, arg));
+        // if there's a network-specific value for this option, it's fine
+        found_result = ArgsManagerHelper::GetArgHelper(m_config_args, ArgsManagerHelper::NetworkArg(*this, arg));
         if (found_result.first) continue;
 
         // if there isn't a default value for this option, it's fine
@@ -640,13 +640,13 @@ void ArgsManager::WarnForSectionOnlyArgs()
         if (!found_result.first) continue;
 
         // otherwise, issue a warning
-        LogPrintf("Warning: Config setting for %s only applied on %s network when in [%s] section.\n", arg, m_section, m_section);
+        LogPrintf("Warning: Config setting for %s only applied on %s network when in [%s] section.\n", arg, m_network, m_network);
     }
 }
 
-void ArgsManager::SelectConfigSection(const std::string& section)
+void ArgsManager::SelectConfigNetwork(const std::string& network)
 {
-    m_section = section;
+    m_network = network;
 }
 
 void ArgsManager::ParseParameters(int argc, const char* const argv[])
@@ -692,9 +692,8 @@ std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
     LOCK(cs_args);
 
     ArgsManagerHelper::AddArgs(result, m_override_args, strArg);
-
-    if (!m_section.empty()) {
-        ArgsManagerHelper::AddArgs(result, m_config_args, ArgsManagerHelper::SectionArg(*this, strArg));
+    if (!m_network.empty()) {
+        ArgsManagerHelper::AddArgs(result, m_config_args, ArgsManagerHelper::NetworkArg(*this, strArg));
     }
 
     if (ArgsManagerHelper::UseDefaultSection(*this, strArg)) {
@@ -717,8 +716,8 @@ bool ArgsManager::IsArgNegated(const std::string& strArg) const
     const auto& ov = m_override_args.find(strArg);
     if (ov != m_override_args.end()) return ov->second.empty();
 
-    if (!m_section.empty()) {
-        const auto& cfs = m_config_args.find(ArgsManagerHelper::SectionArg(*this, strArg));
+    if (!m_network.empty()) {
+        const auto& cfs = m_config_args.find(ArgsManagerHelper::NetworkArg(*this, strArg));
         if (cfs != m_config_args.end()) return cfs->second.empty();
     }
 
