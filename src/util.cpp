@@ -621,10 +621,10 @@ void ArgsManager::WarnForSectionOnlyArgs()
     // if there's no section selected, don't worry
     if (m_network.empty()) return;
 
-    for (const auto& arg : m_network_only_args) {
-        // if it's okay to use the default section for this chain, don't worry
-        if (ArgsManagerHelper::UseDefaultSection(*this, arg)) return;
+    // if it's okay to use the default section for this network, don't worry
+    if (m_network == CBaseChainParams::MAIN) return;
 
+    for (const auto& arg : m_network_only_args) {
         std::pair<bool, std::string> found_result;
 
         // if this option is overridden it's fine
