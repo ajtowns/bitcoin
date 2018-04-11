@@ -462,7 +462,7 @@ public:
 
     /** Determine whether to use config settings in the default section,
      *  See also comments around ArgsManager::ArgsManager() below. */
-    inline static bool UseDefaultSection(const ArgsManager& am, const std::string& arg)
+    static inline bool UseDefaultSection(const ArgsManager& am, const std::string& arg)
     {
         return (am.m_section == CBaseChainParams::MAIN || am.m_section_only_args.count(arg) == 0);
     }
