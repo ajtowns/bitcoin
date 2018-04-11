@@ -475,7 +475,7 @@ public:
     }
 
     /** Find arguments in a map and add them to a vector */
-    inline static void AddArgs(std::vector<std::string>& res, const MapArgs& map_args, const std::string& arg)
+    static inline void AddArgs(std::vector<std::string>& res, const MapArgs& map_args, const std::string& arg)
     {
         auto it = map_args.find(arg);
         if (it != map_args.end()) {
