@@ -468,7 +468,7 @@ public:
     }
 
     /** Convert regular argument into the section-specific setting */
-    inline static std::string SectionArg(const ArgsManager& am, const std::string& arg)
+    static inline std::string SectionArg(const ArgsManager& am, const std::string& arg)
     {
         assert(arg.length() > 1 && arg[0] == '-');
         return "-" + am.m_section + "." + arg.substr(1);
