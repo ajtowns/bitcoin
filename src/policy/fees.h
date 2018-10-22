@@ -227,6 +227,9 @@ public:
     /** Calculation of highest target that estimates are tracked for */
     unsigned int HighestTargetTracked(FeeEstimateHorizon horizon) const;
 
+    /** Check stats are consistent */
+    bool CheckConsistent() const;
+
 private:
     unsigned int nBestSeenHeight;
     unsigned int firstRecordedHeight;

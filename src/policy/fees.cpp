@@ -112,6 +112,11 @@ private:
 
 public:
     /**
+     * Helper function to check that TxConfirmStats behavior is consistent
+     */
+    bool CheckConsistent(const std::vector<double>* expBuckets = nullptr, const std::map<double, unsigned int>* expBucketMap = nullptr) const;
+
+    /**
      * Create new TxConfirmStats. This is called by BlockPolicyEstimator's
      * constructor with default values.
      * @param defaultBuckets contains the upper limits for the bucket boundaries
@@ -171,6 +176,70 @@ public:
     void Read(CAutoFile& filein, int nFileVersion, size_t numBuckets);
 };
 
+#define ASS_FAIL assert(false);
+
+bool CBlockPolicyEstimator::CheckConsistent() const
+{
+    if (!feeStats->CheckConsistent(&buckets, &bucketMap)) return false;
+    if (!shortStats->CheckConsistent(&buckets, &bucketMap)) return false;
+    if (!longStats->CheckConsistent(&buckets, &bucketMap)) return false;
+    return true;
+}
+
+bool TxConfirmStats::CheckConsistent(const std::vector<double>* expBuckets, const std::map<double, unsigned int>* expBucketMap) const
+{
+    if (decay <= 0 || 1 <= decay) ASS_FAIL;
+    if (scale <= 0) ASS_FAIL;
+
+    size_t maxPeriods = confAvg.size();
+    if (maxPeriods == 0 || maxPeriods > 100) ASS_FAIL;
+    if (failAvg.size() != maxPeriods) ASS_FAIL;
+    if (unconfTxs.size() != GetMaxConfirms()) ASS_FAIL;
+
+    if (expBuckets != nullptr) {
+        if (expBuckets != &buckets) ASS_FAIL;
+
+        for (size_t i = 1; i < buckets.size(); ++i) {
+            if (buckets[i-1] >= buckets[i]) ASS_FAIL;
+        }
+
+        if (txCtAvg.size() != buckets.size()) ASS_FAIL;
+        if (avg.size() != buckets.size()) ASS_FAIL;
+        if (oldUnconfTxs.size() != buckets.size()) ASS_FAIL;
+
+        for (size_t i = 0; i < maxPeriods; ++i) {
+            if (confAvg[i].size() != buckets.size()) ASS_FAIL;
+            if (failAvg[i].size() != buckets.size()) ASS_FAIL;
+            if (unconfTxs[i].size() != buckets.size()) ASS_FAIL;
+        }
+
+        if (expBucketMap != nullptr) {
+            if (expBucketMap != &bucketMap) ASS_FAIL;
+
+            if (buckets.size() != bucketMap.size()) ASS_FAIL;
+
+            for (const auto& kv : bucketMap) {
+                if (kv.second >= buckets.size()) ASS_FAIL;
+                if (kv.first != buckets[kv.second]) ASS_FAIL;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < buckets.size(); ++i) {
+        for (size_t j = 1; j < maxPeriods; ++j) {
+            if ( (failAvg[j-1][i] < failAvg[j][i] && failAvg[j-1][i] != 0.0) || (failAvg[j-1][i] < failAvg[j][i]) || (confAvg[j-1][i] > confAvg[j][i]) ) {
+                LogPrintf("j %d (%d-%d) i %d (%d-%d)=%e fail[j-1][i] %e fail[j][i] %e conf[j-1][i] %e conf[j][i] %e\n", j, 1, maxPeriods, i, 0, buckets.size(), buckets[i], failAvg[j-1][i], failAvg[j][i], confAvg[j-1][i], confAvg[j][i]);
+            }
+            if (confAvg[j-1][i] > confAvg[j][i]) ASS_FAIL;
+            if (failAvg[j-1][i] < failAvg[j][i]) ASS_FAIL;
+        }
+        if (confAvg[0][i] < 0) ASS_FAIL;
+        if (confAvg[maxPeriods-1][i] > txCtAvg[i]) ASS_FAIL;
+        if (failAvg[maxPeriods-1][i] < 0) ASS_FAIL;
+    }
+
+    return true;
+}
 
 TxConfirmStats::TxConfirmStats(const std::vector<double>& defaultBuckets,
                                 const std::map<double, unsigned int>& defaultBucketMap,
@@ -193,6 +262,8 @@ TxConfirmStats::TxConfirmStats(const std::vector<double>& defaultBuckets,
     avg.resize(buckets.size());
 
     resizeInMemoryCounters(buckets.size());
+
+    assert(CheckConsistent(&defaultBuckets, &defaultBucketMap));
 }
 
 void TxConfirmStats::resizeInMemoryCounters(size_t newbuckets) {
@@ -457,6 +528,13 @@ void TxConfirmStats::Read(CAutoFile& filein, int nFileVersion, size_t numBuckets
 
     LogPrint(BCLog::ESTIMATEFEE, "Reading estimates: %u buckets counting confirms up to %u blocks\n",
              numBuckets, maxConfirms);
+
+    if (!CheckConsistent()) {
+        LogPrintf("Reading estimates: inconsistencies detected in fee estimate data, continuing anyway\n");
+        LogPrint(BCLog::ESTIMATEFEE, "Reading estimates: inconsistencies detected in fee estimate data, continuing anyway\n");
+    } else {
+        LogPrintf("Reading estimates: consistent!\n");
+    }
 }
 
 unsigned int TxConfirmStats::NewTx(unsigned int nBlockHeight, double val)
@@ -968,6 +1046,13 @@ bool CBlockPolicyEstimator::Read(CAutoFile& filein)
             fileShortStats->Read(filein, nVersionThatWrote, numBuckets);
             fileLongStats->Read(filein, nVersionThatWrote, numBuckets);
 
+            if (!fileFeeStats->CheckConsistent())
+                throw std::runtime_error("Corrupt estimates file. Medium estimates don't pass consistency checks");
+            if (!fileShortStats->CheckConsistent())
+                throw std::runtime_error("Corrupt estimates file. Short estimates don't pass consistency checks");
+            if (!fileLongStats->CheckConsistent())
+                throw std::runtime_error("Corrupt estimates file. Long estimates don't pass consistency checks");
+
             // Fee estimates file parsed correctly
             // Copy buckets from file and refresh our bucketmap
             buckets = fileBuckets;
@@ -982,6 +1067,9 @@ bool CBlockPolicyEstimator::Read(CAutoFile& filein)
             nBestSeenHeight = nFileBestSeenHeight;
             historicalFirst = nFileHistoricalFirst;
             historicalBest = nFileHistoricalBest;
+
+            // Stats were consistent before so must still be consistent
+            assert(CheckConsistent());
         }
     }
     catch (const std::exception& e) {
