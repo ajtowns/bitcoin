@@ -256,6 +256,9 @@ private:
 
     mutable CCriticalSection cs_feeEstimator;
 
+    /** Initialise bucketMap */
+    void InitBucketMap();
+
     /** Process a transaction confirmed in a block*/
     bool processBlockTx(unsigned int nBlockHeight, const CTxMemPoolEntry* entry);
 
