@@ -174,6 +174,11 @@ public:
      * variables with this state.
      */
     void Read(CAutoFile& filein, int nFileVersion, size_t numBuckets);
+
+    /**
+     * Copy state, adjusting stats for offset buckets
+     */
+    void ExtendStatsBelow(size_t added_buckets);
 };
 
 #define ASS_FAIL assert(false);
@@ -474,6 +479,26 @@ void TxConfirmStats::Write(CAutoFile& fileout) const
     fileout << failAvg;
 }
 
+
+void TxConfirmStats::ExtendStatsBelow(size_t added_buckets)
+{
+    assert(avg.size() + added_buckets == buckets.size());
+    if (added_buckets == 0) return;
+
+    avg.insert(avg.begin(), added_buckets, 0.0);
+    txCtAvg.insert(txCtAvg.begin(), added_buckets, 0.0);
+
+    for (unsigned int i = 0; i < confAvg.size(); ++i) {
+        confAvg[i].insert(confAvg[i].begin(), added_buckets, 0.0);
+    }
+
+    for (unsigned int i = 0; i < failAvg.size(); ++i) {
+        failAvg[i].insert(failAvg[i].begin(), added_buckets, 0.0);
+    }
+
+    resizeInMemoryCounters(buckets.size());
+}
+
 void TxConfirmStats::Read(CAutoFile& filein, int nFileVersion, size_t numBuckets)
 {
     // Read data file and do some very basic sanity checking
@@ -630,6 +655,20 @@ void CBlockPolicyEstimator::InitBucketMap()
     for (size_t bucketIndex = 0; bucketIndex < buckets.size(); ++bucketIndex) {
         bucketMap[buckets[bucketIndex]] = bucketIndex;
     }
+}
+
+size_t CBlockPolicyEstimator::ExtendBucketsUpTo(double base, double min)
+{
+    if (base <= min) return 0;
+
+    std::vector<double> below;
+    double bucketBoundary = base;
+    while (bucketBoundary > min) {
+        bucketBoundary /= FEE_SPACING;
+        below.push_back(bucketBoundary);
+    }
+    buckets.insert(buckets.begin(), below.rbegin(), below.rend());
+    return below.size();
 }
 
 void CBlockPolicyEstimator::processTransaction(const CTxMemPoolEntry& entry, bool validFeeEstimate)

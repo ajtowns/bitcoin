@@ -262,6 +262,9 @@ private:
     /** Initialise bucketMap */
     void InitBucketMap();
 
+    /** Initialise buckets up to base */
+    size_t ExtendBucketsUpTo(double base, double min);
+
     /** Process a transaction confirmed in a block*/
     bool processBlockTx(unsigned int nBlockHeight, const CTxMemPoolEntry* entry);
 
