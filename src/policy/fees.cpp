@@ -924,6 +924,10 @@ bool CBlockPolicyEstimator::Write(CAutoFile& fileout) const
 bool CBlockPolicyEstimator::Read(CAutoFile& filein)
 {
     try {
+        // Strategy: read from file into local variables, throwing a runtime
+        // error if there's a parsing problem. Only copy into member variables
+        // once parsing has fully succeeded.
+
         LOCK(cs_feeEstimator);
         int nVersionRequired, nVersionThatWrote;
         filein >> nVersionRequired >> nVersionThatWrote;
