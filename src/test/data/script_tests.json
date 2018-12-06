@@ -735,11 +735,11 @@
 ["0x4e03000000ffff","0x01 NOP", "P2SH,STRICTENC","BAD_OPCODE", "PUSHDATA4 with not enough bytes"],
 
 ["1", "0x4c01", "P2SH,STRICTENC", "BAD_OPCODE", "PUSHDATA1 with not enough bytes"],
-["1", "0xba 0x4c01", "P2SH,STRICTENC", "OK", "PUSHDATA1 with not enough bytes ok after OP_SUCCESS"],
+["1", "0xba 0x4c01", "P2SH,STRICTENC", "BAD_OPCODE", "PUSHDATA1 with not enough bytes ok after OP_SUCCESS"],
 ["1", "IF 1", "P2SH,STRICTENC", "UNBALANCED_CONDITIONAL", "unbalanced IF not ok"],
 ["1", "IF 0xba", "P2SH,STRICTENC", "OK", "unbalanced IF ok after OP_SUCCESS"],
 ["1", "0xba RETURN", "P2SH,STRICTENC", "OK", "RETURN after SUCCESS okay"],
-["1", "RETURN 0xba", "P2SH,STRICTENC", "OP_RETURN", "RETURN before SUCCESS fails"],
+["1", "RETURN 0xba", "P2SH,STRICTENC", "OK", "RETURN before SUCCESS okay too"],
 
 ["1", "IF 0x50 ENDIF 1", "P2SH,STRICTENC","BAD_OPCODE", "0x50 is reserved"],
 ["0x52", "0x5f ADD 0x60 EQUAL", "P2SH,STRICTENC","EVAL_FALSE", "0x51 through 0x60 push 1 through 16 onto stack"],

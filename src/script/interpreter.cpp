@@ -295,9 +295,57 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     valtype vchPushValue;
     std::vector<bool> vfExec;
     std::vector<valtype> altstack;
+
+    // initial tokensiation pass
     set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
     if (script.size() > MAX_SCRIPT_SIZE)
         return set_error(serror, SCRIPT_ERR_SCRIPT_SIZE);
+
+    try
+    {
+        bool fSuccess = false; // force success on unknown opcode
+
+        while (pc < pend)
+        {
+            if (!script.GetOp(pc, opcode, vchPushValue))
+                return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
+
+            if (/*opcode == OP_CAT ||
+                opcode == OP_SUBSTR ||
+                opcode == OP_LEFT ||
+                opcode == OP_RIGHT ||
+                opcode == OP_INVERT ||
+                opcode == OP_AND ||
+                opcode == OP_OR ||
+                opcode == OP_XOR ||
+                opcode == OP_2MUL ||
+                opcode == OP_2DIV ||
+                opcode == OP_MUL ||
+                opcode == OP_DIV ||
+                opcode == OP_MOD ||
+                opcode == OP_LSHIFT ||
+                opcode == OP_RSHIFT || */
+                opcode == OP_RESERVED1 ||
+                opcode == OP_RESERVED2 ||
+                (0xba <= opcode && opcode <= 0xfe))
+            {
+                if (flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_NOPS)
+                    return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS);
+                fSuccess = true;
+            }
+        }
+        if (fSuccess) {
+            stack.clear();
+            stack.push_back(vchTrue);
+            return set_success(serror);
+        }
+    }
+    catch (...)
+    {
+        return set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
+    }
+    pc = script.begin();
+
     int nOpCount = 0;
     bool fRequireMinimal = (flags & SCRIPT_VERIFY_MINIMALDATA) != 0;
 
@@ -1068,19 +1116,11 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 case OP_VERIF:
                 case OP_VERNOTIF:
                 case OP_INVALIDOPCODE:
-                {
                     return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
-                }
-                break;
 
                 default:
-                {
-                    if (flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_NOPS)
-                        return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS);
-                    stack.clear();
-                    stack.push_back(vchTrue);
-                    return true;
-                }
+                    // should be unreachable for "default:" case
+                    return set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
             }
 
             // Size limits
