@@ -735,9 +735,9 @@
 ["0x4e03000000ffff","0x01 NOP", "P2SH,STRICTENC","BAD_OPCODE", "PUSHDATA4 with not enough bytes"],
 
 ["1", "0x4c01", "P2SH,STRICTENC", "BAD_OPCODE", "PUSHDATA1 with not enough bytes"],
-["1", "0xba 0x4c01", "P2SH,STRICTENC", "BAD_OPCODE", "PUSHDATA1 with not enough bytes still not ok after OP_SUCCESS"],
+["1", "0xba 0x4c01", "P2SH,STRICTENC", "OK", "PUSHDATA1 with not enough bytes ok after OP_SUCCESS"],
 ["1", "IF 1", "P2SH,STRICTENC", "UNBALANCED_CONDITIONAL", "unbalanced IF not ok"],
-["1", "IF 0xba", "P2SH,STRICTENC", "UNBALANCED_CONDITIONAL", "unbalanced IF still not ok after OP_SUCCESS"],
+["1", "IF 0xba", "P2SH,STRICTENC", "OK", "unbalanced IF ok after OP_SUCCESS"],
 ["1", "0xba RETURN", "P2SH,STRICTENC", "OK", "RETURN after SUCCESS okay"],
 ["1", "RETURN 0xba", "P2SH,STRICTENC", "OP_RETURN", "RETURN before SUCCESS fails"],
 

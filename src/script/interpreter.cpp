@@ -295,7 +295,6 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     valtype vchPushValue;
     std::vector<bool> vfExec;
     std::vector<valtype> altstack;
-    bool fAssumedSuccess = false;
     set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
     if (script.size() > MAX_SCRIPT_SIZE)
         return set_error(serror, SCRIPT_ERR_SCRIPT_SIZE);
@@ -307,7 +306,6 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
         while (pc < pend)
         {
             bool fExec = !count(vfExec.begin(), vfExec.end(), false);
-            if (fAssumedSuccess) fExec = false;
 
             //
             // Read instruction
@@ -1081,9 +1079,8 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                         return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS);
                     stack.clear();
                     stack.push_back(vchTrue);
-                    fAssumedSuccess = true;
+                    return true;
                 }
-                break;
             }
 
             // Size limits
