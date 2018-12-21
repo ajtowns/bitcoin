@@ -106,10 +106,35 @@ struct RPCArg {
     std::string ToDescriptionString(bool implicitly_required = false) const;
 };
 
+struct RPCResult {
+    const std::string m_result;
+
+    RPCResult(
+        std::string result)
+        : m_result(std::move(result))
+    {
+    }
+
+    /**
+     * Return the description string.
+     */
+    std::string ToDescriptionString() const;
+};
+
+struct RPCExamples {
+    const std::string m_examples;
+    RPCExamples(
+        std::string examples)
+        : m_examples(std::move(examples))
+    {
+    }
+    std::string ToDescriptionString() const;
+};
+
 class RPCHelpMan
 {
 public:
-    RPCHelpMan(const std::string& name, const std::string& description, const std::vector<RPCArg>& args);
+    RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResult result, RPCExamples examples);
 
     std::string ToString() const;
 
@@ -117,6 +142,8 @@ private:
     const std::string m_name;
     const std::string m_description;
     const std::vector<RPCArg> m_args;
+    const RPCResult m_result;
+    const RPCExamples m_examples;
 };
 
 #endif // BITCOIN_RPC_UTIL_H
