@@ -3084,10 +3084,12 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-multiple", false, "more than one coinbase");
 
     // Check transactions
-    for (const auto& tx : block.vtx)
-        if (!CheckTransaction(*tx, state, true))
-            return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
-                                 strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), state.GetDebugMessage()));
+    for (const auto& tx : block.vtx) {
+        if (!CheckTransaction(*tx, state, true)) {
+            LogPrintf("Transaction check failed (tx hash %s) %s\n", tx->GetHash().ToString(), state.GetDebugMessage());
+            return false;
+        }
+    }
 
     unsigned int nSigOps = 0;
     for (const auto& tx : block.vtx)
