@@ -4092,7 +4092,10 @@ bool CChainState::NeedsRedownload() const
 }
 
 void CChainState::UnloadBlockIndex() {
-    nBlockSequenceId = 1;
+    {
+        LOCK(cs_nBlockSequenceId);
+        nBlockSequenceId = 1;
+    }
     setBlockIndexCandidates.clear();
 }
 
