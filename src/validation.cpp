@@ -2181,7 +2181,10 @@ void CChainState::ForceFlushStateToDisk()
 void CChainState::PruneAndFlush()
 {
     BlockValidationState state;
-    fCheckForPruning = true;
+    {
+        LOCK(cs_LastBlockFile);
+        fCheckForPruning = true;
+    }
     if (!this->FlushStateToDisk(state, FlushStateMode::NONE)) {
         LogPrintf("%s: failed to flush state (%s)\n", __func__, state.ToString());
     }
@@ -3777,6 +3780,7 @@ bool BlockManager::LoadBlockIndexDB(std::set<CBlockIndex*, CBlockIndexWorkCompar
         return false;
     }
 
+    LOCK(cs_LastBlockFile);
     // Load block file info
     m_block_tree_db->ReadLastBlockFile(nLastBlockFile);
     vinfoBlockFile.resize(nLastBlockFile + 1);
@@ -4101,7 +4105,10 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     chainman.Unload();
     if (mempool) mempool->clear();
     vinfoBlockFile.clear();
-    nLastBlockFile = 0;
+    {
+        LOCK(cs_LastBlockFile);
+        nLastBlockFile = 0;
+    }
     g_versionbitscache.Clear();
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();
