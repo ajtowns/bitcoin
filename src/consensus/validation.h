@@ -45,9 +45,9 @@ public:
         strRejectReason = strRejectReasonIn;
         corruptionPossible = corruptionIn;
         strDebugMessage = strDebugMessageIn;
+        nDoS = level;
         if (mode == MODE_ERROR)
             return ret;
-        nDoS += level;
         mode = MODE_INVALID;
         return ret;
     }
