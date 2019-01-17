@@ -333,13 +333,18 @@ void BlockManager::Unload()
     m_block_index.clear();
 
     m_blockfile_info.clear();
-    m_last_blockfile = 0;
+    {
+        LOCK(cs_LastBlockFile);
+        m_last_blockfile = 0;
+    }
     m_dirty_blockindex.clear();
     m_dirty_fileinfo.clear();
 }
 
 bool BlockManager::WriteBlockIndexDB()
 {
+    LOCK(cs_LastBlockFile);
+
     std::vector<std::pair<int, const CBlockFileInfo*>> vFiles;
     vFiles.reserve(m_dirty_fileinfo.size());
     for (std::set<int>::iterator it = m_dirty_fileinfo.begin(); it != m_dirty_fileinfo.end();) {
@@ -360,6 +365,8 @@ bool BlockManager::WriteBlockIndexDB()
 
 bool BlockManager::LoadBlockIndexDB(ChainstateManager& chainman)
 {
+    LOCK(cs_LastBlockFile);
+
     if (!LoadBlockIndex(::Params().GetConsensus(), chainman)) {
         return false;
     }
@@ -729,7 +736,7 @@ bool BlockManager::WriteUndoDataForBlock(const CBlockUndo& blockundo, BlockValid
         // in the block file info as below; note that this does not catch the case where the undo writes are keeping up
         // with the block writes (usually when a synced up node is getting newly mined blocks) -- this case is caught in
         // the FindBlockPos function
-        if (_pos.nFile < m_last_blockfile && static_cast<uint32_t>(pindex->nHeight) == m_blockfile_info[_pos.nFile].nHeightLast) {
+        if (_pos.nFile < WITH_LOCK(cs_LastBlockFile, return m_last_blockfile) && static_cast<uint32_t>(pindex->nHeight) == m_blockfile_info[_pos.nFile].nHeightLast) {
             FlushUndoFile(_pos.nFile, true);
         }
 

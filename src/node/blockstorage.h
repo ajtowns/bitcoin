@@ -94,12 +94,12 @@ private:
 
     RecursiveMutex cs_LastBlockFile;
     std::vector<CBlockFileInfo> m_blockfile_info;
-    int m_last_blockfile = 0;
+    int m_last_blockfile GUARDED_BY(cs_LastBlockFile) = 0;
     /** Global flag to indicate we should check to see if there are
      *  block/undo files that should be deleted.  Set on startup
      *  or if we allocate more file space when we're in prune mode
      */
-    bool m_check_for_pruning = false;
+    bool m_check_for_pruning GUARDED_BY(cs_LastBlockFile) = false;
 
     /** Dirty block index entries. */
     std::set<CBlockIndex*> m_dirty_blockindex;
