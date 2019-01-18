@@ -137,18 +137,6 @@ class TxValidationState : public BaseValidationState {
 private:
     TxValidationResult m_result;
 public:
-    bool DoS(int level, TxValidationResult result, bool ret = false,
-             unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
-             bool corruptionIn=false,
-             const std::string &strDebugMessageIn="") {
-        m_result = result;
-        assert(corruptionIn == CorruptionPossible());
-        assert(level == GetDoS());
-        return Invalid(result, ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
-    }
-    bool CorruptionPossible() const {
-        return (m_result == TxValidationResult::TX_WITNESS_MUTATED);
-    }
     bool Invalid(TxValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
                  const std::string &_strDebugMessage="") {
@@ -156,64 +144,18 @@ public:
         return BaseValidationState::Invalid(ret, _chRejectCode, _strRejectReason, _strDebugMessage);
     }
     TxValidationResult GetResult() const { return m_result; }
-    int GetDoS() const {
-        switch (m_result) {
-        case TxValidationResult::NONE:
-            return 0;
-        case TxValidationResult::CONSENSUS:
-            return 100;
-        case TxValidationResult::RECENT_CONSENSUS_CHANGE:
-        case TxValidationResult::TX_NOT_STANDARD:
-        case TxValidationResult::TX_MISSING_INPUTS:
-        case TxValidationResult::TX_PREMATURE_SPEND:
-        case TxValidationResult::TX_WITNESS_MUTATED:
-        case TxValidationResult::TX_CONFLICT:
-        case TxValidationResult::TX_MEMPOOL_POLICY:
-            return 0;
-        }
-    }
 };
 
 class BlockValidationState : public BaseValidationState {
 private:
     BlockValidationResult m_result;
 public:
-    bool DoS(int level, BlockValidationResult result, bool ret = false,
-             unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
-             bool corruptionIn=false,
-             const std::string &strDebugMessageIn="") {
-        m_result = result;
-        assert(corruptionIn == CorruptionPossible());
-        assert(level == GetDoS());
-        return Invalid(result, ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
-    }
-    bool CorruptionPossible() const {
-        return (m_result == BlockValidationResult::BLOCK_MUTATED);
-    }
     bool Invalid(BlockValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
                  const std::string &_strDebugMessage="") {
         return BaseValidationState::Invalid(ret, _chRejectCode, _strRejectReason, _strDebugMessage);
     }
     BlockValidationResult GetResult() const { return m_result; }
-    int GetDoS() const {
-        switch (m_result) {
-        case BlockValidationResult::NONE:
-            return 0;
-        case BlockValidationResult::CONSENSUS:
-        case BlockValidationResult::BLOCK_MUTATED:
-        case BlockValidationResult::BLOCK_INVALID_HEADER:
-        case BlockValidationResult::BLOCK_CHECKPOINT:
-        case BlockValidationResult::BLOCK_INVALID_PREV:
-            return 100;
-        case BlockValidationResult::BLOCK_MISSING_PREV:
-            return 10;
-        case BlockValidationResult::CACHED_INVALID:
-        case BlockValidationResult::RECENT_CONSENSUS_CHANGE:
-        case BlockValidationResult::BLOCK_BAD_TIME:
-            return 0;
-        }
-    }
     void FromTxValidationState(TxValidationState tx_state) {
         switch (tx_state.GetResult()) {
         case TxValidationResult::NONE:
