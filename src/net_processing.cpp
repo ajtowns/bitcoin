@@ -960,7 +960,6 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
 }
 
 static bool TxRelayMayResultInDisconnect(const TxValidationState& state) {
-    assert(state.GetDoS() == state.GetDoSForResult());
     return (state.GetDoS() > 0);
 }
 
@@ -975,7 +974,6 @@ static bool TxRelayMayResultInDisconnect(const TxValidationState& state) {
  * txs, the peer should not be punished. See BIP 152.
  */
 static bool MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state, bool via_compact_block, const std::string& message = "") {
-    assert(state.GetDoS() == state.GetDoSForResult());
     int nDoS = state.GetDoS();
     if (nDoS > 0 && !via_compact_block) {
          LOCK(cs_main);
@@ -994,7 +992,6 @@ static bool MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& s
  * a tx was invalid, rather than just the nDoS score handed back by validation.
  */
 static bool MaybePunishNodeForTx(NodeId nodeid, const TxValidationState& state, const std::string& message = "") {
-    assert(state.GetDoS() == state.GetDoSForResult());
     int nDoS = state.GetDoS();
     if (nDoS > 0) {
          LOCK(cs_main);
@@ -1006,7 +1003,6 @@ static bool MaybePunishNodeForTx(NodeId nodeid, const TxValidationState& state, 
     }
     return false;
 }
-
 
 
 

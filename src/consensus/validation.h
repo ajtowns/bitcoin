@@ -96,28 +96,23 @@ private:
         MODE_INVALID, //!< network rule violation (DoS value may be set)
         MODE_ERROR,   //!< run-time error
     } mode;
-    int nDoS;
     std::string strRejectReason;
     unsigned int chRejectCode;
-    bool corruptionPossible;
     std::string strDebugMessage;
 protected:
-    bool DoS(int level, bool ret = false,
+    bool DoS(bool ret = false,
              unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
-             bool corruptionIn=false,
              const std::string &strDebugMessageIn="") {
         chRejectCode = chRejectCodeIn;
         strRejectReason = strRejectReasonIn;
-        corruptionPossible = corruptionIn;
         strDebugMessage = strDebugMessageIn;
-        nDoS = level;
         if (mode == MODE_ERROR)
             return ret;
         mode = MODE_INVALID;
         return ret;
     }
 public:
-    BaseValidationState() : mode(MODE_VALID), nDoS(0), chRejectCode(0), corruptionPossible(false) {}
+    BaseValidationState() : mode(MODE_VALID), chRejectCode(0) {}
     bool Error(const std::string& strRejectReasonIn) {
         if (mode == MODE_VALID)
             strRejectReason = strRejectReasonIn;
@@ -133,13 +128,6 @@ public:
     bool IsError() const {
         return mode == MODE_ERROR;
     }
-    bool CorruptionPossible() const {
-        return corruptionPossible;
-    }
-    void SetCorruptionPossible() {
-        corruptionPossible = true;
-    }
-    int GetDoS(void) const { return nDoS; }
     unsigned int GetRejectCode() const { return chRejectCode; }
     std::string GetRejectReason() const { return strRejectReason; }
     std::string GetDebugMessage() const { return strDebugMessage; }
@@ -154,9 +142,12 @@ public:
              bool corruptionIn=false,
              const std::string &strDebugMessageIn="") {
         m_result = result;
-        assert(corruptionIn == (m_result == TxValidationResult::TX_WITNESS_MUTATED));
-        assert(level == GetDoSForResult());
-        return BaseValidationState::DoS(level, ret, chRejectCodeIn, strRejectReasonIn, corruptionIn, strDebugMessageIn);
+        assert(corruptionIn == CorruptionPossible());
+        assert(level == GetDoS());
+        return BaseValidationState::DoS(ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
+    }
+    bool CorruptionPossible() const {
+        return (m_result == TxValidationResult::TX_WITNESS_MUTATED);
     }
     bool Invalid(TxValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
@@ -165,7 +156,7 @@ public:
         return DoS(0, result, ret, _chRejectCode, _strRejectReason, false, _strDebugMessage);
     }
     TxValidationResult GetResult() const { return m_result; }
-    int GetDoSForResult() const {
+    int GetDoS() const {
         switch (m_result) {
         case TxValidationResult::NONE:
             return 0;
@@ -192,9 +183,12 @@ public:
              bool corruptionIn=false,
              const std::string &strDebugMessageIn="") {
         m_result = result;
-        assert(corruptionIn == (m_result == BlockValidationResult::BLOCK_MUTATED));
-        assert(level == GetDoSForResult());
-        return BaseValidationState::DoS(level, ret, chRejectCodeIn, strRejectReasonIn, corruptionIn, strDebugMessageIn);
+        assert(corruptionIn == CorruptionPossible());
+        assert(level == GetDoS());
+        return BaseValidationState::DoS(ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
+    }
+    bool CorruptionPossible() const {
+        return (m_result == BlockValidationResult::BLOCK_MUTATED);
     }
     bool Invalid(BlockValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
@@ -203,7 +197,7 @@ public:
         return DoS(0, result, ret, _chRejectCode, _strRejectReason, false, _strDebugMessage);
     }
     BlockValidationResult GetResult() const { return m_result; }
-    int GetDoSForResult() const {
+    int GetDoS() const {
         switch (m_result) {
         case BlockValidationResult::NONE:
             return 0;
@@ -239,7 +233,7 @@ public:
             m_result = BlockValidationResult::RECENT_CONSENSUS_CHANGE;
             break;
         }
-        BaseValidationState::DoS(GetDoSForResult(), false, tx_state.GetRejectCode(), tx_state.GetRejectReason(), false, tx_state.GetDebugMessage());
+        BaseValidationState::DoS(false, tx_state.GetRejectCode(), tx_state.GetRejectReason(), tx_state.GetDebugMessage());
     }
 };
 
