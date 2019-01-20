@@ -100,7 +100,7 @@ private:
     unsigned int chRejectCode;
     std::string strDebugMessage;
 protected:
-    bool DoS(bool ret = false,
+    bool Invalid(bool ret = false,
              unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
              const std::string &strDebugMessageIn="") {
         chRejectCode = chRejectCodeIn;
@@ -144,7 +144,7 @@ public:
         m_result = result;
         assert(corruptionIn == CorruptionPossible());
         assert(level == GetDoS());
-        return BaseValidationState::DoS(ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
+        return Invalid(result, ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
     }
     bool CorruptionPossible() const {
         return (m_result == TxValidationResult::TX_WITNESS_MUTATED);
@@ -152,8 +152,8 @@ public:
     bool Invalid(TxValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
                  const std::string &_strDebugMessage="") {
-        assert(result != TxValidationResult::TX_WITNESS_MUTATED);
-        return DoS(0, result, ret, _chRejectCode, _strRejectReason, false, _strDebugMessage);
+        m_result = result;
+        return BaseValidationState::Invalid(ret, _chRejectCode, _strRejectReason, _strDebugMessage);
     }
     TxValidationResult GetResult() const { return m_result; }
     int GetDoS() const {
@@ -185,7 +185,7 @@ public:
         m_result = result;
         assert(corruptionIn == CorruptionPossible());
         assert(level == GetDoS());
-        return BaseValidationState::DoS(ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
+        return Invalid(result, ret, chRejectCodeIn, strRejectReasonIn, strDebugMessageIn);
     }
     bool CorruptionPossible() const {
         return (m_result == BlockValidationResult::BLOCK_MUTATED);
@@ -193,8 +193,7 @@ public:
     bool Invalid(BlockValidationResult result, bool ret = false,
                  unsigned int _chRejectCode=0, const std::string &_strRejectReason="",
                  const std::string &_strDebugMessage="") {
-        assert(result != BlockValidationResult::BLOCK_MUTATED);
-        return DoS(0, result, ret, _chRejectCode, _strRejectReason, false, _strDebugMessage);
+        return BaseValidationState::Invalid(ret, _chRejectCode, _strRejectReason, _strDebugMessage);
     }
     BlockValidationResult GetResult() const { return m_result; }
     int GetDoS() const {
@@ -233,7 +232,7 @@ public:
             m_result = BlockValidationResult::RECENT_CONSENSUS_CHANGE;
             break;
         }
-        BaseValidationState::DoS(false, tx_state.GetRejectCode(), tx_state.GetRejectReason(), tx_state.GetDebugMessage());
+        BaseValidationState::Invalid(false, tx_state.GetRejectCode(), tx_state.GetRejectReason(), tx_state.GetDebugMessage());
     }
 };
 
