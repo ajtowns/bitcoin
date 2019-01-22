@@ -2396,12 +2396,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     // Use a dummy CValidationState so someone can't setup nodes to counter-DoS based on orphan
                     // resolution (that is, feeding people an invalid transaction based on LegitTxX in order to get
                     // anyone relaying LegitTxX banned)
-                    CValidationState stateDummy;
-
+                    CValidationState orphan_state;
 
                     if (setMisbehaving.count(fromPeer))
                         continue;
-                    if (AcceptToMemoryPool(mempool, stateDummy, porphanTx, &fMissingInputs2, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
+                    if (AcceptToMemoryPool(mempool, orphan_state, porphanTx, &fMissingInputs2, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
                         LogPrint(BCLog::MEMPOOL, "   accepted orphan tx %s\n", orphanHash.ToString());
                         RelayTransaction(orphanTx, connman);
                         for (unsigned int i = 0; i < orphanTx.vout.size(); i++) {
@@ -2412,7 +2411,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     else if (!fMissingInputs2)
                     {
                         int nDos = 0;
-                        if (stateDummy.IsInvalid(nDos) && nDos > 0)
+                        if (orphan_state.IsInvalid(nDos) && nDos > 0)
                         {
                             // Punish peer that gave us an invalid orphan tx
                             Misbehaving(fromPeer, nDos);
@@ -2423,7 +2422,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                         // Probably non-standard or insufficient fee
                         LogPrint(BCLog::MEMPOOL, "   removed orphan tx %s\n", orphanHash.ToString());
                         vEraseQueue.push_back(orphanHash);
-                        if (!orphanTx.HasWitness() && !stateDummy.CorruptionPossible()) {
+                        if (!orphanTx.HasWitness() && !orphan_state.CorruptionPossible()) {
                             // Do not use rejection cache for witness transactions or
                             // witness-stripped transactions, as they can have been malleated.
                             // See https://github.com/bitcoin/bitcoin/issues/8279 for details.
