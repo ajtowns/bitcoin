@@ -137,7 +137,6 @@ public:
         case ValidationInvalidReason::BLOCK_INVALID_HEADER:
         case ValidationInvalidReason::BLOCK_CHECKPOINT:
         case ValidationInvalidReason::BLOCK_INVALID_PREV:
-        case ValidationInvalidReason::TX_MISSING_INPUTS:
             return 100;
         case ValidationInvalidReason::BLOCK_MISSING_PREV:
             return 10;
@@ -145,6 +144,7 @@ public:
         case ValidationInvalidReason::RECENT_CONSENSUS_CHANGE:
         case ValidationInvalidReason::BLOCK_BAD_TIME:
         case ValidationInvalidReason::TX_NOT_STANDARD:
+        case ValidationInvalidReason::TX_MISSING_INPUTS:
         case ValidationInvalidReason::TX_WITNESS_MUTATED:
         case ValidationInvalidReason::TX_CONFLICT:
         case ValidationInvalidReason::TX_MEMPOOL_POLICY:

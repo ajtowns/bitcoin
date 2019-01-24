@@ -209,7 +209,7 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
 {
     // are the actual inputs available?
     if (!inputs.HaveInputs(tx)) {
-        return state.DoS(100, ValidationInvalidReason::TX_MISSING_INPUTS, false, REJECT_INVALID, "bad-txns-inputs-missingorspent", false,
+        return state.DoS(0, ValidationInvalidReason::TX_MISSING_INPUTS, false, REJECT_INVALID, "bad-txns-inputs-missingorspent", false,
                          strprintf("%s: inputs missing/spent", __func__));
     }
 
@@ -221,7 +221,7 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
 
         // If prev is coinbase, check that it's matured
         if (coin.IsCoinBase() && nSpendHeight - coin.nHeight < COINBASE_MATURITY) {
-            return state.DoS(100, ValidationInvalidReason::TX_MISSING_INPUTS, false,
+            return state.DoS(0, ValidationInvalidReason::TX_MISSING_INPUTS, false,
                 REJECT_INVALID, "bad-txns-premature-spend-of-coinbase", false,
                 strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
         }
