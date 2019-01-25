@@ -258,7 +258,7 @@ UniValue stop(const JSONRPCRequest& jsonRequest)
             RPCHelpMan{"stop",
                 "\nStop Bitcoin server.",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{""},
             }.ToString());
     // Event loop will exit after current HTTP requests have been handled, so
@@ -296,7 +296,7 @@ static UniValue getrpcinfo(const JSONRPCRequest& request)
             RPCHelpMan{"getrpcinfo",
                 "\nReturns details of the RPC server.\n",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{""},
             }.ToString()
         );

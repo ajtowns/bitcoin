@@ -107,11 +107,38 @@ struct RPCArg {
 };
 
 struct RPCResult {
+    const std::string m_cond;
     const std::string m_result;
 
-    RPCResult(
-        std::string result)
-        : m_result(std::move(result))
+    RPCResult() = delete;
+    explicit RPCResult(std::string result)
+        : m_cond{}, m_result{std::move(result)}
+    {
+    }
+
+    explicit RPCResult(std::string cond, std::string result)
+        : m_cond{std::move(cond)}, m_result{std::move(result)}
+    {
+        assert(!m_cond.empty());
+        assert(!m_result.empty());
+    }
+};
+
+struct RPCResults {
+    const std::vector<RPCResult> m_results;
+
+    explicit RPCResults()
+        : m_results{}
+    {
+    }
+
+    RPCResults(RPCResult result)
+        : m_results{{result}}
+    {
+    }
+
+    RPCResults(std::initializer_list<RPCResult> results)
+        : m_results{results}
     {
     }
 
@@ -134,7 +161,7 @@ struct RPCExamples {
 class RPCHelpMan
 {
 public:
-    RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResult result, RPCExamples examples);
+    RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples);
 
     std::string ToString() const;
 
@@ -142,7 +169,7 @@ private:
     const std::string m_name;
     const std::string m_description;
     const std::vector<RPCArg> m_args;
-    const RPCResult m_result;
+    const RPCResults m_results;
     const RPCExamples m_examples;
 };
 

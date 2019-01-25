@@ -56,7 +56,7 @@ static UniValue ping(const JSONRPCRequest& request)
                 "Results provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.\n"
                 "Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.\n",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("ping", "")
             + HelpExampleRpc("ping", "")
@@ -224,7 +224,7 @@ static UniValue addnode(const JSONRPCRequest& request)
                     {"node", RPCArg::Type::STR, /* opt */ false, /* default_val */ "", "The node (see getpeerinfo for nodes)"},
                     {"command", RPCArg::Type::STR, /* opt */ false, /* default_val */ "", "'add' to add a node to the list, 'remove' to remove a node from the list, 'onetry' to try a connection to the node once"},
                 },
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("addnode", "\"192.168.0.6:8333\" \"onetry\"")
             + HelpExampleRpc("addnode", "\"192.168.0.6:8333\", \"onetry\"")
@@ -269,7 +269,7 @@ static UniValue disconnectnode(const JSONRPCRequest& request)
                     {"address", RPCArg::Type::STR, /* opt */ true, /* default_val */ "fallback to nodeid", "The IP address/port of the node"},
                     {"nodeid", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "fallback to address", "The node ID (see getpeerinfo for node IDs)"},
                 },
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("disconnectnode", "\"192.168.0.6:8333\"")
             + HelpExampleCli("disconnectnode", "\"\" 1")
@@ -537,7 +537,7 @@ static UniValue setban(const JSONRPCRequest& request)
                     {"bantime", RPCArg::Type::NUM, /* opt */ true, /* default_val */ "0", "time in seconds how long (or until when if [absolute] is set) the IP is banned (0 or empty means using the default time of 24h which can also be overwritten by the -bantime startup argument)"},
                     {"absolute", RPCArg::Type::BOOL, /* opt */ true, /* default_val */ "false", "If set, the bantime must be an absolute timestamp in seconds since epoch (Jan 1 1970 GMT)"},
                 },
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("setban", "\"192.168.0.6\" \"add\" 86400")
                             + HelpExampleCli("setban", "\"192.168.0.0/24\" \"add\"")
@@ -608,7 +608,7 @@ static UniValue listbanned(const JSONRPCRequest& request)
             RPCHelpMan{"listbanned",
                 "\nList all banned IPs/Subnets.\n",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("listbanned", "")
                             + HelpExampleRpc("listbanned", "")
@@ -645,7 +645,7 @@ static UniValue clearbanned(const JSONRPCRequest& request)
             RPCHelpMan{"clearbanned",
                 "\nClear all banned IPs.\n",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{
                     HelpExampleCli("clearbanned", "")
                             + HelpExampleRpc("clearbanned", "")
@@ -669,7 +669,7 @@ static UniValue setnetworkactive(const JSONRPCRequest& request)
                 {
                     {"state", RPCArg::Type::BOOL, /* opt */ false, /* default_val */ "", "true to enable networking, false to disable"},
                 },
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{""},
             }.ToString()
         );

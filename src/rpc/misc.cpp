@@ -253,7 +253,7 @@ static UniValue setmocktime(const JSONRPCRequest& request)
                     {"timestamp", RPCArg::Type::NUM, /* opt */ false, /* default_val */ "", "Unix seconds-since-epoch timestamp\n"
             "   Pass 0 to go back to using the system time."},
                 },
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{""},
             }.ToString()
         );
@@ -320,8 +320,7 @@ static UniValue getmemoryinfo(const JSONRPCRequest& request)
             "  - \"stats\" returns general statistics about memory usage in the daemon.\n"
             "  - \"mallocinfo\" returns an XML string describing low-level heap state (only available if compiled with glibc 2.10+)."},
                 },
-                RPCResult{
-            "\nResult (mode \"stats\"):\n"
+                { RPCResult{"mode \"stats\"",
             "{\n"
             "  \"locked\": {               (json object) Information about locked memory manager\n"
             "    \"used\": xxxxx,          (numeric) Number of bytes used\n"
@@ -331,9 +330,8 @@ static UniValue getmemoryinfo(const JSONRPCRequest& request)
             "    \"chunks_used\": xxxxx,   (numeric) Number allocated chunks\n"
             "    \"chunks_free\": xxxxx,   (numeric) Number unused chunks\n"
             "  }\n"
-            "}\n"
-            "\nResult (mode \"mallocinfo\"):\n"
-            "\"<malloc version=\"1\">...\"\n"
+            "}\n"}, RPCResult{"mode \"mallocinfo\"",
+            "\"<malloc version=\"1\">...\"\n"}
                 },
                 RPCExamples{
                     HelpExampleCli("getmemoryinfo", "")
@@ -455,7 +453,7 @@ static UniValue echo(const JSONRPCRequest& request)
                 "\nThe difference between echo and echojson is that echojson has argument conversion enabled in the client-side table in "
                 "bitcoin-cli and the GUI. There is no server-side difference.",
                 {},
-                RPCResult{""},
+                RPCResults{},
                 RPCExamples{""},
             }.ToString()
         );

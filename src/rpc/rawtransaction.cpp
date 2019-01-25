@@ -83,11 +83,9 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
                     {"verbose", RPCArg::Type::BOOL, /* opt */ true, /* default_val */ "false", "If false, return a string, otherwise return a json object"},
                     {"blockhash", RPCArg::Type::STR_HEX, /* opt */ true, /* default_val */ "null", "The block in which to look for the transaction"},
                 },
-                RPCResult{
-            "\nResult (if verbose is not set or set to false):\n"
+                {RPCResult{"if verbose is not set or set to false",
             "\"data\"      (string) The serialized, hex-encoded data for 'txid'\n"
-
-            "\nResult (if verbose is set to true):\n"
+                 }, RPCResult{"if verbose is set to true",
             "{\n"
             "  \"in_active_chain\": b, (bool) Whether specified block is in the active chain or not (only present with explicit \"blockhash\" argument)\n"
             "  \"hex\" : \"data\",       (string) The serialized, hex-encoded data for 'txid'\n"
@@ -132,7 +130,7 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
             "  \"confirmations\" : n,      (numeric) The confirmations\n"
             "  \"blocktime\" : ttt         (numeric) The block time in seconds since epoch (Jan 1 1970 GMT)\n"
             "  \"time\" : ttt,             (numeric) Same as \"blocktime\"\n"
-            "}\n"
+            "}\n"}
                 },
                 RPCExamples{
                     HelpExampleCli("getrawtransaction", "\"mytxid\"")
