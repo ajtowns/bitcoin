@@ -359,7 +359,7 @@ struct CNodeState {
     bool m_is_manual_connection;
 
     CNodeState(CAddress addrIn, std::string addrNameIn, bool is_inbound, bool is_manual) :
-        address(addrIn), name(addrNameIn), m_is_inbound(is_inbound),
+        address(addrIn), name(std::move(addrNameIn)), m_is_inbound(is_inbound),
         m_is_manual_connection (is_manual)
     {
         fCurrentlyConnected = false;
