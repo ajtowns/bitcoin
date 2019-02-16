@@ -66,6 +66,7 @@ inline Consensus::Deployment DeploymentAlwaysActive()
     res.bit = b;
     res.nStartTime = Consensus::Deployment::ALWAYS_ACTIVE;
     res.nTimeout = Consensus::Deployment::NO_TIMEOUT;
+    res.nFlagTime = 0;
     return res;
 }
 
@@ -79,21 +80,25 @@ inline Consensus::Deployment DeploymentAtFixedHeight()
     res.bit = 33;
     res.nStartTime = height;
     res.nTimeout = Consensus::Deployment::FIXED_ACTIVATION_HEIGHT;
+    res.nFlagTime = 0;
     return res;
 }
 
-template <int b, int64_t start, int64_t end>
+template <int b, int64_t start, int64_t end, int64_t flag=0>
 inline Consensus::Deployment DeploymentByBIP9()
 {
     static_assert(0 <= b && b <= 28, "Version bit must be between 0 and 28");
     static_assert(start != Consensus::Deployment::ALWAYS_ACTIVE, "Use DeploymentAlwaysActive()");
     static_assert(end != Consensus::Deployment::DISABLED, "Use DeploymentDisabled()");
     static_assert(end >= start, "End time must be greater than start time");
+    static_assert(flag == 0 || flag >= start, "Flag time must be greater than start time");
+    static_assert(flag == 0 || flag <= end - (12*7*24*60*60), "Flag time must be at least 12 weeks before end time");
 
     Consensus::Deployment res;
     res.bit = b;
     res.nStartTime = start;
     res.nTimeout = end;
+    res.nFlagTime = flag;
     return res;
 }
 
@@ -103,6 +108,7 @@ inline Consensus::Deployment DeploymentDisabled()
     res.bit = 33;
     res.nStartTime = 0;
     res.nTimeout = Consensus::Deployment::DISABLED;
+    res.nFlagTime = 0;
     return res;
 }
 
@@ -398,6 +404,7 @@ public:
     {
         consensus.vDeployments[d].nStartTime = nStartTime;
         consensus.vDeployments[d].nTimeout = nTimeout;
+        consensus.vDeployments[d].nFlagTime = 0;
     }
     void UpdateVersionBitsParametersFromArgs(const ArgsManager& args);
 };

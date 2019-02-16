@@ -44,6 +44,7 @@
 #include <util/system.h>
 #include <util/validation.h>
 #include <validationinterface.h>
+#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <future>
@@ -1954,6 +1955,15 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int nLockTimeFlags = 0;
     if (VersionBitsActive(pindex->pprev, chainparams.GetConsensus(), Consensus::DEPLOYMENT_CSV, versionbitscache)) {
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
+    }
+
+    for (int i = 0; i < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
+        auto pos = static_cast<Consensus::DeploymentPos>(i);
+        if (VersionBitsMandatory(pindex->pprev, chainparams.GetConsensus(), pos, versionbitscache)) {
+            if (!VersionBitsSignalling(pindex, chainparams.GetConsensus(), pos)) {
+                return state.Invalid(ValidationInvalidReason::RECENT_CONSENSUS_CHANGE, error("ConnectBlock(): relayed block must signal for %s deployment", VersionBitsDeploymentInfo[pos].name), REJECT_INVALID, "version-bits-flag-day");
+            }
+        }
     }
 
     // Get the script flags for this block

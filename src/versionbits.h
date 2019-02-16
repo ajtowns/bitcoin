@@ -68,9 +68,26 @@ BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::
 int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
 uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
+inline bool VersionBitsSignalling(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    if ((pindex->nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) return false;
+    return (pindex->nVersion & VersionBitsMask(params, pos)) != 0;
+}
+
 inline bool VersionBitsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache)
 {
     return VersionBitsState(pindexPrev, params, pos, cache) == ThresholdState::ACTIVE;
+}
+
+inline bool VersionBitsMandatory(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache)
+{
+    int64_t flag_time = params.vDeployments[pos].nFlagTime;
+    if (flag_time > 0 && VersionBitsState(pindexPrev, params, pos, cache) == ThresholdState::STARTED) {
+        int64_t mtp = pindexPrev->GetMedianTimePast();
+        return mtp >= flag_time && mtp < params.vDeployments[pos].nTimeout;
+     } else {
+        return false;
+     }
 }
 
 #endif // BITCOIN_VERSIONBITS_H

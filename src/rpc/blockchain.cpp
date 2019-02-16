@@ -1270,6 +1270,7 @@ static UniValue BIP9SoftForkDesc(const Consensus::Params& consensusParams, Conse
     }
     rv.pushKV("startTime", consensusParams.vDeployments[id].nStartTime);
     rv.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
+    rv.pushKV("flagtime", consensusParams.vDeployments[id].nFlagTime);
     rv.pushKV("since", VersionBitsTipStateSinceHeight(consensusParams, id));
     if (ThresholdState::STARTED == thresholdState)
     {
