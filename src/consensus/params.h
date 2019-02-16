@@ -41,6 +41,11 @@ struct Deployment {
      *  process (which takes at least 3 BIP9 intervals). Only tests that specifically test the
      *  behaviour during activation cannot use this. */
     static constexpr int64_t ALWAYS_ACTIVE = -1;
+
+    /** Special value for nTimeout indicating that the deployment is never active.
+     *  This is useful for integrating code changes or activation on regtest/testnet
+     *  before the deployment parameters for mainnet are set. */
+    static constexpr int64_t DISABLED = 0;
 };
 
 /**
