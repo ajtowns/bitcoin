@@ -1290,7 +1290,7 @@ static void BIP9SoftForkDescPushBack(UniValue& bip9_softforks, const Consensus::
     // Deployments with timeout value of 0 are hidden.
     // A timeout value of 0 guarantees a softfork will never be activated.
     // This is used when softfork codes are merged without specifying the deployment schedule.
-    if (consensusParams.vDeployments[id].nTimeout > 0)
+    if (consensusParams.vDeployments[id].nTimeout != 0)
         bip9_softforks.pushKV(VersionBitsDeploymentInfo[id].name, BIP9SoftForkDesc(consensusParams, id));
 }
 
