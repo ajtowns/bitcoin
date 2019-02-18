@@ -69,6 +69,19 @@ inline Consensus::Deployment DeploymentAlwaysActive()
     return res;
 }
 
+template <int64_t height>
+inline Consensus::Deployment DeploymentAtFixedHeight()
+{
+    static_assert(0 < height, "Use DeploymentAlwaysActive() or set positive height for fixed activation");
+    static_assert(height < 500000000, "Fixed activation height should not look like a timestamp");
+
+    Consensus::Deployment res;
+    res.bit = 33;
+    res.nStartTime = height;
+    res.nTimeout = Consensus::Deployment::FIXED_ACTIVATION_HEIGHT;
+    return res;
+}
+
 template <int b, int64_t start, int64_t end>
 inline Consensus::Deployment DeploymentByBIP9()
 {

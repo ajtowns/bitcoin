@@ -15,6 +15,16 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
     // Check if this deployment is always active.
     if (nTimeStart == Consensus::Deployment::ALWAYS_ACTIVE) {
         return ThresholdState::ACTIVE;
+    } else if (pindexPrev == nullptr) {
+        return ThresholdState::DEFINED;
+    }
+
+    if (nTimeTimeout == Consensus::Deployment::FIXED_ACTIVATION_HEIGHT) {
+        if (pindexPrev->nHeight + 1 < nTimeStart) {
+            return ThresholdState::DEFINED;
+        } else {
+            return ThresholdState::ACTIVE;
+        }
     }
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
@@ -129,6 +139,15 @@ int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex*
     int64_t start_time = BeginTime(params);
     if (start_time == Consensus::Deployment::ALWAYS_ACTIVE) {
         return 0;
+    }
+
+    int64_t end_time = EndTime(params);
+    if (end_time == Consensus::Deployment::FIXED_ACTIVATION_HEIGHT) {
+        if (pindexPrev == nullptr || pindexPrev->nHeight + 1 < start_time) {
+            return 0;
+        } else {
+            return start_time;
+        }
     }
 
     const ThresholdState initialState = GetStateFor(pindexPrev, params, cache);
