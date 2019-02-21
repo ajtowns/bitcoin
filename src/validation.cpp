@@ -907,6 +907,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
                 state.DoS(0, ValidationInvalidReason::TX_WITNESS_MUTATED, false,
                           state.GetRejectCode(), state.GetRejectReason(), true, state.GetDebugMessage());
             }
+            assert(IsTransactionReason(state.GetReason()));
             return false; // state filled in by CheckInputs
         }
 
@@ -1982,6 +1983,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                     state.DoS(100, ValidationInvalidReason::CONSENSUS, false,
                               state.GetRejectCode(), state.GetRejectReason(), state.CorruptionPossible(), state.GetDebugMessage());
                 }
+                assert(IsBlockReason(state.GetReason()));
                 return error("%s: Consensus::CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
             }
             nFees += txfee;
@@ -3495,6 +3497,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
 
     if (!CheckBlock(block, state, chainparams.GetConsensus()) ||
         !ContextualCheckBlock(block, state, chainparams.GetConsensus(), pindex->pprev)) {
+        assert(IsBlockReason(state.GetReason()));
         if (state.IsInvalid() && state.GetReason() != ValidationInvalidReason::BLOCK_MUTATED) {
             pindex->nStatus |= BLOCK_FAILED_VALID;
             setDirtyBlockIndex.insert(pindex);
