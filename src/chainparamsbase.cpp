@@ -21,6 +21,7 @@ void SetupChainParamsBaseOptions()
                                    "This is intended for regression testing tools and app development.", true, OptionsCategory::CHAINPARAMS);
     gArgs.AddArg("-testnet", "Use the test chain", false, OptionsCategory::CHAINPARAMS);
     gArgs.AddArg("-vbparams=deployment:start:end", "Use given start/end times for specified version bits deployment (regtest-only)", true, OptionsCategory::CHAINPARAMS);
+    gArgs.AddArg("-vbflagtime=deployment:flagtime", "Use given time for forced flag day activation of specified version bits deployment (DANGER)", true, OptionsCategory::CHAINPARAMS);
 }
 
 static std::unique_ptr<CBaseChainParams> globalChainBaseParams;

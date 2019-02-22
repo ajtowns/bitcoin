@@ -84,6 +84,9 @@ public:
     const std::vector<SeedSpec6>& FixedSeeds() const { return vFixedSeeds; }
     const CCheckpointData& Checkpoints() const { return checkpointData; }
     const ChainTxData& TxData() const { return chainTxData; }
+
+    void SetDeploymentFlagTime(Consensus::DeploymentPos pos, int64_t nFlagTime) { consensus.vDeployments[pos].nFlagTime = nFlagTime; }
+
 protected:
     CChainParams() {}
 

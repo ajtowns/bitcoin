@@ -112,6 +112,41 @@ inline Consensus::Deployment DeploymentDisabled()
     return res;
 }
 
+static void UpdateVersionBitsFlagDayFromArgs(CChainParams& chain, const ArgsManager& args)
+{
+    if (!args.IsArgSet("-vbflagtime")) return;
+
+    for (const std::string& strDeployment : args.GetArgs("-vbflagtime")) {
+        std::vector<std::string> vDeploymentParams;
+        boost::split(vDeploymentParams, strDeployment, boost::is_any_of(":"));
+        if (vDeploymentParams.size() != 2) {
+            throw std::runtime_error("Version bits flag day parameter malformed, expecting deployment:flagtime");
+        }
+        int64_t nFlagTime;
+        if (!ParseInt64(vDeploymentParams[1], &nFlagTime)) {
+            throw std::runtime_error(strprintf("Invalid flag time (%s)", vDeploymentParams[1]));
+        }
+        bool found = false;
+        for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+            if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
+                const auto& dep = chain.GetConsensus().vDeployments[j];
+                if (dep.nStartTime >= 0 && nFlagTime >= dep.nStartTime && nFlagTime < dep.nTimeout) {
+                    chain.SetDeploymentFlagTime(Consensus::DeploymentPos(j), nFlagTime);
+                    LogPrintf("Setting version bits flag time parameters for %s to %ld\n", vDeploymentParams[0], nFlagTime);
+                } else {
+                    LogPrintf("Invalid flag time for %s (start=%ld, timeout=%ld)\n", vDeploymentParams[0], dep.nStartTime, dep.nTimeout);
+                }
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw std::runtime_error(strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
+        }
+    }
+}
+
+
 /**
  * Main network
  */
@@ -450,13 +485,18 @@ const CChainParams &Params() {
 
 std::unique_ptr<const CChainParams> CreateChainParams(const std::string& chain)
 {
+    CChainParams* chain_params;
     if (chain == CBaseChainParams::MAIN)
-        return std::unique_ptr<CChainParams>(new CMainParams());
+        chain_params = new CMainParams();
     else if (chain == CBaseChainParams::TESTNET)
-        return std::unique_ptr<CChainParams>(new CTestNetParams());
+        chain_params = new CTestNetParams();
     else if (chain == CBaseChainParams::REGTEST)
-        return std::unique_ptr<CChainParams>(new CRegTestParams(gArgs));
-    throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
+        chain_params = new CRegTestParams(gArgs);
+    else
+        throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
+
+    UpdateVersionBitsFlagDayFromArgs(*chain_params, gArgs);
+    return std::unique_ptr<CChainParams>(chain_params);
 }
 
 void SelectParams(const std::string& network)
