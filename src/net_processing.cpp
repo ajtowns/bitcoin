@@ -967,29 +967,8 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
  * us.
  */
 static bool TxRelayMayResultInDisconnect(const CValidationState& state) {
-    switch (state.GetReason()) {
-    case ValidationInvalidReason::NONE:
-        return false;
-    // The node is providing invalid data:
-    case ValidationInvalidReason::CONSENSUS:
-    case ValidationInvalidReason::BLOCK_MUTATED:
-    case ValidationInvalidReason::CACHED_INVALID:
-    case ValidationInvalidReason::BLOCK_INVALID_HEADER:
-    case ValidationInvalidReason::BLOCK_CHECKPOINT:
-    case ValidationInvalidReason::BLOCK_INVALID_PREV:
-    case ValidationInvalidReason::BLOCK_MISSING_PREV:
-        return true;
-    // Conflicting (but not necessarily invalid) data or different policy:
-    case ValidationInvalidReason::RECENT_CONSENSUS_CHANGE:
-    case ValidationInvalidReason::BLOCK_BAD_TIME:
-    case ValidationInvalidReason::TX_NOT_STANDARD:
-    case ValidationInvalidReason::TX_MISSING_INPUTS:
-    case ValidationInvalidReason::TX_WITNESS_MUTATED:
-    case ValidationInvalidReason::TX_CONFLICT:
-    case ValidationInvalidReason::TX_MEMPOOL_POLICY:
-        return false;
-    }
-    return false;
+    assert(IsTransactionReason(state.GetReason()));
+    return state.GetReason() == ValidationInvalidReason::CONSENSUS;
 }
 
 //! Returns true if the peer was punished (probably disconnected)
