@@ -102,6 +102,7 @@ BASE_SCRIPTS = [
     'wallet_listreceivedby.py',
     'wallet_abandonconflict.py',
     'feature_csv_activation.py',
+    'feature_vb_activation.py',
     'rpc_rawtransaction.py',
     'wallet_address_types.py',
     'feature_bip68_sequence.py',
