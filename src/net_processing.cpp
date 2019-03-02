@@ -1002,7 +1002,7 @@ static bool MaybePunishNode(NodeId nodeid, const CValidationState& state, bool v
                 break;
             }
 
-            // Disconnect outbound (but not inbound) peers if on an invalid chain.
+            // Ban outbound (but not inbound) peers if on an invalid chain.
             // Exempt HB compact block peers and manual connections.
             if (!via_compact_block && !node_state->m_is_inbound && !node_state->m_is_manual_connection) {
                 Misbehaving(nodeid, 100, message);
