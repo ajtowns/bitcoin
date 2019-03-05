@@ -960,7 +960,7 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
         LogPrint(BCLog::NET, "%s: %s peer=%d (%d -> %d)%s\n", __func__, state->name, pnode, state->nMisbehavior-howmuch, state->nMisbehavior, message_prefixed);
 }
 
-static bool MayResultInDisconnect(const CValidationState& state, bool via_compact_block) {
+static bool TxRelayMayResultInDisconnect(const CValidationState& state) {
     return (state.GetDoS() > 0);
 }
 
@@ -2501,7 +2501,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // Never relay transactions that we would assign a non-zero DoS
                 // score for, as we expect peers to do the same with us in that
                 // case.
-                if (!state.IsInvalid() || !MayResultInDisconnect(state, false)) {
+                if (!state.IsInvalid() || !TxRelayMayResultInDisconnect(state)) {
                     LogPrintf("Force relaying tx %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->GetId());
                     RelayTransaction(tx, connman);
                 } else {
