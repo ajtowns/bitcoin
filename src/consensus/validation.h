@@ -74,26 +74,26 @@ private:
         MODE_INVALID, //!< network rule violation (DoS value may be set)
         MODE_ERROR,   //!< run-time error
     } mode;
-    ValidationInvalidReason reason;
+    ValidationInvalidReason m_reason;
     int nDoS;
     std::string strRejectReason;
     unsigned int chRejectCode;
     bool corruptionPossible;
     std::string strDebugMessage;
 public:
-    CValidationState() : mode(MODE_VALID), reason(ValidationInvalidReason::NONE), nDoS(0), chRejectCode(0), corruptionPossible(false) {}
-    bool DoS(int level, ValidationInvalidReason reasonIn, bool ret = false,
+    CValidationState() : mode(MODE_VALID), m_reason(ValidationInvalidReason::NONE), nDoS(0), chRejectCode(0), corruptionPossible(false) {}
+    bool DoS(int level, ValidationInvalidReason reason, bool ret = false,
              unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
              bool corruptionIn=false,
              const std::string &strDebugMessageIn="") {
-        reason = reasonIn;
+        m_reason = reason;
         chRejectCode = chRejectCodeIn;
         strRejectReason = strRejectReasonIn;
         corruptionPossible = corruptionIn;
         strDebugMessage = strDebugMessageIn;
         nDoS = level;
         assert(nDoS == GetDoSForReason());
-        assert(corruptionPossible == (reason == ValidationInvalidReason::BLOCK_MUTATED || reason == ValidationInvalidReason::TX_WITNESS_MUTATED));
+        assert(corruptionPossible == (reason == ValidationInvalidReason::BLOCK_MUTATED || m_reason == ValidationInvalidReason::TX_WITNESS_MUTATED));
         if (mode == MODE_ERROR)
             return ret;
         mode = MODE_INVALID;
@@ -120,16 +120,16 @@ public:
         return mode == MODE_ERROR;
     }
     bool CorruptionPossible() const {
-        assert(corruptionPossible == (reason == ValidationInvalidReason::BLOCK_MUTATED || reason == ValidationInvalidReason::TX_WITNESS_MUTATED));
+        assert(corruptionPossible == (m_reason == ValidationInvalidReason::BLOCK_MUTATED || m_reason == ValidationInvalidReason::TX_WITNESS_MUTATED));
         return corruptionPossible;
     }
     void SetCorruptionPossible() {
         corruptionPossible = true;
-        assert(corruptionPossible == (reason == ValidationInvalidReason::BLOCK_MUTATED || reason == ValidationInvalidReason::TX_WITNESS_MUTATED));
+        assert(m_reason == ValidationInvalidReason::BLOCK_MUTATED || m_reason == ValidationInvalidReason::TX_WITNESS_MUTATED);
     }
     int GetDoS(void) const { return nDoS; }
     int GetDoSForReason() const {
-        switch (reason) {
+        switch (m_reason) {
         case ValidationInvalidReason::NONE:
             return 0;
         case ValidationInvalidReason::CONSENSUS:
@@ -153,7 +153,7 @@ public:
             assert(false);
         }
     }
-    ValidationInvalidReason GetReason() const { return reason; }
+    ValidationInvalidReason GetReason() const { return m_reason; }
     unsigned int GetRejectCode() const { return chRejectCode; }
     std::string GetRejectReason() const { return strRejectReason; }
     std::string GetDebugMessage() const { return strDebugMessage; }
