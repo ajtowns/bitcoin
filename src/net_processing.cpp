@@ -960,6 +960,12 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
         LogPrint(BCLog::NET, "%s: %s peer=%d (%d -> %d)%s\n", __func__, state->name, pnode, state->nMisbehavior-howmuch, state->nMisbehavior, message_prefixed);
 }
 
+/**
+ * Returns true if the given validation state result may result in us banning/disconnecting a peer
+ * which provided such an object. This is used to determine whether to relay transactions to
+ * whitelisted peers, preventing us from relaying things which would result in them disconnecting
+ * us.
+ */
 static bool TxRelayMayResultInDisconnect(const CValidationState& state) {
     return (state.GetDoS() > 0);
 }
