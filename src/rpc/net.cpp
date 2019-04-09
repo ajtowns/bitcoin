@@ -178,6 +178,8 @@ static UniValue getpeerinfo(const JSONRPCRequest& request)
             obj.pushKV("banscore", statestats.nMisbehavior);
             obj.pushKV("synced_headers", statestats.nSyncHeight);
             obj.pushKV("synced_blocks", statestats.nCommonHeight);
+            obj.pushKV("tx_inflight", statestats.nTxInFlight);
+            obj.pushKV("tx_process", statestats.nTxProcess);
             UniValue heights(UniValue::VARR);
             for (const int height : statestats.vHeightInFlight) {
                 heights.push_back(height);
