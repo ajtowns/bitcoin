@@ -72,6 +72,8 @@ static constexpr int32_t MAX_PEER_TX_ANNOUNCEMENTS = 2 * MAX_INV_SZ;
 static constexpr int64_t INBOUND_PEER_TX_DELAY = 2 * 1000000;
 /** How long to wait (in microseconds) before downloading a transaction from an additional peer */
 static constexpr int64_t GETDATA_TX_INTERVAL = 60 * 1000000;
+/** How long before a download request is considered timedout */
+static constexpr int64_t GETDATA_TX_TIMEOUT = 3 * GETDATA_TX_INTERVAL;
 /** Maximum delay (in microseconds) for transaction requests to avoid biasing some peers over others. */
 static constexpr int64_t MAX_GETDATA_RANDOM_DELAY = 2 * 1000000;
 static_assert(INBOUND_PEER_TX_DELAY >= MAX_GETDATA_RANDOM_DELAY,
@@ -346,8 +348,8 @@ struct CNodeState {
         //! Store all the transactions a peer has recently announced
         std::set<uint256> m_tx_announced;
 
-        //! Store transactions which were requested by us
-        std::set<uint256> m_tx_in_flight;
+        //! Store transactions which were requested by us and when they were requested
+        std::map<uint256, int64_t> m_tx_in_flight;
     };
 
     TxDownloadState m_tx_download;
@@ -3940,7 +3942,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                         vGetData.clear();
                     }
                     UpdateTxRequestTime(inv.hash, nNow);
-                    state.m_tx_download.m_tx_in_flight.insert(inv.hash);
+                    state.m_tx_download.m_tx_in_flight.emplace(inv.hash, nNow);
                 } else {
                     // This transaction is in flight from someone else; queue
                     // up processing to happen after the download times out
@@ -3955,7 +3957,15 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             }
             tx_process_time.erase(tx_process_time.begin());
         }
-
+        for (auto it = state.m_tx_download.m_tx_in_flight.begin(); it != state.m_tx_download.m_tx_in_flight.end(); ) {
+            if (it->second + GETDATA_TX_TIMEOUT < nNow) {
+                LogPrint(BCLog::NET, "timeout of inflight tx %s from peer %d\n", it->first.ToString(), pto->GetId());
+                state.m_tx_download.m_tx_announced.erase(it->first);
+                it = state.m_tx_download.m_tx_in_flight.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
         if (!vGetData.empty())
             connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));

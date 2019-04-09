@@ -100,8 +100,8 @@ class InvalidTxRequestTest(BitcoinTestFramework):
 
         time.sleep(1*60) # 3 mins total, plus a bit
         self.p2p_withheld_tx(20)
-        assert_equal(len(node.p2p.getdata_requests), 0) # is requesting again, including missed ones
-        self.log.info("Now have 60 unasked-for transactions queued...")
+        assert_equal(len(node.p2p.getdata_requests), 60) # is requesting again, including missed ones
+        self.log.info("Asked for 40 old transactions and 20 brand new ones...")
 
         assert_equal(0, node.getmempoolinfo()['size'])  # Mempool should be empty
         assert_equal(1, len(node.getpeerinfo()))  # still connected
