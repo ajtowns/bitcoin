@@ -79,6 +79,7 @@ BASE_SCRIPTS = [
     'rpc_fundrawtransaction.py',
     'p2p_compactblocks.py',
     'feature_segwit.py',
+    'p2p_getdata_failure.py',
     # vv Tests less than 2m vv
     'wallet_basic.py',
     'wallet_labels.py',
