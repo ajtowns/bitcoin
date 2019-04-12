@@ -1542,6 +1542,8 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
                 }
             }
             if (!push) {
+                auto txinfo = mempool.info(inv.hash);
+                LogPrint(BCLog::NET, "will send notfound for: %s %ds in mempool peer=%d\n", inv.hash.ToString(), (txinfo.tx ? GetTime() - txinfo.nTime : -1), pfrom->GetId());
                 vNotFound.push_back(inv);
             }
         }
