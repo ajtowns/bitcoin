@@ -29,7 +29,7 @@ TransactionError BroadcastTransaction(const CTransactionRef tx, uint256& hashTx,
     bool fHaveMempool = mempool.exists(hashTx);
     if (!fHaveMempool && !fHaveChain) {
         // push to local node and sync with wallets
-        CValidationState state;
+        TxValidationState state;
         bool fMissingInputs;
         if (!AcceptToMemoryPool(mempool, state, std::move(tx), &fMissingInputs,
                                 nullptr /* plTxnReplaced */, false /* bypass_limits */, highfee)) {

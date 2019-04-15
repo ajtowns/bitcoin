@@ -1892,7 +1892,7 @@ void CWallet::ReacceptWalletTransactions(interfaces::Chain::Lock& locked_chain)
     // Try to add wallet transactions to memory pool
     for (const std::pair<const int64_t, CWalletTx*>& item : mapSorted) {
         CWalletTx& wtx = *(item.second);
-        CValidationState state;
+        TxValidationState state;
         wtx.AcceptToMemoryPool(locked_chain, state);
     }
 }
@@ -1908,7 +1908,7 @@ bool CWalletTx::RelayWalletTransaction(interfaces::Chain::Lock& locked_chain)
     // Don't relay conflicted or already confirmed transactions
     if (GetDepthInMainChain(locked_chain) != 0) return false;
     // Don't relay transactions that aren't accepted to the mempool
-    CValidationState unused_state;
+    TxValidationState unused_state;
     if (!InMempool() && !AcceptToMemoryPool(locked_chain, unused_state)) return false;
     // Don't try to relay if the node is not connected to the p2p network
     if (!pwallet->chain().p2pEnabled()) return false;
@@ -3066,7 +3066,7 @@ bool CWallet::CreateTransaction(interfaces::Chain::Lock& locked_chain, const std
 /**
  * Call after CreateTransaction unless you want to abort
  */
-bool CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, CReserveKey& reservekey, CValidationState& state)
+bool CWallet::CommitTransaction(CTransactionRef tx, mapValue_t mapValue, std::vector<std::pair<std::string, std::string>> orderForm, CReserveKey& reservekey, TxValidationState& state)
 {
     {
         auto locked_chain = chain().lock();
@@ -4387,7 +4387,7 @@ bool CMerkleTx::IsImmatureCoinBase(interfaces::Chain::Lock& locked_chain) const
     return GetBlocksToMaturity(locked_chain) > 0;
 }
 
-bool CWalletTx::AcceptToMemoryPool(interfaces::Chain::Lock& locked_chain, CValidationState& state)
+bool CWalletTx::AcceptToMemoryPool(interfaces::Chain::Lock& locked_chain, TxValidationState& state)
 {
     // We must set fInMempool here - while it will be re-set to true by the
     // entered-mempool callback, if we did not there would be a race where a

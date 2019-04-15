@@ -23,7 +23,7 @@ static const unsigned char REJECT_INSUFFICIENTFEE = 0x42;
 static const unsigned char REJECT_CHECKPOINT = 0x43;
 
 /** Capture information about block/transaction validation */
-class CValidationState {
+class BaseValidationState {
 private:
     enum mode_state {
         MODE_VALID,   //!< everything ok
@@ -36,7 +36,7 @@ private:
     bool corruptionPossible;
     std::string strDebugMessage;
 public:
-    CValidationState() : mode(MODE_VALID), nDoS(0), chRejectCode(0), corruptionPossible(false) {}
+    BaseValidationState() : mode(MODE_VALID), nDoS(0), chRejectCode(0), corruptionPossible(false) {}
     bool DoS(int level, bool ret = false,
              unsigned int chRejectCodeIn=0, const std::string &strRejectReasonIn="",
              bool corruptionIn=false,
@@ -81,6 +81,14 @@ public:
     unsigned int GetRejectCode() const { return chRejectCode; }
     std::string GetRejectReason() const { return strRejectReason; }
     std::string GetDebugMessage() const { return strDebugMessage; }
+};
+
+class TxValidationState : public BaseValidationState { };
+class BlockValidationState : public BaseValidationState {
+public:
+    void FromTxValidationState(TxValidationState tx_state) {
+        DoS(tx_state.GetDoS(), false, tx_state.GetRejectCode(), tx_state.GetRejectReason(), tx_state.CorruptionPossible(), tx_state.GetDebugMessage());
+    }
 };
 
 // These implement the weight = (stripped_size * 4) + witness_size formula,

@@ -18,8 +18,8 @@ class CBlock;
 class CFeeRate;
 class CRPCCommand;
 class CScheduler;
-class CValidationState;
 class Coin;
+class TxValidationState;
 class uint256;
 enum class RBFTransactionState;
 struct CBlockLocator;
@@ -151,7 +151,7 @@ public:
         //! Add transaction to memory pool if the transaction fee is below the
         //! amount specified by absurd_fee. Returns false if the transaction
         //! could not be added due to the fee or for another reason.
-        virtual bool submitToMemoryPool(const CTransactionRef& tx, CAmount absurd_fee, CValidationState& state) = 0;
+        virtual bool submitToMemoryPool(const CTransactionRef& tx, CAmount absurd_fee, TxValidationState& state) = 0;
     };
 
     //! Return Lock interface. Chain is locked when this is called, and

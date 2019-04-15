@@ -156,7 +156,7 @@ class LockImpl : public Chain::Lock
         LockAnnotation lock(::cs_main);
         return CheckFinalTx(tx);
     }
-    bool submitToMemoryPool(const CTransactionRef& tx, CAmount absurd_fee, CValidationState& state) override
+    bool submitToMemoryPool(const CTransactionRef& tx, CAmount absurd_fee, TxValidationState& state) override
     {
         LockAnnotation lock(::cs_main);
         return AcceptToMemoryPool(::mempool, state, tx, nullptr /* missing inputs */, nullptr /* txn replaced */,

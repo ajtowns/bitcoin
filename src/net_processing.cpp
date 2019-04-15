@@ -959,23 +959,41 @@ void Misbehaving(NodeId pnode, int howmuch, const std::string& message) EXCLUSIV
         LogPrint(BCLog::NET, "%s: %s peer=%d (%d -> %d)%s\n", __func__, state->name, pnode, state->nMisbehavior-howmuch, state->nMisbehavior, message_prefixed);
 }
 
-static bool MayResultInDisconnect(const CValidationState& state, bool via_compact_block) {
+static bool TxRelayMayResultInDisconnect(const TxValidationState& state) {
     return (state.GetDoS() > 0);
 }
 
 /**
- * Potentially ban a node based on the contents of a CValidationState object
+ * Potentially ban a node based on the contents of a BlockValidationState object
  * TODO: net_processing should make the punish decision based on the reason
- * a tx/block was invalid, rather than just the nDoS score handed back by validation.
+ * a block was invalid, rather than just the nDoS score handed back by validation.
  *
  * @parameter via_compact_block: this bool is passed in because net_processing should
  * punish peers differently depending on whether the data was provided in a compact
  * block message or not. If the compact block had a valid header, but contained invalid
  * txs, the peer should not be punished. See BIP 152.
  */
-static bool MaybePunishNode(NodeId nodeid, const CValidationState& state, bool via_compact_block, const std::string& message = "") {
+static bool MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state, bool via_compact_block, const std::string& message = "") {
     int nDoS = state.GetDoS();
     if (nDoS > 0 && !via_compact_block) {
+         LOCK(cs_main);
+         Misbehaving(nodeid, nDoS, message);
+         return true;
+    }
+    if (message != "") {
+        LogPrint(BCLog::NET, "peer=%d: %s\n", nodeid, message);
+    }
+    return false;
+}
+
+/**
+ * Potentially ban a node based on the contents of a BlockValidationState object
+ * TODO: net_processing should make the punish decision based on the reason
+ * a tx was invalid, rather than just the nDoS score handed back by validation.
+ */
+static bool MaybePunishNodeForTx(NodeId nodeid, const TxValidationState& state, const std::string& message = "") {
+    int nDoS = state.GetDoS();
+    if (nDoS > 0) {
          LOCK(cs_main);
          Misbehaving(nodeid, nDoS, message);
          return true;
@@ -1153,7 +1171,7 @@ void PeerLogicValidation::UpdatedBlockTip(const CBlockIndex *pindexNew, const CB
  * Handle invalid block rejection and consequent peer banning, maintain which
  * peers announce compact blocks.
  */
-void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationState& state) {
+void PeerLogicValidation::BlockChecked(const CBlock& block, const BlockValidationState& state) {
     LOCK(cs_main);
 
     const uint256 hash(block.GetHash());
@@ -1164,7 +1182,7 @@ void PeerLogicValidation::BlockChecked(const CBlock& block, const CValidationSta
         if (it != mapBlockSource.end() && State(it->second.first) && state.GetRejectCode() > 0 && state.GetRejectCode() < REJECT_INTERNAL) {
             CBlockReject reject = {(unsigned char)state.GetRejectCode(), state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), hash};
             State(it->second.first)->rejects.push_back(reject);
-            MaybePunishNode(/*nodeid=*/ it->second.first, state, /*via_compact_block=*/ !it->second.second);
+            MaybePunishNodeForBlock(/*nodeid=*/ it->second.first, state, /*via_compact_block=*/ !it->second.second);
         }
     }
     // Check that:
@@ -1302,7 +1320,7 @@ void static ProcessGetBlockData(CNode* pfrom, const CChainParams& chainparams, c
         }
     } // release cs_main before calling ActivateBestChain
     if (need_activate_chain) {
-        CValidationState state;
+        BlockValidationState state;
         if (!ActivateBestChain(state, Params(), a_recent_block)) {
             LogPrint(BCLog::NET, "failed to activate chain (%s)\n", FormatStateMessage(state));
         }
@@ -1573,7 +1591,7 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
         }
     }
 
-    CValidationState state;
+    BlockValidationState state;
     CBlockHeader first_invalid_header;
     if (!ProcessNewBlockHeaders(headers, state, chainparams, &pindexLast, &first_invalid_header)) {
         if (state.IsInvalid()) {
@@ -1611,7 +1629,7 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
                 // etc), and not just the duplicate-invalid case.
                 pfrom->fDisconnect = true;
             }
-            MaybePunishNode(pfrom->GetId(), state, /*via_compact_block*/ false, "invalid header received");
+            MaybePunishNodeForBlock(pfrom->GetId(), state, /*via_compact_block*/ false, "invalid header received");
             return false;
         }
     }
@@ -1746,10 +1764,10 @@ void static ProcessOrphanTx(CConnman* connman, std::set<uint256>& orphan_work_se
         const CTransaction& orphanTx = *porphanTx;
         NodeId fromPeer = orphan_it->second.fromPeer;
         bool fMissingInputs2 = false;
-        // Use a new CValidationState because orphans come from different peers (and we call
-        // MaybePunishNode based on the source peer from the orphan map, not based on the peer
+        // Use a new TxValidationState because orphans come from different peers (and we call
+        // MaybePunishNodeForTx based on the source peer from the orphan map, not based on the peer
         // that relayed the previous transaction).
-        CValidationState orphan_state;
+        TxValidationState orphan_state;
 
         if (setMisbehaving.count(fromPeer)) continue;
         if (AcceptToMemoryPool(mempool, orphan_state, porphanTx, &fMissingInputs2, &removed_txn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
@@ -1768,7 +1786,7 @@ void static ProcessOrphanTx(CConnman* connman, std::set<uint256>& orphan_work_se
         } else if (!fMissingInputs2) {
             if (orphan_state.IsInvalid()) {
                 // Punish peer that gave us an invalid orphan tx
-                if (MaybePunishNode(fromPeer, orphan_state, /*via_compact_block*/ false)) {
+                if (MaybePunishNodeForTx(fromPeer, orphan_state)) {
                     setMisbehaving.insert(fromPeer);
                 }
                 LogPrint(BCLog::MEMPOOL, "   invalid orphan tx %s\n", orphanHash.ToString());
@@ -2249,7 +2267,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 LOCK(cs_most_recent_block);
                 a_recent_block = most_recent_block;
             }
-            CValidationState state;
+            BlockValidationState state;
             if (!ActivateBestChain(state, Params(), a_recent_block)) {
                 LogPrint(BCLog::NET, "failed to activate chain (%s)\n", FormatStateMessage(state));
             }
@@ -2428,7 +2446,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         LOCK2(cs_main, g_cs_orphans);
 
         bool fMissingInputs = false;
-        CValidationState state;
+        TxValidationState state;
 
         CNodeState* nodestate = State(pfrom->GetId());
         nodestate->m_tx_download.m_tx_announced.erase(inv.hash);
@@ -2515,7 +2533,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // Never relay transactions that we would assign a non-zero DoS
                 // score for, as we expect peers to do the same with us in that
                 // case.
-                if (!state.IsInvalid() || !MayResultInDisconnect(state, false)) {
+                if (!state.IsInvalid() || !TxRelayMayResultInDisconnect(state)) {
                     LogPrintf("Force relaying tx %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->GetId());
                     RelayTransaction(tx, connman);
                 } else {
@@ -2553,7 +2571,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::REJECT, strCommand, (unsigned char)state.GetRejectCode(),
                                    state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), inv.hash));
             }
-            MaybePunishNode(pfrom->GetId(), state, /*via_compact_block*/ false);
+            MaybePunishNodeForTx(pfrom->GetId(), state);
         }
         return true;
     }
@@ -2587,7 +2605,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
 
         const CBlockIndex *pindex = nullptr;
-        CValidationState state;
+        BlockValidationState state;
         if (!ProcessNewBlockHeaders({cmpctblock.header}, state, chainparams, &pindex)) {
             if (state.IsInvalid() && received_new_header) {
                 // In this situation, the block header is known to be invalid.
@@ -2601,9 +2619,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 // here.
                 // TODO: when we switch from DoS scores to reasons that
                 // tx/blocks are invalid, this call should set
-                // via_compact_block to true, since MaybePunishNode will have
+                // via_compact_block to true, since MaybePunishNodeForBlock will have
                 // sufficient information to act correctly.
-                MaybePunishNode(pfrom->GetId(), state, /*via_compact_block*/ false, "invalid header via cmpctblock");
+                MaybePunishNodeForBlock(pfrom->GetId(), state, /*via_compact_block*/ false, "invalid header via cmpctblock");
                 return true;
             }
         }

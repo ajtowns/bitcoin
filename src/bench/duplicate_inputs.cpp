@@ -46,7 +46,7 @@ static void DuplicateInputs(benchmark::State& state)
         thread_group.create_thread(std::bind(&CScheduler::serviceQueue, &scheduler));
         GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
         LoadGenesisBlock(chainparams);
-        CValidationState cvstate;
+        BlockValidationState cvstate;
         ActivateBestChain(cvstate, chainparams);
         assert(::chainActive.Tip() != nullptr);
         const bool witness_enabled{IsWitnessEnabled(::chainActive.Tip(), chainparams.GetConsensus())};
@@ -88,7 +88,7 @@ static void DuplicateInputs(benchmark::State& state)
     block.hashMerkleRoot = BlockMerkleRoot(block);
 
     while (state.KeepRunning()) {
-        CValidationState cvstate{};
+        BlockValidationState cvstate{};
         assert(!CheckBlock(block, cvstate, chainparams.GetConsensus(), false, false));
         assert(cvstate.GetRejectReason() == "bad-txns-inputs-duplicate");
     }

@@ -8,10 +8,10 @@
 
 #include <string>
 
-class CValidationState;
+class BaseValidationState;
 
-/** Convert CValidationState to a human-readable message for logging */
-std::string FormatStateMessage(const CValidationState &state);
+/** Convert BaseValidationState to a human-readable message for logging */
+std::string FormatStateMessage(const BaseValidationState &state);
 
 extern const std::string strMessageMagic;
 

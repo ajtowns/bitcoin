@@ -8,8 +8,8 @@
 #include <consensus/validation.h>
 #include <tinyformat.h>
 
-/** Convert CValidationState to a human-readable message for logging */
-std::string FormatStateMessage(const CValidationState &state)
+/** Convert BaseValidationState to a human-readable message for logging */
+std::string FormatStateMessage(const BaseValidationState &state)
 {
     return strprintf("%s%s (code %i)",
         state.GetRejectReason(),

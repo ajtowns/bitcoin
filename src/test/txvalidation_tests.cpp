@@ -32,7 +32,7 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_reject_coinbase, TestChain100Setup)
 
     BOOST_CHECK(CTransaction(coinbaseTx).IsCoinBase());
 
-    CValidationState state;
+    TxValidationState state;
 
     LOCK(cs_main);
 
