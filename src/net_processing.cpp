@@ -63,6 +63,8 @@ static constexpr int STALE_RELAY_AGE_LIMIT = 30 * 24 * 60 * 60;
 /// Age after which a block is considered historical for purposes of rate
 /// limiting block relay. Set to one week, denominated in seconds.
 static constexpr int HISTORICAL_BLOCK_AGE = 7 * 24 * 60 * 60;
+/** How long to reply with tx details after announcing the tx a peer */
+static constexpr int64_t RELAY_TX_EXPIRY = 15 * 60 * 1000000;
 /** Maximum number of in-flight transactions from a peer */
 static constexpr int32_t MAX_PEER_TX_IN_FLIGHT = 100;
 /** Maximum number of announced transactions from a peer */
@@ -3890,7 +3892,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
                         auto ret = mapRelay.insert(std::make_pair(hash, std::move(txinfo.tx)));
                         if (ret.second) {
-                            vRelayExpiration.push_back(std::make_pair(nNow + 15 * 60 * 1000000, ret.first));
+                            vRelayExpiration.push_back(std::make_pair(nNow + RELAY_TX_EXPIRY, ret.first));
                         }
                     }
                     if (vInv.size() == MAX_INV_SZ) {
