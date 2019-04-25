@@ -971,9 +971,22 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                         fSuccess = !vchSig.empty();
                         if (vchPubKey.empty() || vchPubKey[0] == 4 || vchPubKey[0] == 6 || vchPubKey[0] == 7) {
                             return set_error(serror, SCRIPT_ERR_WITNESS_PUBKEYTYPE);
-                        } else if (vchPubKey[0] == 2 || vchPubKey[0] == 3) {
+                        } else if ((vchPubKey[0] & 0xfe) == TAPSCRIPTKEY_LEGACY) {
                             if (!IsCompressedPubKey(vchPubKey)) return set_error(serror, SCRIPT_ERR_WITNESS_PUBKEYTYPE);
                             if (fSuccess && !checker.CheckSig(vchSig, vchPubKey, execdata, sigversion)) {
+                                return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
+                            }
+                        } else if ((flags & SCRIPT_VERIFY_ANYPREVOUT) != 0 && ((vchPubKey[0] & 0xfe) == TAPSCRIPTKEY_ANYPREVOUT)) {
+                            valtype pubkey_copy;
+                            if (vchPubKey.size() == 1) {
+                                assert(execdata.m_internal_key_init);
+                                pubkey_copy = execdata.m_internal_key;
+                            } else {
+                                pubkey_copy = vchPubKey;
+                                pubkey_copy[0] = 2 + (pubkey_copy[0] & 1);
+                            }
+                            if (!IsCompressedPubKey(pubkey_copy)) return set_error(serror, SCRIPT_ERR_WITNESS_PUBKEYTYPE);
+                            if (fSuccess && !checker.CheckSig(vchSig, pubkey_copy, execdata, SigVersion::ANYPREVOUT)) {
                                 return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
                             }
                         } else {
@@ -981,6 +994,8 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                              *  New public key version softforks should be defined before this `else` block.
                              *  Generally, the new code should not do anything but failing the script execution. To avoid
                              *  consensus bugs, it must not alter any existing values (including fSuccess and sigops_passed).
+                             *  It should use a new set of variables to follow the passing of ANYPREVOUT and fixed prevout
+                             *  signatures, without modifying existing ones.
                              */
                             if ((flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE) != 0) {
                                 return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_PUBKEYTYPE);
@@ -995,6 +1010,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     }
                     break;
 
+                    // SigVersion::TAPROOT and SigVersion::ANYPREVOUT are never used directly
                     default: assert(false);
                     }
 
@@ -1339,7 +1355,7 @@ template<typename T>
 bool SignatureHashTap(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, const unsigned int in_pos, const uint8_t hash_type, const SigVersion sigversion, const PrecomputedTransactionData& cache)
 {
     assert(in_pos < tx_to.vin.size());
-    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT || sigversion == SigVersion::ANYPREVOUT);
     assert(cache.ready && cache.m_amounts_spent_ready);
 
     CHashWriter ss = HasherTapSighash;
@@ -1349,10 +1365,16 @@ bool SignatureHashTap(uint256& hash_out, const ScriptExecutionData& execdata, co
     ss << epoch;
 
     // Hash type
-    if ((hash_type > 3) && (hash_type < 0x81 || hash_type > 0x83)) return false;
+    if (sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT) {
+        if ((hash_type > 3) && (hash_type < 0x81 || hash_type > 0x83)) return false;
+    }
+    if (sigversion == SigVersion::ANYPREVOUT) {
+        if ((hash_type > 3) && (hash_type < 0x81 || hash_type > 0x83) && (hash_type < 0x41 || hash_type > 0x43) && (hash_type < 0xc1 || hash_type > 0xc3)) return false;
+    }
     ss << hash_type;
     const uint8_t input_type = hash_type & SIGHASH_TAPINPUTMASK;
     const uint8_t output_type = hash_type & SIGHASH_TAPOUTPUTMASK;
+    const bool sign_script = (input_type == SIGHASH_TAPDEFAULT || input_type == SIGHASH_ANYONECANPAY || input_type == SIGHASH_ANYPREVOUT);
 
     // Transaction level data
     ss << tx_to.nVersion;
@@ -1374,15 +1396,19 @@ bool SignatureHashTap(uint256& hash_out, const ScriptExecutionData& execdata, co
     if (execdata.m_annex_present) {
         spend_type |= 2;
     }
-    if (sigversion == SigVersion::TAPSCRIPT) {
+    if (sigversion == SigVersion::TAPSCRIPT || sigversion == SigVersion::ANYPREVOUT) {
         spend_type |= 4;
     }
 
     ss << spend_type;
-    ss << scriptPubKey;
+    if (sign_script) {
+        ss << scriptPubKey;
+    }
 
     if (input_type == SIGHASH_ANYONECANPAY) {
         ss << tx_to.vin[in_pos].prevout;
+    }
+    if (input_type == SIGHASH_ANYONECANPAY || input_type == SIGHASH_ANYPREVOUT || input_type == SIGHASH_ANYPREVOUTANYSCRIPT) {
         ss << cache.m_spent_outputs[in_pos].nValue;
         ss << tx_to.vin[in_pos].nSequence;
     } else {
@@ -1401,10 +1427,11 @@ bool SignatureHashTap(uint256& hash_out, const ScriptExecutionData& execdata, co
     }
 
     // Additional data for tapscript
-    if (sigversion == SigVersion::TAPSCRIPT) {
+    if (sigversion == SigVersion::TAPSCRIPT || sigversion == SigVersion::ANYPREVOUT) {
         assert(execdata.m_tapleaf_hash_init);
-        ss << execdata.m_tapleaf_hash;
-        ss << uint8_t(2); // key_version
+        if (sign_script) ss << execdata.m_tapleaf_hash;
+        if (sigversion == SigVersion::TAPSCRIPT) ss << uint8_t(TAPSCRIPTKEY_LEGACY);
+        if (sigversion == SigVersion::ANYPREVOUT) ss << uint8_t(TAPSCRIPTKEY_ANYPREVOUT);
         ss << execdata.m_codeseparator_pos;
     }
 
@@ -1514,6 +1541,7 @@ bool GenericTransactionSignatureChecker<T>::CheckSig(const std::vector<unsigned 
         }
     case SigVersion::TAPROOT:
     case SigVersion::TAPSCRIPT:
+    case SigVersion::ANYPREVOUT:
         {
             uint8_t hashtype = SIGHASH_TAPDEFAULT;
             if (vchSig.size() == 65) {
@@ -1719,6 +1747,8 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
             }
             execdata.m_witness_weight = ::GetSerializeSize(witness.stack, PROTOCOL_VERSION);
             execdata.m_witness_weight_init = true;
+            execdata.m_internal_key = basekey;
+            execdata.m_internal_key_init = true;
         } else if (flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_TAPROOT_VERSION) {
             return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_TAPROOT_VERSION);
         } else {
