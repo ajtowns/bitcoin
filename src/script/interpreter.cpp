@@ -303,6 +303,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     uint32_t sigops_passed = 0;
     uint16_t opcode_pos = 0;
     execdata.m_codeseparator_pos = 0xFFFF;
+    bool v2_fixedprevout = false, v0_fixedprevout = false, v0_anyprevout = false;
 
     try
     {
@@ -976,6 +977,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                             if (fSuccess && !checker.CheckSig(vchSig, vchPubKey, execdata, sigversion)) {
                                 return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
                             }
+                            v2_fixedprevout |= fSuccess;
                         } else if ((flags & SCRIPT_VERIFY_ANYPREVOUT) != 0 && ((vchPubKey[0] & 0xfe) == TAPSCRIPTKEY_ANYPREVOUT)) {
                             valtype pubkey_copy;
                             if (vchPubKey.size() == 1) {
@@ -988,6 +990,14 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                             if (!IsCompressedPubKey(pubkey_copy)) return set_error(serror, SCRIPT_ERR_WITNESS_PUBKEYTYPE);
                             if (fSuccess && !checker.CheckSig(vchSig, pubkey_copy, execdata, SigVersion::ANYPREVOUT)) {
                                 return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
+                            }
+                            if (fSuccess) {
+                                 bool anyprevout = (vchSig.size() == 65 && (vchSig.back() & SIGHASH_ANYPREVOUT) != 0);
+                                 if (anyprevout) {
+                                     v0_anyprevout |= true;
+                                 } else {
+                                     v0_fixedprevout |= true;
+                                 }
                             }
                         } else {
                             /*
@@ -1151,6 +1161,16 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
 
     if (!vfExec.empty())
         return set_error(serror, SCRIPT_ERR_UNBALANCED_CONDITIONAL);
+
+    if (v0_anyprevout && !v0_fixedprevout && !v2_fixedprevout) return set_error(serror, SCRIPT_ERR_TAPSCRIPT_NO_CHAPERONE);
+
+    /*
+     *  We use different variables to follow the passing of ANYPREVOUT and fixed prevout signatures of different public key
+     *  version. To avoid consensus bug, a new public key version must not change the bool values tested in existing
+     *  tests, and use new variables instead. NO_CHAPERONE or similar tests for new public key version should be defined
+     *  before this comment, and not modify existing ones. For example, it will be a hardfork to allow satisfying the
+     *  chaperone requirement of v0 ANYPREVOUT with a newer version signature.
+     */
 
     return set_success(serror);
 }
