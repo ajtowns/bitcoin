@@ -66,13 +66,11 @@ class BIP65Test(BitcoinTestFramework):
 
     def test_cltv_info(self, *, is_active):
         assert_equal(
-            next(s for s in self.nodes[0].getblockchaininfo()['softforks'] if s['id'] == 'bip65'),
+            self.nodes[0].getblockchaininfo()['softforks']['bip65'],
             {
-                "id": "bip65",
-                "version": 4,
-                "reject": {
-                    "status": is_active
-                }
+                'type': 'buried',
+                'active': is_active,
+                'height': 1351
             },
         )
 

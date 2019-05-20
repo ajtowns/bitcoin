@@ -53,13 +53,11 @@ class BIP66Test(BitcoinTestFramework):
 
     def test_dersig_info(self, *, is_active):
         assert_equal(
-            next(s for s in self.nodes[0].getblockchaininfo()['softforks'] if s['id'] == 'bip66'),
+            self.nodes[0].getblockchaininfo()['softforks']['bip66'],
             {
-                "id": "bip66",
-                "version": 3,
-                "reject": {
-                    "status": is_active
-                }
+                'type': 'buried',
+                'active': is_active,
+                'height': 1251
             },
         )
 
