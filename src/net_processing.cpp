@@ -2493,9 +2493,10 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         EraseTxRequest(inv.hash);
 
         std::list<CTransactionRef> lRemovedTxn;
+        std::set<uint256> sMissingInputs;
 
         if (!AlreadyHave(inv) &&
-            AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs, nullptr /* psMissingInputs */, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
+            AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs, &sMissingInputs, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             mempool.check(pcoinsTip.get());
             RelayTransaction(tx, connman);
             for (unsigned int i = 0; i < tx.vout.size(); i++) {
@@ -2530,10 +2531,11 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 uint32_t nFetchFlags = GetFetchFlags(pfrom);
                 int64_t nNow = GetTimeMicros();
 
-                for (const CTxIn& txin : tx.vin) {
-                    CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
+                for (const uint256& phash : sMissingInputs) {
+                    CInv _inv(MSG_TX | nFetchFlags, phash);
                     pfrom->AddInventoryKnown(_inv);
-                    if (!AlreadyHave(_inv)) RequestTx(State(pfrom->GetId()), _inv.hash, nNow);
+                    LogPrint(BCLog::NET, "Requesting %s as parent of %s peer=%d\n", _inv.hash.ToString(), tx.GetHash().ToString(), pfrom->GetId());
+                    RequestTx(State(pfrom->GetId()), _inv.hash, nNow);
                 }
                 AddOrphanTx(ptx, pfrom->GetId());
 
