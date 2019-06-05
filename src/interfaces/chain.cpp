@@ -152,7 +152,7 @@ class LockImpl : public Chain::Lock, public UniqueLock<CCriticalSection>
     bool submitToMemoryPool(const CTransactionRef& tx, CAmount absurd_fee, CValidationState& state) override
     {
         LockAssertion lock(::cs_main);
-        return AcceptToMemoryPool(::mempool, state, tx, nullptr /* missing inputs */, nullptr /* txn replaced */,
+        return AcceptToMemoryPool(::mempool, state, tx, nullptr /* missing inputs */, nullptr /* missing input hashes */, nullptr /* txn replaced */,
             false /* bypass limits */, absurd_fee);
     }
 

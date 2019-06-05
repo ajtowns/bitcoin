@@ -31,7 +31,7 @@ TransactionError BroadcastTransaction(const CTransactionRef tx, uint256& hashTx,
         // push to local node and sync with wallets
         CValidationState state;
         bool fMissingInputs;
-        if (!AcceptToMemoryPool(mempool, state, std::move(tx), &fMissingInputs,
+        if (!AcceptToMemoryPool(mempool, state, std::move(tx), &fMissingInputs, nullptr /* psMissingInputs */,
                                 nullptr /* plTxnReplaced */, false /* bypass_limits */, highfee)) {
             if (state.IsInvalid()) {
                 err_string = FormatStateMessage(state);

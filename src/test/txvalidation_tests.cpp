@@ -42,6 +42,7 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_reject_coinbase, TestChain100Setup)
             false,
             AcceptToMemoryPool(mempool, state, MakeTransactionRef(coinbaseTx),
                 nullptr /* pfMissingInputs */,
+                nullptr /* psMissingInputs */,
                 nullptr /* plTxnReplaced */,
                 true /* bypass_limits */,
                 0 /* nAbsurdFee */));
