@@ -1224,12 +1224,21 @@ static UniValue verifychain(const JSONRPCRequest& request)
     return CVerifyDB().VerifyDB(Params(), pcoinsTip.get(), nCheckLevel, nCheckDepth);
 }
 
-static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name, int height, const CBlockIndex& tip)
+static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name, const std::vector<int>& bips, int height, const CBlockIndex& tip)
 {
     UniValue rv(UniValue::VOBJ);
+
     rv.pushKV("type", "buried");
+    if (!bips.empty()) {
+        UniValue rbips(UniValue::VARR);
+        for (const auto& bip : bips) {
+            rbips.push_back(bip);
+        }
+        rv.pushKV("bips", rbips);
+    }
     rv.pushKV("height", height);
     rv.pushKV("active", tip.nHeight >= height);
+
     softforks.pushKV(name, rv);
 }
 
@@ -1266,6 +1275,14 @@ static UniValue BIP9SoftForkDesc(const Consensus::Params& consensusParams, Conse
 
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "bip9");
+    const std::vector<int>& bips = VersionBitsDeploymentInfo[id].bips;
+    if (!bips.empty()) {
+        UniValue rbips(UniValue::VARR);
+        for (const auto& bip : bips) {
+            rbips.push_back(bip);
+        }
+        rv.pushKV("bips", rbips);
+    }
     rv.pushKV("bip9", bip9);
     if (ThresholdState::LOCKED_IN == thresholdState) {
         rv.pushKV("height", since_height + consensusParams.nMinerConfirmationWindow);
@@ -1327,6 +1344,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
             "        }\n"
             "      },\n"
             "      \"height\": \"xxxxxx\",       (numeric) height of the first block which the rules are enforced (only for \"buried\" type, or \"bip9\" type with \"locked_in\" or \"active\" status)\n"
+            "      \"bips\": [xx,...]          (array of int) the BIPs included in this softfork\n"
             "      \"active\": xx,             (boolean) true if the rules are enforced at the current chain tip\n"
             "     }\n"
             "  }\n"
@@ -1373,9 +1391,9 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
     UniValue softforks(UniValue::VOBJ);
-    BuriedForkDescPushBack(softforks, "bip34", consensusParams.BIP34Height, *tip);
-    BuriedForkDescPushBack(softforks, "bip66", consensusParams.BIP66Height, *tip);
-    BuriedForkDescPushBack(softforks, "bip65", consensusParams.BIP65Height, *tip);
+    BuriedForkDescPushBack(softforks, "heightincb", {34}, consensusParams.BIP34Height, *tip);
+    BuriedForkDescPushBack(softforks, "strictder", {66}, consensusParams.BIP66Height, *tip);
+    BuriedForkDescPushBack(softforks, "cltv", {65}, consensusParams.BIP65Height, *tip);
     for (int pos = Consensus::DEPLOYMENT_CSV; pos != Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++pos) {
         BIP9SoftForkDescPushBack(softforks, consensusParams, static_cast<Consensus::DeploymentPos>(pos));
     }

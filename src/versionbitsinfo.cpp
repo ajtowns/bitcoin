@@ -10,13 +10,16 @@ const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_B
     {
         /*.name =*/ "testdummy",
         /*.gbt_force =*/ true,
+        /*.bips =*/ {},
     },
     {
         /*.name =*/ "csv",
         /*.gbt_force =*/ true,
+        /*.bips =*/ {68, 112, 113},
     },
     {
         /*.name =*/ "segwit",
         /*.gbt_force =*/ true,
+        /*.bips =*/ {141, 143, 147},
     }
 };

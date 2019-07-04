@@ -5,11 +5,15 @@
 #ifndef BITCOIN_VERSIONBITSINFO_H
 #define BITCOIN_VERSIONBITSINFO_H
 
+#include <vector>
+
 struct VBDeploymentInfo {
     /** Deployment name */
     const char *name;
     /** Whether GBT clients can safely ignore this rule in simplified usage */
     bool gbt_force;
+    /** BIP numbers */
+    std::vector<int> bips;
 };
 
 extern const struct VBDeploymentInfo VersionBitsDeploymentInfo[];
