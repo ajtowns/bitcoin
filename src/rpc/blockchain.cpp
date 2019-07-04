@@ -1228,8 +1228,8 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name,
 {
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "buried");
-    rv.pushKV("active", tip.nHeight >= height);
     rv.pushKV("height", height);
+    rv.pushKV("active", tip.nHeight >= height);
     softforks.pushKV(name, rv);
 }
 
