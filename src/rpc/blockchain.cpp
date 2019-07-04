@@ -1237,7 +1237,7 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name,
         rv.pushKV("bips", rbips);
     }
     rv.pushKV("height", height);
-    rv.pushKV("active", tip.nHeight >= height);
+    rv.pushKV("active", tip.nHeight + 1 >= height);
 
     softforks.pushKV(name, rv);
 }
@@ -1400,7 +1400,7 @@ UniValue getforkinfo(const JSONRPCRequest& request)
             "      },\n"
             "      \"height\": \"xxxxxx\",       (numeric) height of the first block which the rules are enforced (only for \"buried\" type, or \"bip9\" type with \"locked_in\" or \"active\" status)\n"
             "      \"bips\": [xx,...]          (array of int) the BIPs included in this softfork\n"
-            "      \"active\": xx,             (boolean) true if the rules are enforced at the current chain tip\n"
+            "      \"active\": xx,             (boolean) true if the rules are enforced after this block\n"
             "     }\n"
             "}\n"
                 },
