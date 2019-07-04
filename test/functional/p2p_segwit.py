@@ -214,7 +214,7 @@ class SegWitTest(BitcoinTestFramework):
         block.solve()
 
     def get_segwit_info(self, node_id):
-        return self.nodes[node_id].getblockchaininfo()['softforks']['segwit']
+        return self.nodes[node_id].getforkinfo()['segwit']
 
     def run_test(self):
         # Setup the p2p connections

@@ -53,7 +53,7 @@ class BIP66Test(BitcoinTestFramework):
 
     def test_dersig_info(self, *, is_active):
         assert_equal(
-            self.nodes[0].getblockchaininfo()['softforks']['strictder'],
+            self.nodes[0].getforkinfo()['strictder'],
             {
                 'type': 'buried',
                 'active': is_active,
