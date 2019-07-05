@@ -1237,7 +1237,7 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name,
         rv.pushKV("bips", rbips);
     }
     rv.pushKV("height", height);
-    rv.pushKV("active", tip.nHeight + 1 >= height);
+    rv.pushKV("active", tip.nHeight >= height);
 
     softforks.pushKV(name, rv);
 }
@@ -1245,7 +1245,7 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string& name,
 static UniValue BIP9SoftForkDesc(const CBlockIndex* pindex, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     UniValue bip9(UniValue::VOBJ);
-    const ThresholdState thresholdState = VersionBitsState(pindex, consensusParams, id, versionbitscache);
+    const ThresholdState thresholdState = VersionBitsState(pindex->pprev, consensusParams, id, versionbitscache);
     switch (thresholdState) {
     case ThresholdState::DEFINED: bip9.pushKV("status", "defined"); break;
     case ThresholdState::STARTED: bip9.pushKV("status", "started"); break;
@@ -1259,8 +1259,9 @@ static UniValue BIP9SoftForkDesc(const CBlockIndex* pindex, const Consensus::Par
     }
     bip9.pushKV("startTime", consensusParams.vDeployments[id].nStartTime);
     bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
-    int64_t since_height = VersionBitsStateSinceHeight(pindex, consensusParams, id, versionbitscache);
+    int64_t since_height = VersionBitsStateSinceHeight(pindex->pprev, consensusParams, id, versionbitscache);
     bip9.pushKV("since", since_height);
+    int started_lockedin_height = 0;
     if (ThresholdState::STARTED == thresholdState)
     {
         UniValue statsUV(UniValue::VOBJ);
@@ -1271,6 +1272,14 @@ static UniValue BIP9SoftForkDesc(const CBlockIndex* pindex, const Consensus::Par
         statsUV.pushKV("count", statsStruct.count);
         statsUV.pushKV("possible", statsStruct.possible);
         bip9.pushKV("statistics", statsUV);
+        if (statsStruct.possible && statsStruct.period == statsStruct.elapsed) {
+            // cannot be sure will end up in LOCKED_IN any earlier
+            // than this, because mediantime might pass nTimeout
+            if (VersionBitsState(pindex, consensusParams, id, versionbitscache) == ThresholdState::LOCKED_IN) {
+                started_lockedin_height = pindex->nHeight + statsStruct.period + 1;
+                // last STARTED block, plus a period of LOCKED_IN, plus 1 for first ACTIVE block
+            }
+        }
     }
 
     UniValue rv(UniValue::VOBJ);
@@ -1288,6 +1297,10 @@ static UniValue BIP9SoftForkDesc(const CBlockIndex* pindex, const Consensus::Par
         rv.pushKV("height", since_height + consensusParams.nMinerConfirmationWindow);
     } else if (ThresholdState::ACTIVE == thresholdState) {
         rv.pushKV("height", since_height);
+    } else if (ThresholdState::STARTED == thresholdState) {
+        if (started_lockedin_height > 0) {
+            rv.pushKV("height", started_lockedin_height);
+        }
     }
     rv.pushKV("active", ThresholdState::ACTIVE == thresholdState);
 
@@ -1400,7 +1413,7 @@ UniValue getforkinfo(const JSONRPCRequest& request)
             "      },\n"
             "      \"height\": \"xxxxxx\",       (numeric) height of the first block which the rules are enforced (only for \"buried\" type, or \"bip9\" type with \"locked_in\" or \"active\" status)\n"
             "      \"bips\": [xx,...]          (array of int) the BIPs included in this softfork\n"
-            "      \"active\": xx,             (boolean) true if the rules are enforced after this block\n"
+            "      \"active\": xx,             (boolean) true if the rules were enforced on this block\n"
             "     }\n"
             "}\n"
                 },

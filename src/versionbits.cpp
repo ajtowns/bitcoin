@@ -106,13 +106,13 @@ BIP9Stats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlockI
         return stats;
 
     // Find beginning of period
-    const CBlockIndex* pindexEndOfPrevPeriod = pindex->GetAncestor(pindex->nHeight - ((pindex->nHeight + 1) % stats.period));
-    stats.elapsed = pindex->nHeight - pindexEndOfPrevPeriod->nHeight;
+    int begin_height = pindex->nHeight - (pindex->nHeight % stats.period);
+    stats.elapsed = pindex->nHeight - begin_height + 1;
 
     // Count from current block to beginning of period
     int count = 0;
     const CBlockIndex* currentIndex = pindex;
-    while (pindexEndOfPrevPeriod->nHeight != currentIndex->nHeight){
+    while (currentIndex->nHeight >= begin_height){
         if (Condition(currentIndex, params))
             count++;
         currentIndex = currentIndex->pprev;
