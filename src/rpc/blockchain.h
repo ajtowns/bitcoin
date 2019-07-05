@@ -46,4 +46,10 @@ UniValue blockheaderToJSON(const CBlockIndex* tip, const CBlockIndex* blockindex
 /** Used by getblockstats to get feerates at different percentiles by weight  */
 void CalculatePercentilesByWeight(CAmount result[NUM_GETBLOCKSTATS_PERCENTILES], std::vector<std::pair<CAmount, int64_t>>& scores, int64_t total_weight);
 
+/**
+ * Lookup the CBlockIndex matching a parameter specifying a block hash
+ * If parameter is "@<height>" lookup the block at the given height.
+ */
+extern CBlockIndex* GetBlockIndexFromParam(const UniValue& param, const std::string& name) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
 #endif

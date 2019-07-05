@@ -79,6 +79,31 @@ double GetDifficulty(const CBlockIndex* blockindex)
     return dDiff;
 }
 
+
+CBlockIndex* GetBlockIndexFromParam(const UniValue& param, const std::string& name)
+{
+    const std::string& v = param.get_str();
+    uint256 hash;
+    if (v.size() > 1 && v[0] == '@') {
+        // treat as height, and lookup
+        int32_t height;
+        if (!ParseInt32(v.substr(1), &height)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Target block height %s must be @ followed by a number", v));
+        }
+        if (height < 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Target block height %d is negative", height));
+        }
+        const int current_tip = ::ChainActive().Height();
+        if (height > current_tip) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Target block height %d after current tip %d", height, current_tip));
+        }
+        hash = *(::ChainActive()[height]->phashBlock);
+    } else {
+        hash = ParseHashV(param, name);
+    }
+    return LookupBlockIndex(hash);
+}
+
 static int ComputeNextBlockAndDepth(const CBlockIndex* tip, const CBlockIndex* blockindex, const CBlockIndex*& next)
 {
     next = tip->GetAncestor(blockindex->nHeight + 1);
@@ -820,7 +845,7 @@ static UniValue getblock(const JSONRPCRequest& request)
     RPCHelpMan{"getblock",
                 "\nIf verbosity is 0, returns a string that is serialized, hex-encoded data for block 'hash'.\n"
                 "If verbosity is 1, returns an Object with information about block <hash>.\n"
-                "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction. \n",
+                "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction.\n",
                 {
                     {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
                     {"verbosity", RPCArg::Type::NUM, /* default */ "1", "0 for hex-encoded data, 1 for a json object, and 2 for json object with transaction data"},
@@ -871,8 +896,6 @@ static UniValue getblock(const JSONRPCRequest& request)
                 },
     }.Check(request);
 
-    uint256 hash(ParseHashV(request.params[0], "blockhash"));
-
     int verbosity = 1;
     if (!request.params[1].isNull()) {
         if(request.params[1].isNum())
@@ -886,7 +909,7 @@ static UniValue getblock(const JSONRPCRequest& request)
     const CBlockIndex* tip;
     {
         LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
+        pblockindex = GetBlockIndexFromParam(request.params[0], "blockhash");
         tip = ::ChainActive().Tip();
 
         if (!pblockindex) {
