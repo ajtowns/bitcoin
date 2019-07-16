@@ -849,10 +849,13 @@ static UniValue getblock(const JSONRPCRequest& request)
     const RPCHelpMan help{"getblock",
                 "\nIf verbosity is 0, returns a string that is serialized, hex-encoded data for block 'hash'.\n"
                 "If verbosity is 1, returns an Object with information about block <hash>.\n"
-                "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction. \n",
+                "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction.\n"
+                "If height is provided, and blockhash is not, the block at the given height is returned.\n"
+                "If both are provided, it is an error if the block with the given hash does not have the given height.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
+                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "The block hash"},
                     {"verbosity", RPCArg::Type::NUM, /* default */ "1", "0 for hex-encoded data, 1 for a json object, and 2 for json object with transaction data"},
+                    {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The block height"},
                 },
                 {
                     RPCResult{"for verbosity = 0",
@@ -904,7 +907,22 @@ static UniValue getblock(const JSONRPCRequest& request)
         throw std::runtime_error(help.ToString());
     }
 
-    uint256 hash(ParseHashV(request.params[0], "blockhash"));
+    const UniValue& uv_blockhash = request.params[0];
+    const UniValue& uv_height = request.params[2];
+
+    if (uv_blockhash.isNull() && uv_height.isNull()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Must specify a blockhash or height.");
+    }
+
+    int height = uv_height.isNull() ? -1 : uv_height.get_int();
+    if (!uv_height.isNull() && height < 0) {
+        // Check if block height is negative
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid block height");
+    }
+
+
+
+
 
     int verbosity = 1;
     if (!request.params[1].isNull()) {
@@ -919,109 +937,22 @@ static UniValue getblock(const JSONRPCRequest& request)
     const CBlockIndex* tip;
     {
         LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
-        tip = ::ChainActive().Tip();
+        if (uv_blockhash.isNull()) {
+            if (height > ::ChainActive().Height()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Block " + std::to_string(request.params[0].get_int()) + " not found");
+            }
+            pblockindex = ::ChainActive()[height];
+        } else {
+            uint256 hash(ParseHashV(uv_blockhash, "blockhash"));
+            pblockindex = LookupBlockIndex(hash);
 
-        if (!pblockindex) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+            if (!pblockindex) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+            }
+            if (height >= 0 && pblockindex->nHeight != height) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Block %s has height %d, not %d", hash.ToString(), pblockindex->nHeight, height));
+            }
         }
-
-        block = GetBlockChecked(pblockindex);
-    }
-
-    if (verbosity <= 0)
-    {
-        CDataStream ssBlock(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
-        ssBlock << block;
-        std::string strHex = HexStr(ssBlock.begin(), ssBlock.end());
-        return strHex;
-    }
-
-    return blockToJSON(block, tip, pblockindex, verbosity >= 2);
-}
-
-static UniValue getblockbyheight(const JSONRPCRequest& request)
-{
-    const RPCHelpMan help{"getblockbyheight",
-                "\nIf verbosity is 0, returns a string that is serialized, hex-encoded data for block 'height'.\n"
-                "If verbosity is 1, returns an Object with information about block <height>.\n"
-                "If verbosity is 2, returns an Object with information about block <height> and information about each transaction. \n",
-                {
-                    {"blockheight", RPCArg::Type::NUM, RPCArg::Optional::NO, "The block height"},
-                    {"verbosity", RPCArg::Type::NUM, /* default */ "1", "0 for hex-encoded data, 1 for a json object, and 2 for json object with transaction data"},
-                },
-                {
-                    RPCResult{"for verbosity = 0",
-            "\"data\"             (string) A string that is serialized, hex-encoded data for block 'height'.\n"
-                    },
-                    RPCResult{"for verbosity = 1",
-            "{\n"
-            "  \"hash\" : \"hash\",     (string) the block hash (same as provided)\n"
-            "  \"confirmations\" : n,   (numeric) The number of confirmations, or -1 if the block is not on the main chain\n"
-            "  \"size\" : n,            (numeric) The block size\n"
-            "  \"strippedsize\" : n,    (numeric) The block size excluding witness data\n"
-            "  \"weight\" : n           (numeric) The block weight as defined in BIP 141\n"
-            "  \"height\" : n,          (numeric) The block height or index\n"
-            "  \"version\" : n,         (numeric) The block version\n"
-            "  \"versionHex\" : \"00000000\", (string) The block version formatted in hexadecimal\n"
-            "  \"merkleroot\" : \"xxxx\", (string) The merkle root\n"
-            "  \"tx\" : [               (array of string) The transaction ids\n"
-            "     \"transactionid\"     (string) The transaction id\n"
-            "     ,...\n"
-            "  ],\n"
-            "  \"time\" : ttt,          (numeric) The block time in seconds since epoch (Jan 1 1970 GMT)\n"
-            "  \"mediantime\" : ttt,    (numeric) The median block time in seconds since epoch (Jan 1 1970 GMT)\n"
-            "  \"nonce\" : n,           (numeric) The nonce\n"
-            "  \"bits\" : \"1d00ffff\", (string) The bits\n"
-            "  \"difficulty\" : x.xxx,  (numeric) The difficulty\n"
-            "  \"chainwork\" : \"xxxx\",  (string) Expected number of hashes required to produce the chain up to this block (in hex)\n"
-            "  \"nTx\" : n,             (numeric) The number of transactions in the block.\n"
-            "  \"previousblockhash\" : \"hash\",  (string) The hash of the previous block\n"
-            "  \"nextblockhash\" : \"hash\"       (string) The hash of the next block\n"
-            "}\n"
-                    },
-                    RPCResult{"for verbosity = 2",
-            "{\n"
-            "  ...,                     Same output as verbosity = 1.\n"
-            "  \"tx\" : [               (array of Objects) The transactions in the format of the getrawtransaction RPC. Different from verbosity = 1 \"tx\" result.\n"
-            "         ,...\n"
-            "  ],\n"
-            "  ,...                     Same output as verbosity = 1.\n"
-            "}\n"
-                    },
-                },
-                RPCExamples{
-                    HelpExampleCli("getblockbyheight", "0")
-            + HelpExampleRpc("getblockbyheight", "42")
-                },
-    };
-
-    if (request.fHelp || !help.IsValidNumArgs(request.params.size()))
-        throw std::runtime_error(help.ToString());
-
-    int verbosity = 1;
-    if (!request.params[1].isNull()) {
-        if(request.params[1].isNum())
-            verbosity = request.params[1].get_int();
-        else
-            verbosity = request.params[1].get_bool() ? 1 : 0;
-    }
-
-    // Check if block exists or is negative
-    if(::ChainActive().Height() < request.params[0].get_int() || request.params[0].get_int() <= -1) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "Block " + std::to_string(request.params[0].get_int()) + " not found");
-    }
-
-    CBlock block;
-    CBlockIndex* pblockindex;
-    const CBlockIndex* tip;
-    {
-        LOCK(cs_main);
-        // Get index and hash
-        pblockindex = ::ChainActive()[request.params[0].get_int()];
-        uint256 hash(pblockindex->GetBlockHash());
-        if(!pblockindex)
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid key");
 
         tip = ::ChainActive().Tip();
         block = GetBlockChecked(pblockindex);
@@ -2485,8 +2416,7 @@ static const CRPCCommand commands[] =
     { "blockchain",         "getblockstats",          &getblockstats,          {"hash_or_height", "stats"} },
     { "blockchain",         "getbestblockhash",       &getbestblockhash,       {} },
     { "blockchain",         "getblockcount",          &getblockcount,          {} },
-    { "blockchain",         "getblock",               &getblock,               {"blockhash","verbosity|verbose"} },
-    { "blockchain",         "getblockbyheight",       &getblockbyheight,       {"blockheight","verbosity|verbose"} },
+    { "blockchain",         "getblock",               &getblock,               {"blockhash","verbosity|verbose","height"} },
     { "blockchain",         "getblockhash",           &getblockhash,           {"height"} },
     { "blockchain",         "getblockheader",         &getblockheader,         {"blockhash","verbose"} },
     { "blockchain",         "getchaintips",           &getchaintips,           {} },

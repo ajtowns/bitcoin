@@ -14,7 +14,6 @@ Test the following RPCs:
     - getchaintxstats
     - getnetworkhashps
     - verifychain
-    - getblockbyheight
 
 Tests correspond to code in rpc/blockchain.cpp.
 """
@@ -313,9 +312,12 @@ class BlockchainTest(BitcoinTestFramework):
         self.log.info("Test getblockbyheight")
         node = self.nodes[0]
         node.add_p2p_connection(P2PInterface())
-        assert_equal(node.getblock(node.getblockhash(20)), node.getblockbyheight(20))
-
-
+        h20 = node.getblockhash(20)
+        assert_equal(node.getblock(h20), node.getblock(height=20))
+        assert_equal(node.getblock(h20), node.getblock(blockhash=h20, height=20))
+        assert_equal(node.getblock(h20), node.getblock(h20, 1, 20))
+        assert_raises_rpc_error(-5, "Block %s has height %s, not %d" % (h20, 20, 19), node.getblock, h20, 1, 19)
+        assert_raises_rpc_error(-8, "Must specify a blockhash or height", node.getblock)
 
 if __name__ == '__main__':
     BlockchainTest().main()
