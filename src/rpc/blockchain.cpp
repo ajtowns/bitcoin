@@ -778,8 +778,6 @@ static UniValue getblockheader(const JSONRPCRequest& request)
                 },
             }.Check(request);
 
-    uint256 hash(ParseHashV(request.params[0], "hash"));
-
     bool fVerbose = true;
     if (!request.params[1].isNull())
         fVerbose = request.params[1].get_bool();
@@ -788,7 +786,7 @@ static UniValue getblockheader(const JSONRPCRequest& request)
     const CBlockIndex* tip;
     {
         LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
+        pblockindex = GetBlockIndexFromParam(request.params[0], "blockhash");
         tip = ::ChainActive().Tip();
     }
 
@@ -1557,12 +1555,10 @@ static UniValue preciousblock(const JSONRPCRequest& request)
                 },
             }.Check(request);
 
-    uint256 hash(ParseHashV(request.params[0], "blockhash"));
     CBlockIndex* pblockindex;
-
     {
         LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
+        pblockindex = GetBlockIndexFromParam(request.params[0], "blockhash");
         if (!pblockindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -1592,13 +1588,12 @@ static UniValue invalidateblock(const JSONRPCRequest& request)
                 },
             }.Check(request);
 
-    uint256 hash(ParseHashV(request.params[0], "blockhash"));
     CValidationState state;
 
     CBlockIndex* pblockindex;
     {
         LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
+        pblockindex = GetBlockIndexFromParam(request.params[0], "blockhash");
         if (!pblockindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -1685,9 +1680,8 @@ static UniValue getchaintxstats(const JSONRPCRequest& request)
         LOCK(cs_main);
         pindex = ::ChainActive().Tip();
     } else {
-        uint256 hash(ParseHashV(request.params[1], "blockhash"));
         LOCK(cs_main);
-        pindex = LookupBlockIndex(hash);
+        pindex = GetBlockIndexFromParam(request.params[1], "blockhash");
         if (!pindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -1858,8 +1852,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
         pindex = ::ChainActive()[height];
     } else {
-        const uint256 hash(ParseHashV(request.params[0], "hash_or_height"));
-        pindex = LookupBlockIndex(hash);
+        pindex = GetBlockIndexFromParam(request.params[0], "hash_or_height");
         if (!pindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -2277,7 +2270,6 @@ static UniValue getblockfilter(const JSONRPCRequest& request)
                 }
             }.Check(request);
 
-    uint256 block_hash = ParseHashV(request.params[0], "blockhash");
     std::string filtertype_name = "basic";
     if (!request.params[1].isNull()) {
         filtertype_name = request.params[1].get_str();
@@ -2297,7 +2289,7 @@ static UniValue getblockfilter(const JSONRPCRequest& request)
     bool block_was_connected;
     {
         LOCK(cs_main);
-        block_index = LookupBlockIndex(block_hash);
+        block_index = GetBlockIndexFromParam(request.params[0], "blockhash");
         if (!block_index) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }

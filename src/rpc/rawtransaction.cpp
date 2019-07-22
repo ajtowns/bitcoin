@@ -17,6 +17,7 @@
 #include <policy/rbf.h>
 #include <primitives/transaction.h>
 #include <psbt.h>
+#include <rpc/blockchain.h>
 #include <rpc/rawtransaction_util.h>
 #include <rpc/server.h>
 #include <rpc/util.h>
@@ -169,8 +170,7 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     if (!request.params[2].isNull()) {
         LOCK(cs_main);
 
-        uint256 blockhash = ParseHashV(request.params[2], "parameter 3");
-        blockindex = LookupBlockIndex(blockhash);
+        blockindex = GetBlockIndexFromParam(request.params[2], "parameter 3");
         if (!blockindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block hash not found");
         }
@@ -246,11 +246,9 @@ static UniValue gettxoutproof(const JSONRPCRequest& request)
     }
 
     CBlockIndex* pblockindex = nullptr;
-    uint256 hashBlock;
     if (!request.params[1].isNull()) {
         LOCK(cs_main);
-        hashBlock = ParseHashV(request.params[1], "blockhash");
-        pblockindex = LookupBlockIndex(hashBlock);
+        pblockindex = GetBlockIndexFromParam(request.params[1], "blockhash");
         if (!pblockindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -277,6 +275,7 @@ static UniValue gettxoutproof(const JSONRPCRequest& request)
 
     if (pblockindex == nullptr)
     {
+        uint256 hashBlock;
         CTransactionRef tx;
         if (!GetTransaction(oneTxid, tx, Params().GetConsensus(), hashBlock) || hashBlock.IsNull())
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not yet in block");
