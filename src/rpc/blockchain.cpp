@@ -1784,7 +1784,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 "\nCompute per block statistics for a given window. All amounts are in satoshis.\n"
                 "It won't work for some heights with pruning.\n",
                 {
-                    {"hash_or_height", RPCArg::Type::NUM, RPCArg::Optional::NO, "The block hash or height of the target block", "", {"", "string or numeric"}},
+                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash of the target block"},
                     {"stats", RPCArg::Type::ARR, /* default */ "all values", "Values to plot (see result below)",
                         {
                             {"height", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Selected statistic"},
@@ -1832,15 +1832,15 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             "}\n"
                 },
                 RPCExamples{
-                    HelpExampleCli("getblockstats", "1000 '[\"minfeerate\",\"avgfeerate\"]'")
-            + HelpExampleRpc("getblockstats", "1000 '[\"minfeerate\",\"avgfeerate\"]'")
+                    HelpExampleCli("getblockstats", "\"@1000\" '[\"minfeerate\",\"avgfeerate\"]'")
+            + HelpExampleRpc("getblockstats", "\"@1000\", '[\"minfeerate\",\"avgfeerate\"]'")
                 },
     }.Check(request);
 
     LOCK(cs_main);
 
     CBlockIndex* pindex;
-    if (request.params[0].isNum()) {
+    if (IsDeprecatedRPCEnabled("getblockstats_numeric") && request.params[0].isNum()) {
         const int height = request.params[0].get_int();
         const int current_tip = ::ChainActive().Height();
         if (height < 0) {
@@ -1852,7 +1852,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
         pindex = ::ChainActive()[height];
     } else {
-        pindex = GetBlockIndexFromParam(request.params[0], "hash_or_height");
+        pindex = GetBlockIndexFromParam(request.params[0], "blockhash");
         if (!pindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
@@ -2331,7 +2331,7 @@ static const CRPCCommand commands[] =
   //  --------------------- ------------------------  -----------------------  ----------
     { "blockchain",         "getblockchaininfo",      &getblockchaininfo,      {} },
     { "blockchain",         "getchaintxstats",        &getchaintxstats,        {"nblocks", "blockhash"} },
-    { "blockchain",         "getblockstats",          &getblockstats,          {"hash_or_height", "stats"} },
+    { "blockchain",         "getblockstats",          &getblockstats,          {"blockhash|hash_or_height", "stats"} },
     { "blockchain",         "getbestblockhash",       &getbestblockhash,       {} },
     { "blockchain",         "getblockcount",          &getblockcount,          {} },
     { "blockchain",         "getblock",               &getblock,               {"blockhash","verbosity|verbose"} },
