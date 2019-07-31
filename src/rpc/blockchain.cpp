@@ -280,7 +280,7 @@ static UniValue waitforblock(const JSONRPCRequest& request)
                 "\nWaits for a specific new block and returns useful info about it.\n"
                 "\nReturns the current block on timeout or exit.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "Block hash to wait for."},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "Block hash to wait for."},
                     {"timeout", RPCArg::Type::NUM, /* default */ "0", "Time in milliseconds to wait for a response. 0 indicates no timeout."},
                 },
                 RPCResult{
@@ -745,7 +745,7 @@ static UniValue getblockheader(const JSONRPCRequest& request)
                 "\nIf verbose is false, returns a string that is serialized, hex-encoded data for blockheader 'hash'.\n"
                 "If verbose is true, returns an Object with information about blockheader <hash>.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "The block hash"},
                     {"verbose", RPCArg::Type::BOOL, /* default */ "true", "true for a json object, false for the hex-encoded data"},
                 },
                 {
@@ -845,7 +845,7 @@ static UniValue getblock(const JSONRPCRequest& request)
                 "If verbosity is 1, returns an Object with information about block <hash>.\n"
                 "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "The block hash"},
                     {"verbosity", RPCArg::Type::NUM, /* default */ "1", "0 for hex-encoded data, 1 for a json object, and 2 for json object with transaction data"},
                 },
                 {
@@ -1546,7 +1546,7 @@ static UniValue preciousblock(const JSONRPCRequest& request)
                 "\nA later preciousblock call can override the effect of an earlier one.\n"
                 "\nThe effects of preciousblock are not retained across restarts.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hash of the block to mark as precious"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "the hash of the block to mark as precious"},
                 },
                 RPCResults{},
                 RPCExamples{
@@ -1579,7 +1579,7 @@ static UniValue invalidateblock(const JSONRPCRequest& request)
             RPCHelpMan{"invalidateblock",
                 "\nPermanently marks a block as invalid, as if it violated a consensus rule.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hash of the block to mark as invalid"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "the hash of the block to mark as invalid"},
                 },
                 RPCResults{},
                 RPCExamples{
@@ -1617,7 +1617,7 @@ static UniValue reconsiderblock(const JSONRPCRequest& request)
                 "\nRemoves invalidity status of a block, its ancestors and its descendants, reconsider them for activation.\n"
                 "This can be used to undo the effects of invalidateblock.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hash of the block to reconsider"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "the hash of the block to reconsider"},
                 },
                 RPCResults{},
                 RPCExamples{
@@ -1654,7 +1654,7 @@ static UniValue getchaintxstats(const JSONRPCRequest& request)
                 "\nCompute statistics about the total number and rate of transactions in the chain.\n",
                 {
                     {"nblocks", RPCArg::Type::NUM, /* default */ "one month", "Size of the window in number of blocks"},
-                    {"blockhash", RPCArg::Type::STR_HEX, /* default */ "chain tip", "The hash of the block that ends the window."},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, /* default */ "chain tip", "The hash of the block that ends the window."},
                 },
                 RPCResult{
             "{\n"
@@ -1784,7 +1784,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 "\nCompute per block statistics for a given window. All amounts are in satoshis.\n"
                 "It won't work for some heights with pruning.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash of the target block"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "The block hash of the target block"},
                     {"stats", RPCArg::Type::ARR, /* default */ "all values", "Values to plot (see result below)",
                         {
                             {"height", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Selected statistic"},
@@ -2256,7 +2256,7 @@ static UniValue getblockfilter(const JSONRPCRequest& request)
             RPCHelpMan{"getblockfilter",
                 "\nRetrieve a BIP 157 content filter for a particular block.\n",
                 {
-                    {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The hash of the block"},
+                    {"blockhash", RPCArg::Type::BLOCK_REF, RPCArg::Optional::NO, "The hash of the block"},
                     {"filtertype", RPCArg::Type::STR, /*default*/ "basic", "The type name of the filter"},
                 },
                 RPCResult{

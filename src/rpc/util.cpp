@@ -330,6 +330,7 @@ struct Sections {
         const bool push_name{outer_type == OuterType::OBJ}; // Dictionary keys must have a name
 
         switch (arg.m_type) {
+        case RPCArg::Type::BLOCK_REF:
         case RPCArg::Type::STR_HEX:
         case RPCArg::Type::STR:
         case RPCArg::Type::NUM:
@@ -530,6 +531,10 @@ std::string RPCArg::ToDescriptionString() const
         ret += m_type_str.at(1);
     } else {
         switch (m_type) {
+        case Type::BLOCK_REF: {
+            ret += "string, hex or @height";
+            break;
+        }
         case Type::STR_HEX:
         case Type::STR: {
             ret += "string";
@@ -600,6 +605,8 @@ std::string RPCArg::ToStringObj(const bool oneline) const
         res += "\": ";
     }
     switch (m_type) {
+    case Type::BLOCK_REF:
+        return res + "\"hex\"";
     case Type::STR:
         return res + "\"str\"";
     case Type::STR_HEX:
@@ -633,6 +640,7 @@ std::string RPCArg::ToString(const bool oneline) const
     if (oneline && !m_oneline_description.empty()) return m_oneline_description;
 
     switch (m_type) {
+    case Type::BLOCK_REF:
     case Type::STR_HEX:
     case Type::STR: {
         return "\"" + m_name + "\"";
