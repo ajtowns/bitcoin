@@ -440,6 +440,21 @@ static int CommandLineRPC(int argc, char *argv[])
         const bool fWait = gArgs.GetBoolArg("-rpcwait", false);
         do {
             try {
+                if (method == "getblock") {
+                    if (args.size() >= 1 && args[0][0] == '%') {
+                        DefaultRequestHandler rh_bh;
+
+                        std::vector<std::string> bh_args;
+                        bh_args.push_back(args[0].substr(1));
+
+                        const UniValue& reply_args = CallRPC(&rh_bh, "getblockhash", bh_args);
+                        const UniValue& result = find_value(reply_args, "result");
+                        const UniValue& error  = find_value(reply_args, "error");
+                        if (error.isNull() && result.isStr()) {
+                            args[0] = result.get_str();
+                        }
+                    }
+                }
                 const UniValue reply = CallRPC(rh.get(), method, args);
 
                 // Parse reply
