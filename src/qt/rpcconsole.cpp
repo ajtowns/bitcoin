@@ -300,8 +300,22 @@ bool RPCConsole::RPCParseCommandLine(interfaces::Node* node, std::string &strRes
                         if (fExecute) {
                             // Convert argument list to JSON objects in method-dependent way,
                             // and pass it along with the method name to the dispatcher.
-                            UniValue params = RPCConvertValues(stack.back()[0], std::vector<std::string>(stack.back().begin() + 1, stack.back().end()));
+                            assert(node);
                             std::string method = stack.back()[0];
+                            std::vector<std::string> args{stack.back().begin() + 1, stack.back().end()};
+                            if (method == "getblock" && args.size() >= 1 && args[0][0] == '%') {
+                                UniValue gbh_height;
+                                gbh_height.read(args[0].substr(1));
+                                if (gbh_height.isNum()) {
+                                    std::string gbh_uri;
+                                    UniValue gbh_args(UniValue::VARR);
+                                    gbh_args.push_back(gbh_height);
+                                    UniValue gbh_res = node->executeRpc("getblockhash", gbh_args, gbh_uri);
+                                    if (gbh_res.isStr()) args[0] = gbh_res.get_str();
+                                }
+LogPrintf("getblockhash for getblock %s\n", args[0]);
+                            }
+                            UniValue params = RPCConvertValues(method, args);
                             std::string uri;
 #ifdef ENABLE_WALLET
                             if (wallet_model) {
@@ -309,7 +323,6 @@ bool RPCConsole::RPCParseCommandLine(interfaces::Node* node, std::string &strRes
                                 uri = "/wallet/"+std::string(encodedName.constData(), encodedName.length());
                             }
 #endif
-                            assert(node);
                             lastResult = node->executeRpc(method, params, uri);
                         }
 
