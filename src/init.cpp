@@ -1670,11 +1670,8 @@ bool AppInitMain(InitInterfaces& interfaces)
         }
     }
 
-    if (chainparams.GetConsensus().SegwitHeight != std::numeric_limits<int>::max()) {
-        // Advertise witness capabilities.
-        // The option to not set NODE_WITNESS is only used in the tests and should be removed.
-        nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
-    }
+    // Advertise witness capabilities.
+    nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
 
     // ********************************************************* Step 11: import blocks
 

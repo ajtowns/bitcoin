@@ -184,12 +184,11 @@ class TestP2PConn(P2PInterface):
 class SegWitTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
-        self.num_nodes = 3
+        self.num_nodes = 2
         # This test tests SegWit both pre and post-activation, so use the normal BIP9 activation.
         self.extra_args = [
             ["-whitelist=127.0.0.1", "-acceptnonstdtxn=1", "-segwitheight={}".format(SEGWIT_HEIGHT)],
             ["-whitelist=127.0.0.1", "-acceptnonstdtxn=0", "-segwitheight={}".format(SEGWIT_HEIGHT)],
-            ["-whitelist=127.0.0.1", "-acceptnonstdtxn=1", "-segwitheight=-1"]
         ]
 
     def skip_test_if_missing_module(self):
@@ -267,7 +266,6 @@ class SegWitTest(BitcoinTestFramework):
         self.test_signature_version_1()
         self.test_non_standard_witness_blinding()
         self.test_non_standard_witness()
-        self.test_upgrade_after_activation()
         self.test_witness_sigops()
         self.test_superfluous_witness()
 
@@ -531,28 +529,23 @@ class SegWitTest(BitcoinTestFramework):
 
     @subtest
     def test_getblocktemplate_before_lockin(self):
-        txid = int(self.nodes[0].sendtoaddress(self.nodes[0].getnewaddress(), 1), 16)
+        node = self.nodes[0]
+        txid = int(node.sendtoaddress(node.getnewaddress(), 1), 16)
 
-        for node in [self.nodes[0], self.nodes[2]]:
-            gbt_results = node.getblocktemplate({"rules": ["segwit"]})
-            if node == self.nodes[2]:
-                # If this is a non-segwit node, we should not get a witness
-                # commitment.
-                assert 'default_witness_commitment' not in gbt_results
-            else:
-                # For segwit-aware nodes, check the witness
-                # commitment is correct.
-                assert 'default_witness_commitment' in gbt_results
-                witness_commitment = gbt_results['default_witness_commitment']
+        gbt_results = node.getblocktemplate({"rules": ["segwit"]})
+        # For segwit-aware nodes, check the witness
+        # commitment is correct.
+        assert 'default_witness_commitment' in gbt_results
+        witness_commitment = gbt_results['default_witness_commitment']
 
-                # Check that default_witness_commitment is present.
-                witness_root = CBlock.get_merkle_root([ser_uint256(0),
-                                                       ser_uint256(txid)])
-                script = get_witness_script(witness_root, 0)
-                assert_equal(witness_commitment, script.hex())
+        # Check that default_witness_commitment is present.
+        witness_root = CBlock.get_merkle_root([ser_uint256(0),
+                                               ser_uint256(txid)])
+        script = get_witness_script(witness_root, 0)
+        assert_equal(witness_commitment, script.hex())
 
         # Clear out the mempool
-        self.nodes[0].generate(1)
+        node.generate(1)
         self.sync_blocks()
 
     @subtest
@@ -1889,28 +1882,6 @@ class SegWitTest(BitcoinTestFramework):
         assert_equal(len(self.nodes[1].getrawmempool()), 0)
 
         self.utxo.pop(0)
-
-    @subtest
-    def test_upgrade_after_activation(self):
-        """Test the behavior of starting up a segwit-aware node after the softfork has activated."""
-
-        # Restart with the new binary
-        self.stop_node(2)
-        self.start_node(2, extra_args=["-segwitheight={}".format(SEGWIT_HEIGHT)])
-        connect_nodes(self.nodes[0], 2)
-
-        self.sync_blocks()
-
-        # Make sure that this peer thinks segwit has activated.
-        assert softfork_active(self.nodes[2], 'segwit')
-
-        # Make sure this peer's blocks match those of node0.
-        height = self.nodes[2].getblockcount()
-        while height >= 0:
-            block_hash = self.nodes[2].getblockhash(height)
-            assert_equal(block_hash, self.nodes[0].getblockhash(height))
-            assert_equal(self.nodes[0].getblock(block_hash), self.nodes[2].getblock(block_hash))
-            height -= 1
 
     @subtest
     def test_witness_sigops(self):
