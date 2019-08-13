@@ -119,6 +119,7 @@ void CTxMemPool::GetRebroadcastTransactions(std::set<uint256> &setRebroadcastTxs
     // pblocktemplate->block.vtx is set of rebroadcast candidates
     // tx is CTransaction type
     // *it gives CTxMemPoolEntry type
+    LOCK(cs);
     for (const auto &tx : pblocktemplate->block.vtx) {
         txiter it = mapTx.find(tx->GetHash());
         // todo: deal with if txn doesn't exist

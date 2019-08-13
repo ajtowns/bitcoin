@@ -3813,8 +3813,10 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                   LogPrint(BCLog::NET, "3! \n");
                   std::set<uint256> setRebroadcastTxs;
                   mempool.GetRebroadcastTransactions(setRebroadcastTxs);
+                  for (const auto& hash : setRebroadcastTxs) {
+                      LogPrint(BCLog::NET, "Rebroadcast tx=%s peer=%d\n", hash.GetHex(), pto->GetId());
+                  }
 
-                  LogPrint(BCLog::NET, "insert tx to send \n");
                   pto->setInventoryTxToSend.insert(setRebroadcastTxs.begin(), setRebroadcastTxs.end());
                 }
             }

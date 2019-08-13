@@ -94,13 +94,19 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         connect_nodes(node1, 1)
         time.sleep(1)
         start_time = int(time.time())
-        delta_time = 11 * 60 # seconds
+        delta_time = 60 * 60 # seconds
         node1.setmocktime(start_time + delta_time)
         node2.setmocktime(start_time + delta_time)
+        self.log.info("Should be time to rebroadcast")
         time.sleep(1)
 
         # check that node2 got txns bc rebroadcasting
         # assert_equal(len(node2.getrawmempool()), 6)
+
+        # bump by GETDATA interval
+        node1.setmocktime(start_time + delta_time + 60)
+        node2.setmocktime(start_time + delta_time + 60)
+        self.log.info("Should be time to get tx")
         wait_until(lambda: len(node2.getrawmempool()) == 6)
 
     # def test_correct_invs(self):

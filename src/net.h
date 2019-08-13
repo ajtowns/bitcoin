@@ -877,6 +877,12 @@ public:
 /** Return a timestamp in the future (in microseconds) for exponentially distributed events. */
 int64_t PoissonNextSend(int64_t now, int average_interval_seconds);
 
+inline std::chrono::seconds PoissonNextSend(std::chrono::seconds now, int average_interval_seconds) {
+    int64_t now_micros = (std::chrono::duration_cast<std::chrono::microseconds>(now)).count();
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::microseconds{PoissonNextSend(now_micros, average_interval_seconds)});
+}
+
+
 std::chrono::seconds PoissonNextSend(std::chrono::seconds now, int average_interval_seconds);
 
 #endif // BITCOIN_NET_H

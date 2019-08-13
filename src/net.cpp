@@ -2709,24 +2709,6 @@ int64_t PoissonNextSend(int64_t now, int average_interval_seconds)
     return now + val;
 }
 
-// return mockable time
-std::chrono::seconds PoissonNextSend(std::chrono::seconds now, int average_interval_seconds)
-{
-    auto val = (int64_t)(log1p(GetRand(1ULL << 48) * -0.0000000000000035527136788 /* -1/2^48 */) * average_interval_seconds * -1000000.0 + 0.5);
-    LogPrint(BCLog::NET, "!! now from new: %s, type: %s \n", now.count(), typeid(now).name());
-    LogPrint(BCLog::NET, "!! avg interval from new: %s \n", average_interval_seconds);
-    LogPrint(BCLog::NET, "!! time from new: %s, type: %s \n", val, typeid(val).name());
-    LogPrint(BCLog::NET, "!! divided: %s \n", val/1000000);
-    //LogPrint(BCLog::NET, "!! casted time from new: %s, type: %s \n", std::chrono::seconds(val), typeid(std::chrono::seconds(val)).name());
-
-    //return now + std::chrono::seconds(11393);
-    //return now + std::chrono::seconds(val/1000000);
-    return now + std::chrono::seconds(10);
-
-    //return now + std::chrono::duration<double>(10);
-    //return now + std::chrono::duration<double>(log1p(GetRand(1ULL << 48) * -0.0000000000000035527136788) * average_interval_seconds * -1000000.0 + 0.5);
-}
-
 CSipHasher CConnman::GetDeterministicRandomizer(uint64_t id) const
 {
     return CSipHasher(nSeed0, nSeed1).Write(id);
