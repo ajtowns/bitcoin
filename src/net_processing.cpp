@@ -110,6 +110,8 @@ static constexpr unsigned int INVENTORY_BROADCAST_MAX = 7 * INVENTORY_BROADCAST_
 static constexpr unsigned int AVG_FEEFILTER_BROADCAST_INTERVAL = 10 * 60;
 /** Maximum feefilter broadcast delay after significant change. */
 static constexpr unsigned int MAX_FEEFILTER_CHANGE_DELAY = 5 * 60;
+/** Average delay between rebroadcasts */
+static const std::chrono::seconds TX_REBROADCAST_INTERVAL = std::chrono::seconds{60 * 60};
 
 // Internal stuff
 namespace {
@@ -3778,6 +3780,26 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                         pto->m_tx_relay->nNextInvSend = PoissonNextSend(nNow, INVENTORY_BROADCAST_INTERVAL >> 1);
                     }
                 }
+
+            // use mockable current_time rather than nNow to allow for testing
+            const auto current_time = GetTime<std::chrono::microseconds>();
+
+            // Check for rebroadcasts
+            if (pto->m_next_rebroadcast < current_time) {
+                bool fFirst = (pto->m_next_rebroadcast.count() == 0);
+                pto->m_next_rebroadcast = PoissonNextSend(current_time, TX_REBROADCAST_INTERVAL);
+
+                if (!fFirst) {
+                    std::set<uint256> setRebroadcastTxs;
+                    mempool.GetRebroadcastTransactions(setRebroadcastTxs);
+
+                    for (const auto& hash : setRebroadcastTxs) {
+                        LogPrint(BCLog::NET, "Rebroadcast tx=%s peer=%d\n", hash.GetHex(), pto->GetId());
+                    }
+
+                    pto->m_tx_relay->setInventoryTxToSend.insert(setRebroadcastTxs.begin(), setRebroadcastTxs.end());
+                }
+            }
 
                 // Time to send but the peer has requested we not relay transactions.
                 if (fSendTrickle) {

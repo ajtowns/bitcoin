@@ -5,9 +5,11 @@
 
 #include <txmempool.h>
 
+#include <chainparams.h>
 #include <consensus/consensus.h>
 #include <consensus/tx_verify.h>
 #include <consensus/validation.h>
+#include <miner.h>
 #include <validation.h>
 #include <policy/policy.h>
 #include <policy/fees.h>
@@ -95,6 +97,27 @@ void CTxMemPool::UpdateForDescendants(txiter updateIt, cacheMap &cachedDescendan
         }
     }
     mapTx.modify(updateIt, update_descendant_state(modifySize, modifyFee, modifyCount));
+}
+
+void CTxMemPool::GetRebroadcastTransactions(std::set<uint256>& setRebroadcastTxs)
+{
+    // Don't rebroadcast txns during importing, reindex, or IBD to ensure we don't
+    // accidentally spam our peers with old transactions.
+    if (::ChainstateActive().IsInitialBlockDownload() || ::fImporting || ::fReindex) return;
+
+    BlockAssembler::Options options;
+    options.nBlockMaxWeight = MAX_REBROADCAST_WEIGHT;
+    options.m_max_tx_time = std::chrono::seconds(GetTime()) - REBROADCAST_MIN_TX_AGE;
+    CScript scriptDummy = CScript() << OP_TRUE;
+
+    // use CreateNewBlock to get set of transaction candidates
+    std::unique_ptr<CBlockTemplate> pblocktemplate = BlockAssembler(Params(), options).CreateNewBlock(scriptDummy);
+
+    LOCK(cs);
+    for (const auto& tx : pblocktemplate->block.vtx) {
+        // add to rebroadcast set
+        setRebroadcastTxs.insert(tx->GetHash());
+    }
 }
 
 // vHashesToUpdate is the set of transaction hashes from a disconnected block

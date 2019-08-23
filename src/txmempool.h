@@ -35,6 +35,10 @@ extern CCriticalSection cs_main;
 /** Fake height value used in Coin to signify they are only in the memory pool (since 0.8) */
 static const uint32_t MEMPOOL_HEIGHT = 0x7FFFFFFF;
 
+// we rebroadcast 3/4 of max block weight (defined in consensus.h)
+// to reduce noise due to circumstances such as miners mining priority txns
+static const unsigned int MAX_REBROADCAST_WEIGHT = 3000000;
+
 struct LockPoints
 {
     // Will be set to the blockchain height and median time past
@@ -616,6 +620,11 @@ public:
      *  that any in-mempool descendants have their ancestor state updated.
      */
     void RemoveStaged(setEntries& stage, bool updateDescendants, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    /** Use CreateNewBlock with specific rebroadcast parameters to identify a set
+     * of transaction candidates & populate them in setRebroadcastTxs.
+     */
+    void GetRebroadcastTransactions(std::set<uint256>& setRebroadcastTxs);
 
     /** When adding transactions from a disconnected block back to the mempool,
      *  new mempool entries may have children in the mempool (which is generally
