@@ -80,6 +80,9 @@ TransactionError BroadcastTransaction(const CTransactionRef tx, std::string& err
     }
 
     if (relay) {
+        // the mempool explicitly keeps track of wallet txns to ensure successful initial broadcast
+        mempool.m_unbroadcast_txids.insert(hashTx);
+
         RelayTransaction(hashTx, *g_connman);
     }
 
