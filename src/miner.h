@@ -135,6 +135,7 @@ private:
     bool fIncludeWitness;
     unsigned int nBlockMaxWeight;
     CFeeRate blockMinFeeRate;
+    std::chrono::seconds m_max_tx_time;
 
     // Information on the current status of the block
     uint64_t nBlockWeight;
@@ -153,6 +154,7 @@ public:
         Options();
         size_t nBlockMaxWeight;
         CFeeRate blockMinFeeRate;
+        std::chrono::seconds m_max_tx_time;
     };
 
     explicit BlockAssembler(const CChainParams& params);
