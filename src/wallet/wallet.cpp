@@ -46,6 +46,8 @@ const std::map<uint64_t,std::string> WALLET_FLAG_CAVEATS{
 };
 
 static const size_t OUTPUT_GROUP_MAX_ENTRIES = 10;
+// frequency of resubmitting txns to mempool- 24 hours
+static const std::chrono::milliseconds RESEND_TXS_FREQUENCY { 1000 * 60 * 60 * 24 };
 
 static CCriticalSection cs_wallets;
 static std::vector<std::shared_ptr<CWallet>> vpwallets GUARDED_BY(cs_wallets);
@@ -2337,31 +2339,17 @@ bool CWalletTx::IsEquivalentTo(const CWalletTx& _tx) const
         return CTransaction(tx1) == CTransaction(tx2);
 }
 
-// Rebroadcast transactions from the wallet. We do this on a random timer
-// to slightly obfuscate which transactions come from our wallet.
-//
-// Ideally, we'd only resend transactions that we think should have been
-// mined in the most recent block. Any transaction that wasn't in the top
-// blockweight of transactions in the mempool shouldn't have been mined,
-// and so is probably just sitting in the mempool waiting to be confirmed.
-// Rebroadcasting does nothing to speed up confirmation and only damages
-// privacy.
+// Once a day, resbumit all wallet transactions to the node,
+// in case it has been dropped from your mempool.
 void CWallet::ResendWalletTransactions()
 {
     // During reindex, importing and IBD, old wallet transactions become
-    // unconfirmed. Don't resend them as that would spam other nodes.
+    // unconfirmed. Don't need to resubmit to our node.
     if (!chain().isReadyToBroadcast()) return;
 
-    // Do this infrequently and randomly to avoid giving away
-    // that these are our transactions.
-    if (GetTime() < nNextResend || !fBroadcastTransactions) return;
-    bool fFirst = (nNextResend == 0);
-    nNextResend = GetTime() + GetRand(30 * 60);
-    if (fFirst) return;
-
-    // Only do it if there's been a new block since last time
-    if (m_best_block_time < nLastResend) return;
-    nLastResend = GetTime();
+    // Do this once per day.
+    if (std::chrono::milliseconds{GetTime()} < nNextResend) return;
+    nNextResend = std::chrono::milliseconds{GetTime()} + RESEND_TXS_FREQUENCY;
 
     int submitted_tx_count = 0;
 
@@ -2369,15 +2357,11 @@ void CWallet::ResendWalletTransactions()
         auto locked_chain = chain().lock();
         LOCK(cs_wallet);
 
-        // Relay transactions
+        // Resubmit transactions
         for (std::pair<const uint256, CWalletTx>& item : mapWallet) {
             CWalletTx& wtx = item.second;
-            // Attempt to rebroadcast all txes more than 5 minutes older than
-            // the last block. SubmitMemoryPoolAndRelay() will not rebroadcast
-            // any confirmed or conflicting txs.
-            if (wtx.nTimeReceived > m_best_block_time - 5 * 60) continue;
             std::string unused_err_string;
-            if (wtx.SubmitMemoryPoolAndRelay(unused_err_string, true, *locked_chain)) ++submitted_tx_count;
+            if (wtx.SubmitMemoryPoolAndRelay(unused_err_string, false, *locked_chain)) ++submitted_tx_count;
         }
     } // locked_chain and cs_wallet
 
