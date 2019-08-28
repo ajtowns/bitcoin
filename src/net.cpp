@@ -352,8 +352,10 @@ static CAddress GetBindAddress(SOCKET sock)
     return addr_bind;
 }
 
-CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, bool manual_connection, bool block_relay_only)
+CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, NodeType node_type)
 {
+    assert(node_type != NodeType::INBOUND);
+
     if (pszDest == nullptr) {
         if (IsLocal(addrConnect))
             return nullptr;
@@ -416,7 +418,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             if (hSocket == INVALID_SOCKET) {
                 return nullptr;
             }
-            connected = ConnectSocketDirectly(addrConnect, hSocket, nConnectTimeout, manual_connection);
+            connected = ConnectSocketDirectly(addrConnect, hSocket, nConnectTimeout, /*manual_connection=*/ node_type == NodeType::MANUAL);
         }
         if (!proxyConnectionFailed) {
             // If a connection to the node was attempted, and failure (if any) is not caused by a problem connecting to
@@ -442,7 +444,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     NodeId id = GetNewNodeId();
     uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
     CAddress addr_bind = GetBindAddress(hSocket);
-    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", false, block_relay_only);
+    CNode* pnode = new CNode(id, nLocalServices, GetBestHeight(), hSocket, addrConnect, CalculateKeyedNetGroup(addrConnect), nonce, addr_bind, pszDest ? pszDest : "", node_type);
     pnode->AddRef();
 
     return pnode;
@@ -984,7 +986,7 @@ void CConnman::AcceptConnection(const ListenSocket& hListenSocket) {
     if (NetPermissions::HasFlag(permissionFlags, PF_BLOOMFILTER)) {
         nodeServices = static_cast<ServiceFlags>(nodeServices | NODE_BLOOM);
     }
-    CNode* pnode = new CNode(id, nodeServices, GetBestHeight(), hSocket, addr, CalculateKeyedNetGroup(addr), nonce, addr_bind, "", true);
+    CNode* pnode = new CNode(id, nodeServices, GetBestHeight(), hSocket, addr, CalculateKeyedNetGroup(addr), nonce, addr_bind, "", NodeType::INBOUND);
     pnode->AddRef();
     pnode->m_permissionFlags = permissionFlags;
     // If this flag is present, the user probably expect that RPC and QT report it as whitelisted (backward compatibility)
@@ -1630,7 +1632,7 @@ void CConnman::ProcessOneShot()
     CAddress addr;
     CSemaphoreGrant grant(*semOutbound, true);
     if (grant) {
-        OpenNetworkConnection(addr, false, &grant, strDest.c_str(), true);
+        OpenNetworkConnection(addr, false, &grant, strDest.c_str(), /*oneshot=*/ true);
     }
 }
 
@@ -1676,7 +1678,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             for (const std::string& strAddr : connect)
             {
                 CAddress addr(CService(), NODE_NONE);
-                OpenNetworkConnection(addr, false, nullptr, strAddr.c_str(), false, false, true);
+                OpenNetworkConnection(addr, false, nullptr, strAddr.c_str(), /*oneshot=*/ false, NodeType::MANUAL);
                 for (int i = 0; i < 10 && i < nLoop; i++)
                 {
                     if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
@@ -1838,8 +1840,9 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             // also at our block-relay peer limit, but check against that as
             // well for sanity.)
             bool block_relay_only = nOutboundBlockRelay < m_max_outbound_block_relay && !fFeeler && nOutboundFullRelay >= m_max_outbound_full_relay;
+            NodeType node_type = (fFeeler ? NodeType::FEELER : block_relay_only ? NodeType::BLOCK_RELAY : NodeType::OUTBOUND);
 
-            OpenNetworkConnection(addrConnect, (int)setConnected.size() >= std::min(nMaxConnections - 1, 2), &grant, nullptr, false, fFeeler, false, block_relay_only);
+            OpenNetworkConnection(addrConnect, (int)setConnected.size() >= std::min(nMaxConnections - 1, 2), &grant, nullptr, /*oneshot=*/ false, node_type);
         }
     }
 }
@@ -1914,7 +1917,7 @@ void CConnman::ThreadOpenAddedConnections()
                 }
                 tried = true;
                 CAddress addr(CService(), NODE_NONE);
-                OpenNetworkConnection(addr, false, &grant, info.strAddedNode.c_str(), false, false, true);
+                OpenNetworkConnection(addr, false, &grant, info.strAddedNode.c_str(), /*oneshot=*/ false, NodeType::MANUAL);
                 if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
                     return;
             }
@@ -1926,8 +1929,10 @@ void CConnman::ThreadOpenAddedConnections()
 }
 
 // if successful, this moves the passed grant to the constructed node
-void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound, const char *pszDest, bool fOneShot, bool fFeeler, bool manual_connection, bool block_relay_only)
+void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound, const char *pszDest, bool fOneShot, NodeType node_type)
 {
+    assert(node_type != NodeType::INBOUND);
+
     //
     // Initiate outbound network connection
     //
@@ -1945,7 +1950,7 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
     } else if (FindNode(std::string(pszDest)))
         return;
 
-    CNode* pnode = ConnectNode(addrConnect, pszDest, fCountFailure, manual_connection, block_relay_only);
+    CNode* pnode = ConnectNode(addrConnect, pszDest, fCountFailure, node_type);
 
     if (!pnode)
         return;
@@ -1953,10 +1958,6 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         grantOutbound->MoveTo(pnode->grantOutbound);
     if (fOneShot)
         pnode->fOneShot = true;
-    if (fFeeler)
-        pnode->fFeeler = true;
-    if (manual_connection)
-        pnode->m_manual_connection = true;
 
     m_msgproc->InitializeNode(pnode);
     {
@@ -2636,17 +2637,19 @@ int CConnman::GetBestHeight() const
 
 unsigned int CConnman::GetReceiveFloodSize() const { return nReceiveFloodSize; }
 
-CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, bool fInboundIn, bool block_relay_only)
+CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, NodeType node_type)
     : nTimeConnected(GetSystemTimeInSeconds()),
     addr(addrIn),
     addrBind(addrBindIn),
-    fInbound(fInboundIn),
+    fFeeler(node_type == NodeType::FEELER),
+    m_manual_connection(node_type == NodeType::MANUAL),
+    fInbound(node_type == NodeType::INBOUND),
     nKeyedNetGroup(nKeyedNetGroupIn),
     addrKnown(5000, 0.001),
     // Don't relay addr messages to peers that we connect to as block-relay-only
     // peers (to prevent adversaries from inferring these links from addr
     // traffic).
-    m_addr_relay_peer(!block_relay_only),
+    m_addr_relay_peer(node_type != NodeType::BLOCK_RELAY),
     id(idIn),
     nLocalHostNonce(nLocalHostNonceIn),
     nLocalServices(nLocalServicesIn),
@@ -2655,7 +2658,7 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     hSocket = hSocketIn;
     addrName = addrNameIn == "" ? addr.ToStringIPPort() : addrNameIn;
     hashContinue = uint256();
-    if (!block_relay_only) {
+    if (node_type != NodeType::BLOCK_RELAY) {
         m_tx_relay = MakeUnique<TxRelay>();
     }
 
