@@ -212,7 +212,7 @@ static UniValue addnode(const JSONRPCRequest& request)
     if (!request.params[1].isNull())
         strCommand = request.params[1].get_str();
     if (request.fHelp || request.params.size() != 2 ||
-        (strCommand != "onetry" && strCommand != "add" && strCommand != "remove"))
+        (strCommand != "onetry" && strCommand != "add" && strCommand != "remove" && strCommand != "onetry-auto" && strCommand != "onetry-blockrelay")) {
         throw std::runtime_error(
             RPCHelpMan{"addnode",
                 "\nAttempts to add or remove a node from the addnode list.\n"
@@ -229,6 +229,7 @@ static UniValue addnode(const JSONRPCRequest& request)
             + HelpExampleRpc("addnode", "\"192.168.0.6:8333\", \"onetry\"")
                 },
             }.ToString());
+    }
 
     if(!g_connman)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
@@ -239,6 +240,20 @@ static UniValue addnode(const JSONRPCRequest& request)
     {
         CAddress addr;
         g_connman->OpenNetworkConnection(addr, false, nullptr, strNode.c_str(), /*oneshot=*/ false, NodeType::MANUAL);
+        return NullUniValue;
+    }
+
+    if (strCommand == "onetry-auto")
+    {
+        CAddress addr;
+        g_connman->OpenNetworkConnection(addr, false, nullptr, strNode.c_str(), /*oneshot=*/ false, NodeType::OUTBOUND);
+        return NullUniValue;
+    }
+
+    if (strCommand == "onetry-blockrelay")
+    {
+        CAddress addr;
+        g_connman->OpenNetworkConnection(addr, false, nullptr, strNode.c_str(), /*oneshot=*/ false, NodeType::BLOCK_RELAY);
         return NullUniValue;
     }
 
