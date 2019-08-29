@@ -470,7 +470,7 @@ class TestNode():
                     assert_msg = "bitcoind should have exited with expected error " + expected_msg
                 self._raise_assertion_error(assert_msg)
 
-    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, **kwargs):
+    def add_p2p_connection(self, p2p_conn, *, wait_for_verack=True, connect_type=None, connect_idx=None, **kwargs):
         """Add a p2p connection to the node.
 
         This method adds the p2p connection to the self.p2ps list and also
@@ -480,7 +480,17 @@ class TestNode():
         if 'dstaddr' not in kwargs:
             kwargs['dstaddr'] = '127.0.0.1'
 
-        p2p_conn.peer_connect(**kwargs)()
+        if connect_type is None:
+            p2p_conn.peer_connect(**kwargs)()
+        else:
+            if connect_idx is None: connect_idx = 0
+            def cb(a,p):
+                self.log.debug("Connecting to %s:%d %s" % (a,p,connect_type))
+                self.addnode('%s:%d' % (a, p), connect_type)
+
+            p2p_conn.peer_connect(connect_cb=cb, connect_idx=connect_idx, **kwargs)()
+
+        p2p_conn.wait_for_connect()
         self.p2ps.append(p2p_conn)
         if wait_for_verack:
             p2p_conn.wait_for_verack()

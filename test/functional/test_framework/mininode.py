@@ -53,7 +53,7 @@ from test_framework.messages import (
     NODE_WITNESS,
     sha256,
 )
-from test_framework.util import wait_until
+from test_framework.util import MAX_NODES, p2p_port, wait_until
 
 logger = logging.getLogger("TestFramework.mininode")
 
@@ -89,6 +89,10 @@ MAGIC_BYTES = {
 }
 
 
+class AutoCloseProtocol(asyncio.Protocol):
+    def connection_made(self, transport):
+        transport.close()
+
 class P2PConnection(asyncio.Protocol):
     """A low-level connection object to a node's P2P interface.
 
@@ -111,7 +115,7 @@ class P2PConnection(asyncio.Protocol):
     def is_connected(self):
         return self._transport is not None
 
-    def peer_connect(self, dstaddr, dstport, net="regtest"):
+    def peer_connect(self, dstaddr=None, dstport=None, connect_cb=None, connect_idx=0, net="regtest"):
         assert not self.is_connected
         self.dstaddr = dstaddr
         self.dstport = dstport
@@ -119,12 +123,16 @@ class P2PConnection(asyncio.Protocol):
         self.on_connection_send_msg = None
         self.recvbuf = b""
         self.magic_bytes = MAGIC_BYTES[net]
-        logger.debug('Connecting to Bitcoin Node: %s:%d' % (self.dstaddr, self.dstport))
-
-        loop = NetworkThread.network_event_loop
-        conn_gen_unsafe = loop.create_connection(lambda: self, host=self.dstaddr, port=self.dstport)
-        conn_gen = lambda: loop.call_soon_threadsafe(loop.create_task, conn_gen_unsafe)
-        return conn_gen
+        if connect_cb is None:
+            assert dstaddr is not None and dstport is not None
+            loop = NetworkThread.network_event_loop
+            logger.debug('Connecting to Bitcoin Node: %s:%d' % (self.dstaddr, self.dstport))
+            coroutine = loop.create_connection(lambda: self, host=self.dstaddr, port=self.dstport)
+            finish = lambda: loop.call_soon_threadsafe(loop.create_task, coroutine)
+        else:
+            logger.debug('Listening for Bitcoin Node: %s' % (connect_idx))
+            finish = lambda: NetworkThread.listen(self, connect_cb, idx=connect_idx)
+        return finish
 
     def peer_disconnect(self):
         # Connection could have already been closed by other end.
@@ -355,6 +363,10 @@ class P2PInterface(P2PConnection):
 
     # Connection helper methods
 
+    def wait_for_connect(self, timeout=60):
+        test_function = lambda: self.is_connected
+        wait_until(test_function, timeout=timeout, lock=mininode_lock)
+
     def wait_for_disconnect(self, timeout=60):
         test_function = lambda: not self.is_connected
         wait_until(test_function, timeout=timeout, lock=mininode_lock)
@@ -468,6 +480,8 @@ class NetworkThread(threading.Thread):
         # There is only one event loop and no more than one thread must be created
         assert not self.network_event_loop
 
+        NetworkThread.listeners = {}
+        NetworkThread.protos = {}
         NetworkThread.network_event_loop = asyncio.new_event_loop()
 
     def run(self):
@@ -480,6 +494,32 @@ class NetworkThread(threading.Thread):
         wait_until(lambda: not self.network_event_loop.is_running(), timeout=timeout)
         self.network_event_loop.close()
         self.join(timeout)
+
+    @classmethod
+    def listen(cls, p2p, cb, port=None, addr=None, idx=0):
+        if port is None:
+            assert idx >= 0 and idx < MAX_NODES
+            port = p2p_port(MAX_NODES-idx)
+        if addr is None: addr = '127.0.0.1'
+        coroutine = cls.create_server(addr, port, cb, p2p)
+        cls.network_event_loop.call_soon_threadsafe(cls.network_event_loop.create_task, coroutine)
+
+    @classmethod
+    def peer_listener(cls, addr, port):
+        def pl():
+            x = cls.protos.get((addr,port))
+            cls.protos[(addr,port)] = None
+            return x
+        return pl
+
+    @classmethod
+    async def create_server(cls, addr, port, cb, proto):
+        if (addr,port) not in cls.listeners:
+            listener = await cls.network_event_loop.create_server(cls.peer_listener(addr, port), addr, port)
+            logger.debug("Listening server on %s:%d should be started" % (addr, port))
+            cls.listeners[(addr,port)] = listener
+        cls.protos[(addr,port)] = proto
+        cb(addr,port)
 
 
 class P2PDataStore(P2PInterface):
