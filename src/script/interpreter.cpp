@@ -281,34 +281,26 @@ int FindAndDelete(CScript& script, const CScript& b)
 namespace {
 class FalseCounter {
 private:
-    int true_depth = 0;
-    int ignore_depth = 0;
+    int depth = 0;
+    int first_false = 0;
 public:
-    bool empty() { return true_depth == 0 && ignore_depth == 0; }
-    bool all_true() { return ignore_depth == 0; }
+    bool empty() { return depth == 0; }
+    bool all_true() { return first_false == 0; }
     void push_back(bool f) {
-        if (all_true() && f) {
-            ++true_depth;
-        } else {
-            ++ignore_depth;
-        }
+        ++depth;
+        if (first_false == 0 && !f) first_false = depth;
     }
     void pop_back() {
-        if (ignore_depth > 0) {
-            --ignore_depth;
-        } else {
-            --true_depth;
-        }
+        if (first_false == depth) first_false = 0;
+        --depth;
     }
     void toggle_top() {
-        if (ignore_depth == 0) {
-            --true_depth;
-            ++ignore_depth;
-        } else if (ignore_depth == 1) {
-            ++true_depth;
-            --ignore_depth;
+        if (first_false == 0) {
+            first_false = depth;
+        } else if (first_false == depth) {
+            first_false = 0;
         } else {
-            // no action needed as top is ignored either way
+            // no action needed as change is unobservable
         }
     }
 };
