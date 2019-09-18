@@ -278,34 +278,6 @@ int FindAndDelete(CScript& script, const CScript& b)
     return nFound;
 }
 
-namespace {
-class FalseCounter {
-private:
-    int depth = 0;
-    int first_false = 0;
-public:
-    bool empty() { return depth == 0; }
-    bool all_true() { return first_false == 0; }
-    void push_back(bool f) {
-        ++depth;
-        if (first_false == 0 && !f) first_false = depth;
-    }
-    void pop_back() {
-        if (first_false == depth) first_false = 0;
-        --depth;
-    }
-    void toggle_top() {
-        if (first_false == 0) {
-            first_false = depth;
-        } else if (first_false == depth) {
-            first_false = 0;
-        } else {
-            // no action needed as change is unobservable
-        }
-    }
-};
-}
-
 bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* serror)
 {
     static const CScriptNum bnZero(0);
@@ -321,7 +293,8 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     CScript::const_iterator pbegincodehash = script.begin();
     opcodetype opcode;
     valtype vchPushValue;
-    FalseCounter vfExec;
+    uint32_t if_nesting = 0; // How many IF/NOTIFs we're inside
+    uint32_t negative_if_nesting = 0; // What IF/NOT nesting depth is causing us to not execute (or 0 if none)
     std::vector<valtype> altstack;
     set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
     if (script.size() > MAX_SCRIPT_SIZE)
@@ -333,7 +306,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     {
         while (pc < pend)
         {
-            bool fExec = vfExec.all_true();
+            bool fExec = negative_if_nesting == 0;
 
             //
             // Read instruction
@@ -497,7 +470,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 case OP_NOTIF:
                 {
                     // <expression> if [statements] [else [statements]] endif
-                    bool fValue = false;
+                    ++if_nesting;
                     if (fExec)
                     {
                         if (stack.size() < 1)
@@ -509,28 +482,37 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                             if (vch.size() == 1 && vch[0] != 1)
                                 return set_error(serror, SCRIPT_ERR_MINIMALIF);
                         }
-                        fValue = CastToBool(vch);
+                        bool fValue = CastToBool(vch);
                         if (opcode == OP_NOTIF)
                             fValue = !fValue;
                         popstack(stack);
+                        if (!fValue) negative_if_nesting = if_nesting;
                     }
-                    vfExec.push_back(fValue);
                 }
                 break;
 
                 case OP_ELSE:
                 {
-                    if (vfExec.empty())
+                    if (if_nesting == 0) {
                         return set_error(serror, SCRIPT_ERR_UNBALANCED_CONDITIONAL);
-                    vfExec.toggle_top();
+                    }
+                    if (negative_if_nesting == 0) {
+                        negative_if_nesting = if_nesting;
+                    } else if (negative_if_nesting == if_nesting) {
+                        negative_if_nesting = 0;
+                    }
                 }
                 break;
 
                 case OP_ENDIF:
                 {
-                    if (vfExec.empty())
+                    if (if_nesting == 0) {
                         return set_error(serror, SCRIPT_ERR_UNBALANCED_CONDITIONAL);
-                    vfExec.pop_back();
+                    }
+                    if (negative_if_nesting == if_nesting) {
+                        negative_if_nesting = 0;
+                    }
+                    --if_nesting;
                 }
                 break;
 
@@ -1105,7 +1087,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
         return set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
     }
 
-    if (!vfExec.empty())
+    if (if_nesting != 0)
         return set_error(serror, SCRIPT_ERR_UNBALANCED_CONDITIONAL);
 
     return set_success(serror);
