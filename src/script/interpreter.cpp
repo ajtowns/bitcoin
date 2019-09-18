@@ -278,6 +278,19 @@ int FindAndDelete(CScript& script, const CScript& b)
     return nFound;
 }
 
+namespace {
+class FalseCounter {
+private:
+    std::vector<bool> flags;
+public:
+    bool empty() { return flags.empty(); }
+    bool all_true() { return !count(flags.begin(), flags.end(), false); }
+    void push_back(bool f) { flags.push_back(f); }
+    void pop_back() { flags.pop_back(); }
+    void toggle_top() { flags.back() = !flags.back(); }
+};
+}
+
 bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* serror)
 {
     static const CScriptNum bnZero(0);
@@ -293,7 +306,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     CScript::const_iterator pbegincodehash = script.begin();
     opcodetype opcode;
     valtype vchPushValue;
-    std::vector<bool> vfExec;
+    FalseCounter vfExec;
     std::vector<valtype> altstack;
     set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
     if (script.size() > MAX_SCRIPT_SIZE)
@@ -305,7 +318,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
     {
         while (pc < pend)
         {
-            bool fExec = !count(vfExec.begin(), vfExec.end(), false);
+            bool fExec = vfExec.all_true();
 
             //
             // Read instruction
@@ -494,7 +507,7 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 {
                     if (vfExec.empty())
                         return set_error(serror, SCRIPT_ERR_UNBALANCED_CONDITIONAL);
-                    vfExec.back() = !vfExec.back();
+                    vfExec.toggle_top();
                 }
                 break;
 
