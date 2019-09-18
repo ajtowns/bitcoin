@@ -281,13 +281,36 @@ int FindAndDelete(CScript& script, const CScript& b)
 namespace {
 class FalseCounter {
 private:
-    std::vector<bool> flags;
+    int true_depth = 0;
+    int ignore_depth = 0;
 public:
-    bool empty() { return flags.empty(); }
-    bool all_true() { return !count(flags.begin(), flags.end(), false); }
-    void push_back(bool f) { flags.push_back(f); }
-    void pop_back() { flags.pop_back(); }
-    void toggle_top() { flags.back() = !flags.back(); }
+    bool empty() { return true_depth == 0 && ignore_depth == 0; }
+    bool all_true() { return ignore_depth == 0; }
+    void push_back(bool f) {
+        if (all_true() && f) {
+            ++true_depth;
+        } else {
+            ++ignore_depth;
+        }
+    }
+    void pop_back() {
+        if (ignore_depth > 0) {
+            --ignore_depth;
+        } else {
+            --true_depth;
+        }
+    }
+    void toggle_top() {
+        if (ignore_depth == 0) {
+            --true_depth;
+            ++ignore_depth;
+        } else if (ignore_depth == 1) {
+            ++true_depth;
+            --ignore_depth;
+        } else {
+            // no action needed as top is ignored either way
+        }
+    }
 };
 }
 
