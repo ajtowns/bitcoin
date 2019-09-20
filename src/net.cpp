@@ -545,7 +545,7 @@ void CNode::copyStats(CNodeStats &stats)
     // the caller can immediately detect that this is happening.
     int64_t nPingUsecWait = 0;
     if ((0 != nPingNonceSent) && (0 != nPingUsecStart)) {
-        nPingUsecWait = GetTimeMicros() - nPingUsecStart;
+        nPingUsecWait = GetSysTimeMicros() - nPingUsecStart;
     }
 
     // Raw ping time is in microseconds, but show it to user as whole seconds (Bitcoin users should be well used to small numbers with many decimal places by now :)
@@ -562,7 +562,7 @@ void CNode::copyStats(CNodeStats &stats)
 bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes, bool& complete)
 {
     complete = false;
-    int64_t nTimeMicros = GetTimeMicros();
+    int64_t nTimeMicros = GetSysTimeMicros();
     LOCK(cs_vRecv);
     nLastRecv = nTimeMicros / 1000000;
     nRecvBytes += nBytes;
@@ -709,7 +709,7 @@ size_t CConnman::SocketSendData(CNode *pnode) const EXCLUSIVE_LOCKS_REQUIRED(pno
             nBytes = send(pnode->hSocket, reinterpret_cast<const char*>(data.data()) + pnode->nSendOffset, data.size() - pnode->nSendOffset, MSG_NOSIGNAL | MSG_DONTWAIT);
         }
         if (nBytes > 0) {
-            pnode->nLastSend = GetSystemTimeInSeconds();
+            pnode->nLastSend = GetSysTime();
             pnode->nSendBytes += nBytes;
             pnode->nSendOffset += nBytes;
             nSentSize += nBytes;
@@ -1081,7 +1081,7 @@ void CConnman::NotifyNumConnectionsChanged()
 
 void CConnman::InactivityCheck(CNode *pnode)
 {
-    int64_t nTime = GetSystemTimeInSeconds();
+    int64_t nTime = GetSysTime();
     if (nTime - pnode->nTimeConnected > m_peer_connect_timeout)
     {
         if (pnode->nLastRecv == 0 || pnode->nLastSend == 0)
@@ -1099,9 +1099,9 @@ void CConnman::InactivityCheck(CNode *pnode)
             LogPrintf("socket receive timeout: %is\n", nTime - pnode->nLastRecv);
             pnode->fDisconnect = true;
         }
-        else if (pnode->nPingNonceSent && pnode->nPingUsecStart + TIMEOUT_INTERVAL * 1000000 < GetTimeMicros())
+        else if (pnode->nPingNonceSent && pnode->nPingUsecStart + TIMEOUT_INTERVAL * 1000000 < GetSysTimeMicros())
         {
-            LogPrintf("ping timeout: %fs\n", 0.000001 * (GetTimeMicros() - pnode->nPingUsecStart));
+            LogPrintf("ping timeout: %fs\n", 0.000001 * (GetSysTimeMicros() - pnode->nPingUsecStart));
             pnode->fDisconnect = true;
         }
         else if (!pnode->fSuccessfullyConnected)
@@ -1611,13 +1611,13 @@ void CConnman::ThreadDNSAddressSeed()
 
 void CConnman::DumpAddresses()
 {
-    int64_t nStart = GetTimeMillis();
+    int64_t nStart = GetSysTimeMillis();
 
     CAddrDB adb;
     adb.Write(addrman);
 
     LogPrint(BCLog::NET, "Flushed %d addresses to peers.dat  %dms\n",
-           addrman.size(), GetTimeMillis() - nStart);
+           addrman.size(), GetSysTimeMillis() - nStart);
 }
 
 void CConnman::ProcessOneShot()
@@ -1762,7 +1762,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         bool fFeeler = false;
 
         if (nOutboundFullRelay >= m_max_outbound_full_relay && nOutboundBlockRelay >= m_max_outbound_block_relay && !GetTryNewOutboundPeer()) {
-            int64_t nTime = GetTimeMicros(); // The current time right now (in microseconds).
+            int64_t nTime = GetSysTimeMicros(); // The current time right now (in microseconds).
             if (nTime > nNextFeeler) {
                 nNextFeeler = PoissonNextSend(nTime, FEELER_INTERVAL);
                 fFeeler = true;
@@ -2233,11 +2233,11 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
         clientInterface->InitMessage(_("Loading P2P addresses...").translated);
     }
     // Load addresses from peers.dat
-    int64_t nStart = GetTimeMillis();
+    int64_t nStart = GetSysTimeMillis();
     {
         CAddrDB adb;
         if (adb.Read(addrman))
-            LogPrintf("Loaded %i addresses from peers.dat  %dms\n", addrman.size(), GetTimeMillis() - nStart);
+            LogPrintf("Loaded %i addresses from peers.dat  %dms\n", addrman.size(), GetSysTimeMillis() - nStart);
         else {
             addrman.Clear(); // Addrman can be in an inconsistent state after failure, reset it
             LogPrintf("Invalid or missing peers.dat; recreating\n");
@@ -2640,7 +2640,7 @@ int CConnman::GetBestHeight() const
 unsigned int CConnman::GetReceiveFloodSize() const { return nReceiveFloodSize; }
 
 CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn, SOCKET hSocketIn, const CAddress& addrIn, uint64_t nKeyedNetGroupIn, uint64_t nLocalHostNonceIn, const CAddress& addrBindIn, const std::string& addrNameIn, bool fInboundIn, bool block_relay_only)
-    : nTimeConnected(GetSystemTimeInSeconds()),
+    : nTimeConnected(GetSysTime()),
     addr(addrIn),
     addrBind(addrBindIn),
     fInbound(fInboundIn),

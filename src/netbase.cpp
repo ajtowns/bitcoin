@@ -323,7 +323,7 @@ enum class IntrRecvError {
  */
 static IntrRecvError InterruptibleRecv(uint8_t* data, size_t len, int timeout, const SOCKET& hSocket)
 {
-    int64_t curTime = GetTimeMillis();
+    int64_t curTime = GetSysTimeMillis();
     int64_t endTime = curTime + timeout;
     // Maximum time to wait for I/O readiness. It will take up until this time
     // (in millis) to break off in case of an interruption.
@@ -365,7 +365,7 @@ static IntrRecvError InterruptibleRecv(uint8_t* data, size_t len, int timeout, c
         }
         if (interruptSocks5Recv)
             return IntrRecvError::Interrupted;
-        curTime = GetTimeMillis();
+        curTime = GetSysTimeMillis();
     }
     return len == 0 ? IntrRecvError::OK : IntrRecvError::Timeout;
 }

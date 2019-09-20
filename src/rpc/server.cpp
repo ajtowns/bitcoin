@@ -50,7 +50,7 @@ struct RPCCommandExecution
     explicit RPCCommandExecution(const std::string& method)
     {
         LOCK(g_rpc_server_info.mutex);
-        it = g_rpc_server_info.active_commands.insert(g_rpc_server_info.active_commands.end(), {method, GetTimeMicros()});
+        it = g_rpc_server_info.active_commands.insert(g_rpc_server_info.active_commands.end(), {method, GetSysTimeMicros()});
     }
     ~RPCCommandExecution()
     {
@@ -220,7 +220,7 @@ static UniValue getrpcinfo(const JSONRPCRequest& request)
     for (const RPCCommandExecutionInfo& info : g_rpc_server_info.active_commands) {
         UniValue entry(UniValue::VOBJ);
         entry.pushKV("method", info.method);
-        entry.pushKV("duration", GetTimeMicros() - info.start);
+        entry.pushKV("duration", GetSysTimeMicros() - info.start);
         active_commands.push_back(entry);
     }
 

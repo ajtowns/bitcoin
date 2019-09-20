@@ -20,16 +20,16 @@ inline int64_t count_seconds(std::chrono::seconds t) { return t.count(); }
 
 /**
  * DEPRECATED
- * Use either GetSystemTimeInSeconds (not mockable) or GetTime<T> (mockable)
+ * Use either GetSysTime (not mockable) or GetTime<T> (mockable)
  */
 int64_t GetTime();
 
 /** Returns the system time (not mockable) */
-int64_t GetTimeMillis();
+int64_t GetSysTimeMillis();
 /** Returns the system time (not mockable) */
-int64_t GetTimeMicros();
+int64_t GetSysTimeMicros();
 /** Returns the system time (not mockable) */
-int64_t GetSystemTimeInSeconds(); // Like GetTime(), but not mockable
+int64_t GetSysTime(); // Like GetTime(), but not mockable
 
 /** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument */
 void SetMockTime(int64_t nMockTimeIn);

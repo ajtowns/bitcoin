@@ -765,7 +765,7 @@ bool BerkeleyBatch::Rewrite(BerkeleyDatabase& database, const char* pszSkip)
 
 void BerkeleyEnvironment::Flush(bool fShutdown)
 {
-    int64_t nStart = GetTimeMillis();
+    int64_t nStart = GetSysTimeMillis();
     // Flush log data to the actual data file on all files that are not in use
     LogPrint(BCLog::DB, "BerkeleyEnvironment::Flush: [%s] Flush(%s)%s\n", strPath, fShutdown ? "true" : "false", fDbEnvInit ? "" : " database not started");
     if (!fDbEnvInit)
@@ -790,7 +790,7 @@ void BerkeleyEnvironment::Flush(bool fShutdown)
             } else
                 mi++;
         }
-        LogPrint(BCLog::DB, "BerkeleyEnvironment::Flush: Flush(%s)%s took %15dms\n", fShutdown ? "true" : "false", fDbEnvInit ? "" : " database not started", GetTimeMillis() - nStart);
+        LogPrint(BCLog::DB, "BerkeleyEnvironment::Flush: Flush(%s)%s took %15dms\n", fShutdown ? "true" : "false", fDbEnvInit ? "" : " database not started", GetSysTimeMillis() - nStart);
         if (fShutdown) {
             char** listp;
             if (mapFileUseCount.empty()) {
@@ -831,14 +831,14 @@ bool BerkeleyBatch::PeriodicFlush(BerkeleyDatabase& database)
             if (mi != env->mapFileUseCount.end())
             {
                 LogPrint(BCLog::DB, "Flushing %s\n", strFile);
-                int64_t nStart = GetTimeMillis();
+                int64_t nStart = GetSysTimeMillis();
 
                 // Flush wallet file so it's self contained
                 env->CloseDb(strFile);
                 env->CheckpointLSN(strFile);
 
                 env->mapFileUseCount.erase(mi++);
-                LogPrint(BCLog::DB, "Flushed %s %dms\n", strFile, GetTimeMillis() - nStart);
+                LogPrint(BCLog::DB, "Flushed %s %dms\n", strFile, GetSysTimeMillis() - nStart);
                 ret = true;
             }
         }

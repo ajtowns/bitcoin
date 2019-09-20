@@ -32,7 +32,7 @@ static void BenchTimeMillis(benchmark::State& state)
 static void BenchTimeMillisSys(benchmark::State& state)
 {
     while (state.KeepRunning()) {
-        (void)GetTimeMillis();
+        (void)GetSysTimeMillis();
     }
 }
 

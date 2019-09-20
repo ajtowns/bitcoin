@@ -406,7 +406,7 @@ static UniValue getnettotals(const JSONRPCRequest& request)
     UniValue obj(UniValue::VOBJ);
     obj.pushKV("totalbytesrecv", g_connman->GetTotalBytesRecv());
     obj.pushKV("totalbytessent", g_connman->GetTotalBytesSent());
-    obj.pushKV("timemillis", GetTimeMillis());
+    obj.pushKV("timemillis", GetSysTimeMillis());
 
     UniValue outboundLimit(UniValue::VOBJ);
     outboundLimit.pushKV("timeframe", g_connman->GetMaxOutboundTimeframe());

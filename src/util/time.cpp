@@ -35,7 +35,7 @@ T GetTime()
     return std::chrono::duration_cast<T>(
         mocktime.count() ?
             mocktime :
-            std::chrono::microseconds{GetTimeMicros()});
+            std::chrono::microseconds{GetSysTimeMicros()});
 }
 template std::chrono::seconds GetTime();
 template std::chrono::milliseconds GetTime();
@@ -51,7 +51,7 @@ int64_t GetMockTime()
     return nMockTime.load(std::memory_order_relaxed);
 }
 
-int64_t GetTimeMillis()
+int64_t GetSysTimeMillis()
 {
     int64_t now = (boost::posix_time::microsec_clock::universal_time() -
                    boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_milliseconds();
@@ -59,7 +59,7 @@ int64_t GetTimeMillis()
     return now;
 }
 
-int64_t GetTimeMicros()
+int64_t GetSysTimeMicros()
 {
     int64_t now = (boost::posix_time::microsec_clock::universal_time() -
                    boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_microseconds();
@@ -67,9 +67,9 @@ int64_t GetTimeMicros()
     return now;
 }
 
-int64_t GetSystemTimeInSeconds()
+int64_t GetSysTime()
 {
-    return GetTimeMicros()/1000000;
+    return GetSysTimeMicros()/1000000;
 }
 
 void MilliSleep(int64_t n)

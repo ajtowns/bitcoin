@@ -226,7 +226,7 @@ static void BlockTipChanged(ClientModel *clientmodel, bool initialSync, int heig
     // was > 250ms (MODEL_UPDATE_DELAY) ago
     int64_t now = 0;
     if (initialSync)
-        now = GetTimeMillis();
+        now = GetSysTimeMillis();
 
     int64_t& nLastUpdateNotification = fHeader ? nLastHeaderTipUpdateNotification : nLastBlockTipUpdateNotification;
 

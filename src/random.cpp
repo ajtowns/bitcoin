@@ -245,7 +245,7 @@ static void Strengthen(const unsigned char (&seed)[32], int microseconds, CSHA51
 
     // Hash loop
     unsigned char buffer[64];
-    int64_t stop = GetTimeMicros() + microseconds;
+    int64_t stop = GetSysTimeMicros() + microseconds;
     do {
         for (int i = 0; i < 1000; ++i) {
             inner_hasher.Finalize(buffer);
@@ -255,7 +255,7 @@ static void Strengthen(const unsigned char (&seed)[32], int microseconds, CSHA51
         // Benchmark operation and feed it into outer hasher.
         int64_t perf = GetPerformanceCounter();
         hasher.Write((const unsigned char*)&perf, sizeof(perf));
-    } while (GetTimeMicros() < stop);
+    } while (GetSysTimeMicros() < stop);
 
     // Produce output from inner state and feed it to outer hasher.
     inner_hasher.Finalize(buffer);
@@ -562,7 +562,7 @@ static void SeedStrengthen(CSHA512& hasher, RNGState& rng) noexcept
 {
     static std::atomic<int64_t> last_strengthen{0};
     int64_t last_time = last_strengthen.load();
-    int64_t current_time = GetTimeMicros();
+    int64_t current_time = GetSysTimeMicros();
     if (current_time > last_time + 60000000) { // Only run once a minute
         // Generate 32 bytes of entropy from the RNG, and a copy of the entropy already in hasher.
         unsigned char strengthen_seed[32];

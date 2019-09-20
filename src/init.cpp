@@ -1468,7 +1468,7 @@ bool AppInitMain(InitInterfaces& interfaces)
         uiInterface.InitMessage(_("Loading block index...").translated);
 
         do {
-            const int64_t load_block_index_start_time = GetTimeMillis();
+            const int64_t load_block_index_start_time = GetSysTimeMillis();
             bool is_coinsview_empty;
             try {
                 LOCK(cs_main);
@@ -1612,7 +1612,7 @@ bool AppInitMain(InitInterfaces& interfaces)
             }
 
             fLoaded = true;
-            LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
+            LogPrintf(" block index %15dms\n", GetSysTimeMillis() - load_block_index_start_time);
         } while(false);
 
         if (!fLoaded && !ShutdownRequested()) {

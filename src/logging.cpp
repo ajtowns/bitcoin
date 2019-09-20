@@ -207,7 +207,7 @@ std::string BCLog::Logger::LogTimestampStr(const std::string& str)
         return str;
 
     if (m_started_new_line) {
-        int64_t nTimeMicros = GetTimeMicros();
+        int64_t nTimeMicros = GetSysTimeMicros();
         strStamped = FormatISO8601DateTime(nTimeMicros/1000000);
         if (m_log_time_micros) {
             strStamped.pop_back();
