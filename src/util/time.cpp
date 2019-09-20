@@ -37,8 +37,6 @@ T GetTime()
             mocktime :
             std::chrono::microseconds{GetSysTimeMicros()});
 }
-template std::chrono::seconds GetTime();
-template std::chrono::milliseconds GetTime();
 template std::chrono::microseconds GetTime();
 
 void SetMockTime(int64_t nMockTimeIn)

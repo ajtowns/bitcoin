@@ -3873,7 +3873,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                             vInv.clear();
                         }
                     }
-                    pto->m_tx_relay->m_last_mempool_req = GetTime<std::chrono::seconds>();
+                    pto->m_tx_relay->m_last_mempool_req = GetTime<std::chrono::microseconds>();
                 }
 
                 // Determine transactions to relay

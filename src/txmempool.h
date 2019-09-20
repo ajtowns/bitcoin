@@ -657,7 +657,7 @@ public:
     void TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
-    int Expire(std::chrono::seconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    int Expire(std::chrono::microseconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /**
      * Calculate the ancestor and descendant count for the given transaction.

@@ -17,19 +17,19 @@ static void BenchTimeMock(benchmark::State& state)
 {
     SetMockTime(111);
     while (state.KeepRunning()) {
-        (void)GetTime<std::chrono::seconds>();
+        (void)GetTime<std::chrono::microseconds>();
     }
     SetMockTime(0);
 }
 
-static void BenchTimeMillis(benchmark::State& state)
+static void BenchTimeMicros(benchmark::State& state)
 {
     while (state.KeepRunning()) {
-        (void)GetTime<std::chrono::milliseconds>();
+        (void)GetTime<std::chrono::microseconds>();
     }
 }
 
-static void BenchTimeMillisSys(benchmark::State& state)
+static void BenchSysTimeMillis(benchmark::State& state)
 {
     while (state.KeepRunning()) {
         (void)GetSysTimeMillis();
@@ -37,6 +37,6 @@ static void BenchTimeMillisSys(benchmark::State& state)
 }
 
 BENCHMARK(BenchTimeDeprecated, 100000000);
-BENCHMARK(BenchTimeMillis, 6000000);
-BENCHMARK(BenchTimeMillisSys, 6000000);
+BENCHMARK(BenchTimeMicros, 6000000);
+BENCHMARK(BenchSysTimeMillis, 6000000);
 BENCHMARK(BenchTimeMock, 300000000);
