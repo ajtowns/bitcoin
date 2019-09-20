@@ -39,7 +39,18 @@ int64_t GetMockTime();
 void MilliSleep(int64_t n);
 
 /** Return system time (or mocked time, if set) */
-std::chrono::microseconds GetTimeMicros();
+struct mockable_clock
+{
+    typedef std::chrono::microseconds duration;
+    typedef duration::rep rep;
+    typedef duration::period period;
+    typedef std::chrono::time_point<mockable_clock> time_point;
+    static const bool is_steady = false;
+    static time_point now() noexcept;
+    static constexpr time_point epoch{duration{0}};
+};
+typedef mockable_clock::time_point mockable_time;
+static inline std::chrono::microseconds GetTimeMicros() { return mockable_clock::now().time_since_epoch(); }
 
 /**
  * ISO 8601 formatting is preferred. Use the FormatISO8601{DateTime,Date}

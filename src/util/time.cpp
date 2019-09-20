@@ -27,11 +27,11 @@ int64_t GetTime()
     return now;
 }
 
-std::chrono::microseconds GetTimeMicros()
+mockable_time mockable_clock::now() noexcept
 {
     const std::chrono::seconds mocktime{nMockTime.load(std::memory_order_relaxed)};
 
-    return mocktime.count() ? mocktime : std::chrono::microseconds{GetSysTimeMicros()};
+    return mockable_clock::time_point{mocktime.count() ? mocktime : std::chrono::microseconds{GetSysTimeMicros()}};
 }
 
 void SetMockTime(int64_t nMockTimeIn)
