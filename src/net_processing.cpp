@@ -112,9 +112,9 @@ static const unsigned int INVENTORY_BROADCAST_INTERVAL = 5;
  *  Limits the impact of low-fee transaction floods. */
 static constexpr unsigned int INVENTORY_BROADCAST_MAX = 7 * INVENTORY_BROADCAST_INTERVAL;
 /** Average delay between feefilter broadcasts in seconds. */
-static constexpr unsigned int AVG_FEEFILTER_BROADCAST_INTERVAL = 10 * 60;
+static constexpr std::chrono::seconds AVG_FEEFILTER_BROADCAST_INTERVAL{10 * 60};
 /** Maximum feefilter broadcast delay after significant change. */
-static constexpr unsigned int MAX_FEEFILTER_CHANGE_DELAY = 5 * 60;
+static constexpr std::chrono::seconds MAX_FEEFILTER_CHANGE_DELAY{5 * 60};
 
 // Internal stuff
 namespace {
@@ -4108,7 +4108,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         if (pto->m_tx_relay != nullptr && pto->nVersion >= FEEFILTER_VERSION && gArgs.GetBoolArg("-feefilter", DEFAULT_FEEFILTER) &&
             !pto->HasPermission(PF_FORCERELAY)) {
             CAmount currentFilter = mempool.GetMinFee(gArgs.GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000).GetFeePerK();
-            int64_t timeNow = GetSysTimeMicros();
+            system_time timeNow = system_clock::now();
             if (timeNow > pto->m_tx_relay->nextSendTimeFeeFilter) {
                 static CFeeRate default_feerate(DEFAULT_MIN_RELAY_TX_FEE);
                 static FeeFilterRounder filterRounder(default_feerate);
@@ -4125,7 +4125,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             // until scheduled broadcast, then move the broadcast to within MAX_FEEFILTER_CHANGE_DELAY.
             else if (timeNow + MAX_FEEFILTER_CHANGE_DELAY * 1000000 < pto->m_tx_relay->nextSendTimeFeeFilter &&
                      (currentFilter < 3 * pto->m_tx_relay->lastSentFeeFilter / 4 || currentFilter > 4 * pto->m_tx_relay->lastSentFeeFilter / 3)) {
-                pto->m_tx_relay->nextSendTimeFeeFilter = timeNow + GetRandInt(MAX_FEEFILTER_CHANGE_DELAY) * 1000000;
+                pto->m_tx_relay->nextSendTimeFeeFilter = timeNow + std::chrono::seconds{GetRandInt(MAX_FEEFILTER_CHANGE_DELAY.count())};
             }
         }
     }

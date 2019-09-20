@@ -770,7 +770,7 @@ public:
         // Minimum fee rate with which to filter inv's to this node
         CAmount minFeeFilter GUARDED_BY(cs_feeFilter){0};
         CAmount lastSentFeeFilter{0};
-        int64_t nextSendTimeFeeFilter{0};
+        system_time nextSendTimeFeeFilter{system_clock::epoch};
     };
 
     // m_tx_relay == nullptr if we're not relaying transactions with this peer
@@ -951,5 +951,8 @@ public:
 
 /** Return a timestamp in the future (in microseconds) for exponentially distributed events. */
 int64_t PoissonNextSend(int64_t now, int average_interval_seconds);
+
+template<class T,class M=std::chrono::microseconds>
+inline T PoissonNextSend(T now, std::chrono::seconds avg_int) { return T{M{PoissonNextSend(M{now.time_since_epoch()}.count(), avg_int.count())}}; }
 
 #endif // BITCOIN_NET_H
