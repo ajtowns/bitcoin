@@ -2240,7 +2240,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         LOCK(cs_main);
 
         uint32_t nFetchFlags = GetFetchFlags(pfrom);
-        const auto current_time = GetTime<std::chrono::microseconds>();
+        const auto current_time = GetTimeMicros();
 
         for (CInv &inv : vInv)
         {
@@ -2550,7 +2550,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
             if (!fRejectedParents) {
                 uint32_t nFetchFlags = GetFetchFlags(pfrom);
-                const auto current_time = GetTime<std::chrono::microseconds>();
+                const auto current_time = GetTimeMicros();
 
                 for (const CTxIn& txin : tx.vin) {
                     CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
@@ -3873,7 +3873,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                             vInv.clear();
                         }
                     }
-                    pto->m_tx_relay->m_last_mempool_req = GetTime<std::chrono::microseconds>();
+                    pto->m_tx_relay->m_last_mempool_req = GetTimeMicros();
                 }
 
                 // Determine transactions to relay
@@ -3947,7 +3947,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
 
         // Detect whether we're stalling
-        const auto current_time = GetTime<std::chrono::microseconds>();
+        const auto current_time = GetTimeMicros();
         // nNow is the current system time (GetSysTimeMicros is not mockable) and
         // should be replaced by the mockable current_time eventually
         nNow = GetSysTimeMicros();

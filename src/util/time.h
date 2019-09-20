@@ -41,6 +41,7 @@ void MilliSleep(int64_t n);
 /** Return system time (or mocked time, if set) */
 template <typename T>
 T GetTime();
+static inline std::chrono::microseconds GetTimeMicros() { return GetTime<std::chrono::microseconds>(); }
 
 /**
  * ISO 8601 formatting is preferred. Use the FormatISO8601{DateTime,Date}

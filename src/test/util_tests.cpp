@@ -1112,14 +1112,14 @@ BOOST_AUTO_TEST_CASE(util_time_GetTime)
     for (const auto& num_sleep : {0, 1}) {
         MilliSleep(num_sleep);
         BOOST_CHECK_EQUAL(111, GetTime()); // Deprecated time getter
-        BOOST_CHECK_EQUAL(111000000, GetTime<std::chrono::microseconds>().count());
+        BOOST_CHECK_EQUAL(111000000, GetTimeMicros().count());
     }
 
     SetMockTime(0);
     // Check that system time changes after a sleep
-    const auto us_0 = GetTime<std::chrono::microseconds>();
+    const auto us_0 = GetTimeMicros();
     MilliSleep(1);
-    BOOST_CHECK(us_0 + std::chrono::milliseconds{1} <= GetTime<std::chrono::microseconds>());
+    BOOST_CHECK(us_0 + std::chrono::milliseconds{1} <= GetTimeMicros());
 }
 
 BOOST_AUTO_TEST_CASE(test_IsDigit)
