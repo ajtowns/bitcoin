@@ -36,13 +36,17 @@
 #endif
 
 /** Expiration time for orphan transactions in seconds */
-static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
+static constexpr std::chrono::seconds ORPHAN_TX_EXPIRE_TIME{20 * 60};
 /** Minimum time between orphan transactions expire time checks in seconds */
-static constexpr int64_t ORPHAN_TX_EXPIRE_INTERVAL = 5 * 60;
+static constexpr std::chrono::seconds ORPHAN_TX_EXPIRE_INTERVAL{5 * 60};
 /** Headers download timeout expressed in microseconds
  *  Timeout = base + per_header * (expected number of headers) */
 static constexpr int64_t HEADERS_DOWNLOAD_TIMEOUT_BASE = 15 * 60 * 1000000; // 15 minutes
 static constexpr int64_t HEADERS_DOWNLOAD_TIMEOUT_PER_HEADER = 1000; // 1ms/header
+/** Block download timeout base, expressed in millionths of the block interval (i.e. 10 min) */
+static constexpr int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
+/** Additional block download timeout per parallel downloading peer (i.e. 5 min) */
+static constexpr int64_t BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 500000;
 /** Protect at least this many outbound peers from disconnection due to slow/
  * behind headers chain.
  */
@@ -81,11 +85,12 @@ static_assert(INBOUND_PEER_TX_DELAY >= MAX_GETDATA_RANDOM_DELAY,
 static const unsigned int MAX_GETDATA_SZ = 1000;
 
 
+
 struct COrphanTx {
     // When modifying, adapt the copy of this definition in tests/DoS_tests.
     CTransactionRef tx;
     NodeId fromPeer;
-    int64_t nTimeExpire;
+    mockable_time nTimeExpire;
     size_t list_pos;
 };
 CCriticalSection g_cs_orphans;
@@ -236,7 +241,7 @@ struct CNodeState {
     int64_t nStallingSince;
     std::list<QueuedBlock> vBlocksInFlight;
     //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
-    int64_t nDownloadingSince;
+    system_time m_downloading_since;
     int nBlocksInFlight;
     int nBlocksInFlightValidHeaders;
     //! Whether we consider this a preferred download peer.
@@ -375,7 +380,7 @@ struct CNodeState {
         fSyncStarted = false;
         nHeadersSyncTimeout = 0;
         nStallingSince = 0;
-        nDownloadingSince = 0;
+        m_downloading_since = system_clock::epoch;
         nBlocksInFlight = 0;
         nBlocksInFlightValidHeaders = 0;
         fPreferredDownload = false;
@@ -451,7 +456,7 @@ static bool MarkBlockAsReceived(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs
         }
         if (state->vBlocksInFlight.begin() == itInFlight->second.second) {
             // First block on the queue was received, update the start download time for the next one
-            state->nDownloadingSince = std::max(state->nDownloadingSince, GetSysTimeMicros());
+            state->m_downloading_since = std::max(state->m_downloading_since, system_clock::now());
         }
         state->vBlocksInFlight.erase(itInFlight->second.second);
         state->nBlocksInFlight--;
@@ -486,7 +491,7 @@ static bool MarkBlockAsInFlight(NodeId nodeid, const uint256& hash, const CBlock
     state->nBlocksInFlightValidHeaders += it->fValidatedHeaders;
     if (state->nBlocksInFlight == 1) {
         // We're starting a block download (batch) from this peer.
-        state->nDownloadingSince = GetSysTimeMicros();
+        state->m_downloading_since = system_clock::now();
     }
     if (state->nBlocksInFlightValidHeaders == 1 && pindex != nullptr) {
         nPeersWithValidatedDownloads++;
@@ -864,7 +869,7 @@ bool AddOrphanTx(const CTransactionRef& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRE
         return false;
     }
 
-    auto ret = mapOrphanTransactions.emplace(hash, COrphanTx{tx, peer, GetTime() + ORPHAN_TX_EXPIRE_TIME, g_orphan_list.size()});
+    auto ret = mapOrphanTransactions.emplace(hash, COrphanTx{tx, peer, mockable_clock::now() + ORPHAN_TX_EXPIRE_TIME, g_orphan_list.size()});
     assert(ret.second);
     g_orphan_list.push_back(ret.first);
     for (const CTxIn& txin : tx->vin) {
@@ -930,12 +935,12 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
     LOCK(g_cs_orphans);
 
     unsigned int nEvicted = 0;
-    static int64_t nNextSweep;
-    int64_t nNow = GetTime();
-    if (nNextSweep <= nNow) {
+    static mockable_time g_next_sweep GUARDED_BY(g_cs_orphans);
+    mockable_time nNow = mockable_clock::now();
+    if (g_next_sweep <= nNow) {
         // Sweep out expired orphan pool entries:
         int nErased = 0;
-        int64_t nMinExpTime = nNow + ORPHAN_TX_EXPIRE_TIME - ORPHAN_TX_EXPIRE_INTERVAL;
+        mockable_time nMinExpTime = nNow + ORPHAN_TX_EXPIRE_TIME - ORPHAN_TX_EXPIRE_INTERVAL;
         std::map<uint256, COrphanTx>::iterator iter = mapOrphanTransactions.begin();
         while (iter != mapOrphanTransactions.end())
         {
@@ -947,7 +952,7 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
             }
         }
         // Sweep again 5 minutes after the next entry that expires in order to batch the linear scan.
-        nNextSweep = nMinExpTime + ORPHAN_TX_EXPIRE_INTERVAL;
+        g_next_sweep = nMinExpTime + ORPHAN_TX_EXPIRE_INTERVAL;
         if (nErased > 0) LogPrint(BCLog::MEMPOOL, "Erased %d orphan tx due to expiration\n", nErased);
     }
     FastRandomContext rng;
@@ -3967,7 +3972,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         if (state.vBlocksInFlight.size() > 0) {
             QueuedBlock &queuedBlock = state.vBlocksInFlight.front();
             int nOtherPeersWithValidatedDownloads = nPeersWithValidatedDownloads - (state.nBlocksInFlightValidHeaders > 0);
-            if (nNow > state.nDownloadingSince + consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER * nOtherPeersWithValidatedDownloads)) {
+            if (system_time{std::chrono::microseconds{nNow}} > state.m_downloading_since + std::chrono::microseconds{consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER * nOtherPeersWithValidatedDownloads)}) {
                 LogPrintf("Timeout downloading block %s from peer=%d, disconnecting\n", queuedBlock.hash.ToString(), pto->GetId());
                 pto->fDisconnect = true;
                 return true;
