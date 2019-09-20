@@ -34,25 +34,12 @@ int64_t GetMockTime()
     return nMockTime.load(std::memory_order_relaxed);
 }
 
-int64_t GetSysTimeMillis()
-{
-    int64_t now = (boost::posix_time::microsec_clock::universal_time() -
-                   boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_milliseconds();
-    assert(now > 0);
-    return now;
-}
-
 int64_t GetSysTimeMicros()
 {
     int64_t now = (boost::posix_time::microsec_clock::universal_time() -
                    boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_microseconds();
     assert(now > 0);
     return now;
-}
-
-int64_t GetSysTime()
-{
-    return GetSysTimeMicros()/1000000;
 }
 
 void MilliSleep(int64_t n)

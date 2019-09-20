@@ -18,12 +18,24 @@
  */
 inline int64_t count_seconds(std::chrono::seconds t) { return t.count(); }
 
-/** Returns the system time in milliseconds (not mockable) */
-int64_t GetSysTimeMillis();
 /** Returns the system time in microseconds (not mockable) */
 int64_t GetSysTimeMicros();
+/** Returns system time (not mockable) */
+struct system_clock
+{
+    typedef std::chrono::microseconds duration;
+    typedef duration::rep rep;
+    typedef duration::period period;
+    typedef std::chrono::time_point<system_clock> time_point;
+    static const bool is_steady = false;
+    static time_point now() noexcept { return time_point{duration{GetSysTimeMicros()}}; }
+    static constexpr time_point epoch{duration{0}};
+};
+typedef system_clock::time_point system_time;
+/** Returns the system time in milliseconds (not mockable) */
+static inline int64_t GetSysTimeMillis() { return std::chrono::duration_cast<std::chrono::milliseconds>(system_clock::now().time_since_epoch()).count(); }
 /** Returns the system time in seconds (not mockable) */
-int64_t GetSysTime();
+static inline int64_t GetSysTime() { return std::chrono::duration_cast<std::chrono::seconds>(system_clock::now().time_since_epoch()).count(); }
 
 /** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument */
 void SetMockTime(int64_t nMockTimeIn);
