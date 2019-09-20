@@ -27,17 +27,12 @@ int64_t GetTime()
     return now;
 }
 
-template <typename T>
-T GetTime()
+std::chrono::microseconds GetTimeMicros()
 {
     const std::chrono::seconds mocktime{nMockTime.load(std::memory_order_relaxed)};
 
-    return std::chrono::duration_cast<T>(
-        mocktime.count() ?
-            mocktime :
-            std::chrono::microseconds{GetSysTimeMicros()});
+    return mocktime.count() ? mocktime : std::chrono::microseconds{GetSysTimeMicros()};
 }
-template std::chrono::microseconds GetTime();
 
 void SetMockTime(int64_t nMockTimeIn)
 {
