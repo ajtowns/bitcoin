@@ -66,7 +66,7 @@
 #include <thread>
 
 // Application startup time (used for uptime calculation)
-const int64_t nStartupTime = GetTime();
+const int64_t nStartupTime = GetSysTime();
 
 const char * const BITCOIN_CONF_FILENAME = "bitcoin.conf";
 
