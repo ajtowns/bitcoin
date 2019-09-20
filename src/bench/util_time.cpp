@@ -17,7 +17,7 @@ static void BenchTimeMock(benchmark::State& state)
 {
     SetMockTime(111);
     while (state.KeepRunning()) {
-        (void)GetTimeMicros();
+        (void)mockable_clock::now();
     }
     SetMockTime(0);
 }
@@ -25,7 +25,7 @@ static void BenchTimeMock(benchmark::State& state)
 static void BenchTimeMicros(benchmark::State& state)
 {
     while (state.KeepRunning()) {
-        (void)GetTimeMicros();
+        (void)mockable_clock::now();
     }
 }
 

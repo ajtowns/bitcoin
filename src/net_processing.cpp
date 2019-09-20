@@ -340,16 +340,16 @@ struct CNodeState {
         /* Track when to attempt download of announced transactions (process
          * time in micros -> txid)
          */
-        std::multimap<std::chrono::microseconds, uint256> m_tx_process_time;
+        std::multimap<mockable_time, uint256> m_tx_process_time;
 
         //! Store all the transactions a peer has recently announced
         std::set<uint256> m_tx_announced;
 
         //! Store transactions which were requested by us, with timestamp
-        std::map<uint256, std::chrono::microseconds> m_tx_in_flight;
+        std::map<uint256, mockable_time> m_tx_in_flight;
 
         //! Periodically check for stuck getdata requests
-        std::chrono::microseconds m_check_expiry_timer{0};
+        mockable_time m_check_expiry_timer{mockable_clock::epoch};
     };
 
     TxDownloadState m_tx_download;
@@ -391,7 +391,7 @@ struct CNodeState {
 };
 
 // Keeps track of the time (in microseconds) when transactions were requested last time
-limitedmap<uint256, std::chrono::microseconds> g_already_asked_for GUARDED_BY(cs_main)(MAX_INV_SZ);
+limitedmap<uint256, mockable_time> g_already_asked_for GUARDED_BY(cs_main)(MAX_INV_SZ);
 
 /** Map maintaining per-node state. */
 static std::map<NodeId, CNodeState> mapNodeState GUARDED_BY(cs_main);
@@ -691,7 +691,7 @@ void EraseTxRequest(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     g_already_asked_for.erase(txid);
 }
 
-std::chrono::microseconds GetTxRequestTime(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+mockable_time GetTxRequestTime(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     auto it = g_already_asked_for.find(txid);
     if (it != g_already_asked_for.end()) {
@@ -700,7 +700,7 @@ std::chrono::microseconds GetTxRequestTime(const uint256& txid) EXCLUSIVE_LOCKS_
     return {};
 }
 
-void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+void UpdateTxRequestTime(const uint256& txid, mockable_time request_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     auto it = g_already_asked_for.find(txid);
     if (it == g_already_asked_for.end()) {
@@ -710,12 +710,12 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
     }
 }
 
-std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+mockable_time CalculateTxGetDataTime(const uint256& txid, mockable_time current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
-    std::chrono::microseconds process_time;
-    const auto last_request_time = GetTxRequestTime(txid);
+    mockable_time process_time;
+    const mockable_time last_request_time = GetTxRequestTime(txid);
     // First time requesting this tx
-    if (last_request_time.count() == 0) {
+    if (last_request_time == mockable_clock::epoch) {
         process_time = current_time;
     } else {
         // Randomize the delay to avoid biasing some peers over others (such as due to
@@ -729,7 +729,7 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     return process_time;
 }
 
-void RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+void RequestTx(CNodeState* state, const uint256& txid, mockable_time current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     CNodeState::TxDownloadState& peer_download_state = state->m_tx_download;
     if (peer_download_state.m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
@@ -2240,7 +2240,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         LOCK(cs_main);
 
         uint32_t nFetchFlags = GetFetchFlags(pfrom);
-        const auto current_time = GetTimeMicros();
+        const mockable_time current_time = mockable_clock::now();
 
         for (CInv &inv : vInv)
         {
@@ -2550,7 +2550,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
             if (!fRejectedParents) {
                 uint32_t nFetchFlags = GetFetchFlags(pfrom);
-                const auto current_time = GetTimeMicros();
+                const mockable_time current_time = mockable_clock::now();
 
                 for (const CTxIn& txin : tx.vin) {
                     CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
@@ -3947,7 +3947,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
             connman->PushMessage(pto, msgMaker.Make(NetMsgType::INV, vInv));
 
         // Detect whether we're stalling
-        const auto current_time = GetTimeMicros();
+        const mockable_time current_time = mockable_clock::now();
         // nNow is the current system time (GetSysTimeMicros is not mockable) and
         // should be replaced by the mockable current_time eventually
         nNow = GetSysTimeMicros();

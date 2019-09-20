@@ -36,8 +36,6 @@ void SetMockTime(int64_t nMockTimeIn);
 /** For testing */
 int64_t GetMockTime();
 
-void MilliSleep(int64_t n);
-
 /** Return system time (or mocked time, if set) */
 struct mockable_clock
 {
@@ -52,7 +50,7 @@ struct mockable_clock
 typedef mockable_clock::time_point mockable_time;
 inline int64_t count_seconds(mockable_time t) { return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count(); }
 
-static inline std::chrono::microseconds GetTimeMicros() { return mockable_clock::now().time_since_epoch(); }
+void MilliSleep(int64_t n);
 
 /**
  * ISO 8601 formatting is preferred. Use the FormatISO8601{DateTime,Date}
