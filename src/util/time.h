@@ -18,18 +18,12 @@
  */
 inline int64_t count_seconds(std::chrono::seconds t) { return t.count(); }
 
-/**
- * DEPRECATED
- * Use either GetSysTime (not mockable) or GetTime<T> (mockable)
- */
-int64_t GetTime();
-
-/** Returns the system time (not mockable) */
+/** Returns the system time in milliseconds (not mockable) */
 int64_t GetSysTimeMillis();
-/** Returns the system time (not mockable) */
+/** Returns the system time in microseconds (not mockable) */
 int64_t GetSysTimeMicros();
-/** Returns the system time (not mockable) */
-int64_t GetSysTime(); // Like GetTime(), but not mockable
+/** Returns the system time in seconds (not mockable) */
+int64_t GetSysTime();
 
 /** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument */
 void SetMockTime(int64_t nMockTimeIn);
@@ -49,6 +43,12 @@ struct mockable_clock
 };
 typedef mockable_clock::time_point mockable_time;
 inline int64_t count_seconds(mockable_time t) { return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count(); }
+
+/**
+ * DEPRECATED
+ * Use either GetSysTime (not mockable) or mockable_clock::now() (mockable)
+ */
+static inline int64_t GetTime() { return std::chrono::duration_cast<std::chrono::seconds>(mockable_clock::now().time_since_epoch()).count(); }
 
 void MilliSleep(int64_t n);
 
