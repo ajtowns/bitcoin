@@ -6,6 +6,7 @@
 #ifndef BITCOIN_UTIL_TIME_H
 #define BITCOIN_UTIL_TIME_H
 
+#include <atomic>
 #include <stdint.h>
 #include <string>
 #include <chrono>
@@ -55,6 +56,21 @@ struct mockable_clock
 };
 typedef mockable_clock::time_point mockable_time;
 inline int64_t count_seconds(mockable_time t) { return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count(); }
+
+/** Use in place of std::atomic<mockable_time>
+ * atomic and time_point don't work together due to lack of
+ * noexcept mark up, so special case it.
+ */
+class atomic_mockable_time {
+private:
+    std::atomic<mockable_clock::duration> d;
+public:
+    atomic_mockable_time() noexcept : d{mockable_clock::duration{0}} { }
+    atomic_mockable_time(const atomic_mockable_time&) = delete;
+    atomic_mockable_time(const mockable_time&& t) noexcept : d{t.time_since_epoch()} { }
+    mockable_time load() { return mockable_time{d.load()}; }
+    mockable_time operator=(const mockable_time&& t) { d = t.time_since_epoch(); return t; }
+};
 
 /**
  * DEPRECATED
