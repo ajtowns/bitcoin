@@ -761,7 +761,9 @@ public:
         // Used for BIP35 mempool sending
         bool fSendMempool GUARDED_BY(cs_tx_inventory){false};
         // Last time a "MEMPOOL" request was serviced.
-        std::atomic<std::chrono::microseconds> m_last_mempool_req{std::chrono::microseconds{0}};
+        // can't use mockable_time directly since time_point
+        // constructors aren't marked noexcept
+        std::atomic<mockable_clock::duration> m_last_mempool_req;
         int64_t nNextInvSend{0};
 
         CCriticalSection cs_feeFilter;

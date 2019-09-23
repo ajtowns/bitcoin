@@ -22,6 +22,7 @@
 #include <primitives/transaction.h>
 #include <sync.h>
 #include <random.h>
+#include <util/time.h>
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/hashed_index.hpp>
@@ -102,7 +103,7 @@ public:
     const CAmount& GetFee() const { return nFee; }
     size_t GetTxSize() const;
     size_t GetTxWeight() const { return nTxWeight; }
-    std::chrono::seconds GetTime() const { return std::chrono::seconds{nTime}; }
+    mockable_time GetTime() const { return mockable_time{std::chrono::seconds{nTime}}; }
     unsigned int GetHeight() const { return entryHeight; }
     int64_t GetSigOpCost() const { return sigOpCost; }
     int64_t GetModifiedFee() const { return nFee + feeDelta; }
@@ -332,7 +333,7 @@ struct TxMempoolInfo
     CTransactionRef tx;
 
     /** Time the transaction entered the mempool. */
-    std::chrono::seconds m_time;
+    mockable_time m_time;
 
     /** Feerate of the transaction. */
     CFeeRate feeRate;
@@ -657,7 +658,7 @@ public:
     void TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
-    int Expire(std::chrono::microseconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    int Expire(mockable_time time) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /**
      * Calculate the ancestor and descendant count for the given transaction.

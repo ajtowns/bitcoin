@@ -1545,7 +1545,7 @@ void static ProcessGetData(CNode* pfrom, const CChainParams& chainparams, CConnm
                 auto txinfo = mempool.info(inv.hash);
                 // To protect privacy, do not answer getdata using the mempool when
                 // that TX couldn't have been INVed in reply to a MEMPOOL request.
-                if (txinfo.tx && txinfo.m_time <= pfrom->m_tx_relay->m_last_mempool_req.load()) {
+                if (txinfo.tx && txinfo.m_time <= mockable_time{pfrom->m_tx_relay->m_last_mempool_req.load()}) {
                     connman->PushMessage(pfrom, msgMaker.Make(nSendFlags, NetMsgType::TX, *txinfo.tx));
                     push = true;
                 }
@@ -3873,7 +3873,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                             vInv.clear();
                         }
                     }
-                    pto->m_tx_relay->m_last_mempool_req = GetTimeMicros();
+                    pto->m_tx_relay->m_last_mempool_req = mockable_clock::now().time_since_epoch();
                 }
 
                 // Determine transactions to relay

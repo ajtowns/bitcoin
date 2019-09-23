@@ -317,7 +317,7 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
 static void LimitMempoolSize(CTxMemPool& pool, size_t limit, std::chrono::seconds age)
     EXCLUSIVE_LOCKS_REQUIRED(pool.cs, ::cs_main)
 {
-    int expired = pool.Expire(GetTimeMicros() - age);
+    int expired = pool.Expire(mockable_clock::now() - age);
     if (expired != 0) {
         LogPrint(BCLog::MEMPOOL, "Expired %i transactions from the memory pool\n", expired);
     }

@@ -50,6 +50,8 @@ struct mockable_clock
     static constexpr time_point epoch{duration{0}};
 };
 typedef mockable_clock::time_point mockable_time;
+inline int64_t count_seconds(mockable_time t) { return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count(); }
+
 static inline std::chrono::microseconds GetTimeMicros() { return mockable_clock::now().time_since_epoch(); }
 
 /**

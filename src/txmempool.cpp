@@ -917,7 +917,7 @@ void CTxMemPool::RemoveStaged(setEntries &stage, bool updateDescendants, MemPool
     }
 }
 
-int CTxMemPool::Expire(std::chrono::microseconds time)
+int CTxMemPool::Expire(mockable_time time)
 {
     AssertLockHeld(cs);
     indexed_transaction_set::index<entry_time>::type::iterator it = mapTx.get<entry_time>().begin();
