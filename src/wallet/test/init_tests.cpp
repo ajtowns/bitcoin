@@ -35,28 +35,31 @@ BOOST_AUTO_TEST_CASE(walletinit_verify_walletdir_custom)
 BOOST_AUTO_TEST_CASE(walletinit_verify_walletdir_does_not_exist)
 {
     SetWalletDir(m_walletdir_path_cases["nonexistent"]);
-    ASSERT_DEBUG_LOG({"does not exist"}, {
+    {
+        ASSERT_DEBUG_LOG("does not exist");
         bool result = m_chain_client->verify();
         BOOST_CHECK(result == false);
-    });
+    }
 }
 
 BOOST_AUTO_TEST_CASE(walletinit_verify_walletdir_is_not_directory)
 {
     SetWalletDir(m_walletdir_path_cases["file"]);
-    ASSERT_DEBUG_LOG({"is not a directory"}, {
+    {
+        ASSERT_DEBUG_LOG("is not a directory");
         bool result = m_chain_client->verify();
         BOOST_CHECK(result == false);
-    });
+    }
 }
 
 BOOST_AUTO_TEST_CASE(walletinit_verify_walletdir_is_not_relative)
 {
     SetWalletDir(m_walletdir_path_cases["relative"]);
-    ASSERT_DEBUG_LOG({"is a relative path"}, {
+    {
+        ASSERT_DEBUG_LOG("is a relative path");
         bool result = m_chain_client->verify();
         BOOST_CHECK(result == false);
-    });
+    }
 }
 
 BOOST_AUTO_TEST_CASE(walletinit_verify_walletdir_no_trailing)

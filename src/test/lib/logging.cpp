@@ -11,29 +11,27 @@
 
 #include <stdexcept>
 
-static std::list<std::function<void(const std::string&)>>::iterator g_print_connection;
-static std::unique_ptr<std::string> g_log_lines{nullptr};
-
-void assert_debug_log_redirect()
+DebugLogHelper::DebugLogHelper(const std::string& message, bool capture)
+    : m_message{message}, m_capture{capture}
 {
-    assert(!g_log_lines);
-    g_log_lines = MakeUnique<std::string>();
-    g_print_connection = LogInstance().PushBackCallback(
-        [](const std::string& s) {
-            (*g_log_lines) += s;
+    m_print_connection = LogInstance().PushBackCallback(
+        [this](const std::string& s) {
+            if (m_found) return;
+            if (s.find(m_message) != std::string::npos) {
+                m_found = true;
+                m_log = "";
+            } else if (m_capture) {
+                m_log += s;
+            }
         });
     noui_test_redirect();
 }
 
-void assert_debug_log_helper(const std::vector<std::string>& messages)
+void DebugLogHelper::check_found()
 {
-    for (const auto& m : messages) {
-        if (g_log_lines->find(m) == std::string::npos) {
-            throw std::runtime_error(strprintf("\n'%s'\n not found in \n'%s'\n", m, *g_log_lines));
-        }
-    }
     noui_reconnect();
-    LogInstance().DeleteCallback(g_print_connection);
-    assert(g_log_lines);
-    g_log_lines.reset();
+    LogInstance().DeleteCallback(m_print_connection);
+    if (!m_found) {
+        throw std::runtime_error(strprintf("'%s' not found in debug log%s\n", m_message, (m_capture ? strprintf(": '''\n%s'''", m_log) : "")));
+    }
 }
