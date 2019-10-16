@@ -1,0 +1,11 @@
+{
+    "binana": [2016, 119, 0],
+    "deployment": "CHECKTEMPLATEVERIFY",
+    "start": 1654041600,
+    "timeout": 1969660800,
+    "scriptverify": true,
+    "scriptverify_discourage": true,
+    "opcodes": {
+        "CHECKTEMPLATEVERIFY": "0xb3"
+    }
+}
