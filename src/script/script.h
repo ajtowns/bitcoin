@@ -555,6 +555,7 @@ public:
      */
     static bool IsPayToAnchor(int version, const std::vector<unsigned char>& program);
 
+    bool IsPayToBareDefaultCheckTemplateVerifyHash() const;
     bool IsPayToScriptHash() const;
     bool IsPayToWitnessScriptHash() const;
     bool IsWitnessProgram(int& version, std::vector<unsigned char>& program) const;
