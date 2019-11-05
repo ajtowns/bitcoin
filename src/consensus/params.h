@@ -14,7 +14,7 @@ namespace Consensus {
 enum DeploymentPos
 {
     DEPLOYMENT_TESTDUMMY,
-    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbits.cpp
+    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbitsinfo.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 
@@ -26,7 +26,10 @@ struct BIP9Deployment {
     int bit;
     /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
     int64_t nStartTime;
-    /** Timeout/expiry MedianTime for the deployment attempt. */
+    /** Timeout/expiry MedianTime for the deployment attempt.
+     * Setting to 0 will prevent the soft-fork from ever activating.
+     * Deployments with timeout value before Jan 1, 2009 (1230768000) are hidden.
+     */
     int64_t nTimeout;
 
     /** Constant for nTimeout very far in the future. */
