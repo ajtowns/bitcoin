@@ -696,7 +696,7 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vec
                 // We consider the chain that this peer is on invalid.
                 return;
             }
-            if (!State(nodeid)->fHaveWitness && IsWitnessEnabled(pindex->pprev, consensusParams)) {
+            if (!State(nodeid)->fHaveWitness && DeploymentActiveAt(pindex, consensusParams, Consensus::DEPLOYMENT_SEGWIT)) {
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
@@ -1273,7 +1273,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         return;
     nHighestFastAnnounce = pindex->nHeight;
 
-    bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
+    bool fWitnessEnabled = DeploymentActiveAt(pindex, Params().GetConsensus(), Consensus::DEPLOYMENT_SEGWIT);
     uint256 hashBlock(pblock->GetHash());
 
     {
@@ -1851,7 +1851,7 @@ bool static ProcessHeadersMessage(CNode& pfrom, CConnman* connman, ChainstateMan
             while (pindexWalk && !::ChainActive().Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                         !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
-                        (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom.GetId())->fHaveWitness)) {
+                        (!DeploymentActiveAt(pindexWalk, chainparams.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) || State(pfrom.GetId())->fHaveWitness)) {
                     // We don't have this block, and it's not yet in flight.
                     vToFetch.push_back(pindexWalk);
                 }
@@ -3032,7 +3032,7 @@ bool ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRec
         if (!fAlreadyInFlight && !CanDirectFetch(chainparams.GetConsensus()))
             return true;
 
-        if (IsWitnessEnabled(pindex->pprev, chainparams.GetConsensus()) && !nodestate->fSupportsDesiredCmpctVersion) {
+        if (DeploymentActiveAt(pindex, chainparams.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) && !nodestate->fSupportsDesiredCmpctVersion) {
             // Don't bother trying to process compact blocks from v1 peers
             // after segwit activates.
             return true;

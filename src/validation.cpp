@@ -1894,22 +1894,22 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
     }
 
     // Start enforcing the DERSIG (BIP66) rule
-    if (pindex->nHeight >= consensusparams.BIP66Height) {
+    if (DeploymentActiveAt(pindex, consensusparams, Consensus::DEPLOYMENT_DERSIG)) {
         flags |= SCRIPT_VERIFY_DERSIG;
     }
 
     // Start enforcing CHECKLOCKTIMEVERIFY (BIP65) rule
-    if (pindex->nHeight >= consensusparams.BIP65Height) {
+    if (DeploymentActiveAt(pindex, consensusparams, Consensus::DEPLOYMENT_CLTV)) {
         flags |= SCRIPT_VERIFY_CHECKLOCKTIMEVERIFY;
     }
 
     // Start enforcing BIP112 (CHECKSEQUENCEVERIFY)
-    if (pindex->nHeight >= consensusparams.CSVHeight) {
+    if (DeploymentActiveAt(pindex, consensusparams, Consensus::DEPLOYMENT_CSV)) {
         flags |= SCRIPT_VERIFY_CHECKSEQUENCEVERIFY;
     }
 
     // Start enforcing BIP147 NULLDUMMY (activated simultaneously with segwit)
-    if (IsWitnessEnabled(pindex->pprev, consensusparams)) {
+    if (DeploymentActiveAt(pindex, consensusparams, Consensus::DEPLOYMENT_SEGWIT)) {
         flags |= SCRIPT_VERIFY_NULLDUMMY;
     }
 
@@ -2101,7 +2101,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
 
     // Start enforcing BIP68 (sequence locks)
     int nLockTimeFlags = 0;
-    if (pindex->nHeight >= chainparams.GetConsensus().CSVHeight) {
+    if (DeploymentActiveAt(pindex, chainparams.GetConsensus(), Consensus::DEPLOYMENT_CSV)) {
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
@@ -3202,7 +3202,7 @@ void CChainState::ReceivedBlockTransactions(const CBlock& block, CBlockIndex* pi
     pindexNew->nDataPos = pos.nPos;
     pindexNew->nUndoPos = 0;
     pindexNew->nStatus |= BLOCK_HAVE_DATA;
-    if (IsWitnessEnabled(pindexNew->pprev, consensusParams)) {
+    if (DeploymentActiveAt(pindexNew, consensusParams, Consensus::DEPLOYMENT_SEGWIT)) {
         pindexNew->nStatus |= BLOCK_OPT_WITNESS;
     }
     pindexNew->RaiseValidity(BLOCK_VALID_TRANSACTIONS);
@@ -3394,12 +3394,6 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
     return true;
 }
 
-bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
-{
-    int height = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
-    return (height >= params.SegwitHeight);
-}
-
 int GetWitnessCommitmentIndex(const CBlock& block)
 {
     int commitpos = -1;
@@ -3424,7 +3418,7 @@ void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPr
 {
     int commitpos = GetWitnessCommitmentIndex(block);
     static const std::vector<unsigned char> nonce(32, 0x00);
-    if (commitpos != -1 && IsWitnessEnabled(pindexPrev, consensusParams) && !block.vtx[0]->HasWitness()) {
+    if (commitpos != -1 && DeploymentActiveAfter(pindexPrev, consensusParams, Consensus::DEPLOYMENT_SEGWIT) && !block.vtx[0]->HasWitness()) {
         CMutableTransaction tx(*block.vtx[0]);
         tx.vin[0].scriptWitness.stack.resize(1);
         tx.vin[0].scriptWitness.stack[0] = nonce;
@@ -3539,7 +3533,7 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
 
     // Start enforcing BIP113 (Median Time Past).
     int nLockTimeFlags = 0;
-    if (nHeight >= consensusParams.CSVHeight) {
+    if (DeploymentActiveAfter(pindexPrev, consensusParams, Consensus::DEPLOYMENT_CSV)) {
         assert(pindexPrev != nullptr);
         nLockTimeFlags |= LOCKTIME_MEDIAN_TIME_PAST;
     }
@@ -4491,7 +4485,7 @@ bool CChainState::RewindBlockIndex(const CChainParams& params)
     {
         LOCK(cs_main);
         for (const auto& entry : m_blockman.m_block_index) {
-            if (IsWitnessEnabled(entry.second->pprev, params.GetConsensus()) && !(entry.second->nStatus & BLOCK_OPT_WITNESS) && !m_chain.Contains(entry.second)) {
+            if (DeploymentActiveAt(entry.second, params.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) && !(entry.second->nStatus & BLOCK_OPT_WITNESS) && !m_chain.Contains(entry.second)) {
                 EraseBlockData(entry.second);
             }
         }
@@ -4506,7 +4500,7 @@ bool CChainState::RewindBlockIndex(const CChainParams& params)
             // Although SCRIPT_VERIFY_WITNESS is now generally enforced on all
             // blocks in ConnectBlock, we don't need to go back and
             // re-download/re-verify blocks from before segwit actually activated.
-            if (IsWitnessEnabled(m_chain[nHeight - 1], params.GetConsensus()) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
+            if (DeploymentActiveAfter(m_chain[nHeight - 1], params.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
                 break;
             }
             nHeight++;

@@ -88,6 +88,40 @@ BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::
 int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
 uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
+inline bool DeploymentActive_height(int height, const Consensus::Params& params, Consensus::DeploymentFixed dep)
+{
+    switch(dep) {
+    case Consensus::DEPLOYMENT_CLTV:
+        return height >= params.BIP65Height;
+    case Consensus::DEPLOYMENT_DERSIG:
+        return height >= params.BIP66Height;
+    case Consensus::DEPLOYMENT_CSV:
+        return height >= params.CSVHeight;
+    case Consensus::DEPLOYMENT_SEGWIT:
+        return height >= params.SegwitHeight;
+    }
+}
+
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentFixed dep)
+{
+    const int height = (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1);
+    return DeploymentActive_height(height, params, dep);
+}
+inline bool DeploymentActiveAt(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentFixed dep)
+{
+    return DeploymentActive_height(pindex->nHeight, params, dep);
+}
+
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return ThresholdState::ACTIVE == VersionBitsState(pindexPrev, params, pos, versionbitscache);
+}
+
+inline bool DeploymentActiveAt(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return ThresholdState::ACTIVE == VersionBitsState(pindex->pprev, params, pos, versionbitscache);
+}
+
 /**
  * Determine what nVersion a new block should use.
  */

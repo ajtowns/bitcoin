@@ -11,10 +11,19 @@
 
 namespace Consensus {
 
+enum DeploymentFixed
+{
+    // buried deployments get negative values to avoid overlap with DeploymentPos
+    DEPLOYMENT_CLTV = -255,
+    DEPLOYMENT_DERSIG,
+    DEPLOYMENT_CSV,
+    DEPLOYMENT_SEGWIT,
+};
+
 enum DeploymentPos
 {
     DEPLOYMENT_TESTDUMMY,
-    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbits.cpp
+    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbitsinfo.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 
