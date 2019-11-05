@@ -14,28 +14,26 @@
 /* Define a virtual block time, one block per 10 minutes after Nov 14 2014, 0:55:36am */
 static int32_t TestTime(int nHeight) { return 1415926536 + 600 * nHeight; }
 
-static const Consensus::Params paramsDummy = Consensus::Params();
-
 class TestConditionChecker : public AbstractThresholdConditionChecker
 {
 private:
     mutable ThresholdConditionCache cache;
 
 public:
-    int64_t BeginTime(const Consensus::Params& params) const override { return TestTime(10000); }
-    int64_t EndTime(const Consensus::Params& params) const override { return TestTime(20000); }
-    int Period(const Consensus::Params& params) const override { return 1000; }
-    int Threshold(const Consensus::Params& params) const override { return 900; }
-    bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override { return (pindex->nVersion & 0x100); }
+    int64_t BeginTime() const override { return TestTime(10000); }
+    int64_t EndTime() const override { return TestTime(20000); }
+    int Period() const override { return 1000; }
+    int Threshold() const override { return 900; }
+    bool Condition(const CBlockIndex* pindex) const override { return (pindex->nVersion & 0x100); }
 
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateFor(pindexPrev, paramsDummy, cache); }
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateSinceHeightFor(pindexPrev, paramsDummy, cache); }
+    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateFor(pindexPrev, cache); }
+    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateSinceHeightFor(pindexPrev, cache); }
 };
 
 class TestAlwaysActiveConditionChecker : public TestConditionChecker
 {
 public:
-    int64_t BeginTime(const Consensus::Params& params) const override { return Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
+    int64_t BeginTime() const override { return Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
 };
 
 #define CHECKERS 6

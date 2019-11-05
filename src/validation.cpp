@@ -1798,17 +1798,18 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
 class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
 {
 private:
+    const Consensus::Params& params;
     int bit;
 
 public:
-    explicit WarningBitsConditionChecker(int bitIn) : bit(bitIn) {}
+    explicit WarningBitsConditionChecker(const Consensus::Params& paramsIn, int bitIn) : params(paramsIn), bit(bitIn) {}
 
-    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
-    int64_t EndTime(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
-    int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
-    int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
+    int64_t BeginTime() const override { return 0; }
+    int64_t EndTime() const override { return std::numeric_limits<int64_t>::max(); }
+    int Period() const override { return params.nMinerConfirmationWindow; }
+    int Threshold() const override { return params.nRuleChangeActivationThreshold; }
 
-    bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override
+    bool Condition(const CBlockIndex* pindex) const override
     {
         return pindex->nHeight >= params.MinBIP9WarningHeight &&
                ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
@@ -2375,8 +2376,8 @@ void static UpdateTip(const CBlockIndex* pindexNew, const CChainParams& chainPar
         int nUpgraded = 0;
         const CBlockIndex* pindex = pindexNew;
         for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {
-            WarningBitsConditionChecker checker(bit);
-            ThresholdState state = checker.GetStateFor(pindex, chainParams.GetConsensus(), warningcache[bit]);
+            WarningBitsConditionChecker checker(chainParams.GetConsensus(), bit);
+            ThresholdState state = checker.GetStateFor(pindex, warningcache[bit]);
             if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN) {
                 const std::string strWarning = strprintf(_("Warning: unknown new rules activated (versionbit %i)").translated, bit);
                 if (state == ThresholdState::ACTIVE) {
