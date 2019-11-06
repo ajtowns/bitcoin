@@ -35,6 +35,7 @@
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
+#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <stdint.h>
@@ -1134,6 +1135,25 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name,
     softforks.pushKV(name, rv);
 }
 
+
+/** Get the BIP9 state for a given deployment at the current tip. */
+static ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsState(::ChainActive().Tip(), params, pos, versionbitscache);
+}
+
+/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip. */
+static BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsStatistics(::ChainActive().Tip(), params, pos);
+}
+
+/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip. */
+static int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsStateSinceHeight(::ChainActive().Tip(), params, pos, versionbitscache);
+}
+
 static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     // For BIP9 deployments.
@@ -1276,7 +1296,9 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     BuriedForkDescPushBack(softforks, "bip65", consensusParams.BIP65Height);
     BuriedForkDescPushBack(softforks, "csv", consensusParams.CSVHeight);
     BuriedForkDescPushBack(softforks, "segwit", consensusParams.SegwitHeight);
-    BIP9SoftForkDescPushBack(softforks, "testdummy", consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
+    for (int i = 0; i < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
+        BIP9SoftForkDescPushBack(softforks, VersionBitsDeploymentInfo[i].name, consensusParams, (Consensus::DeploymentPos)i);
+    }
     obj.pushKV("softforks",             softforks);
 
     obj.pushKV("warnings", GetWarnings(false).original);
