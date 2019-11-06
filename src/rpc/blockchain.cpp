@@ -1135,6 +1135,21 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name,
     softforks.pushKV(name, rv);
 }
 
+static ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsState(::ChainActive().Tip(), params, pos, versionbitscache);
+}
+
+static BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsStatistics(::ChainActive().Tip(), params, pos);
+}
+
+static int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    return VersionBitsStateSinceHeight(::ChainActive().Tip(), params, pos, versionbitscache);
+}
+
 static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     // For BIP9 deployments.
