@@ -35,6 +35,8 @@
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
+#include <versionbits.h>
+#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <stdint.h>
@@ -1209,6 +1211,26 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name,
     rv.pushKV("active", ::ChainActive().Tip()->nHeight + 1 >= height);
     rv.pushKV("height", height);
     softforks.pushKV(name, rv);
+}
+
+namespace {
+/** Get the BIP9 state for a given deployment at the current tip. */
+ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    return VersionBitsState(::ChainActive().Tip(), params, pos, versionbitscache);
+}
+
+/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip. */
+BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    return VersionBitsStatistics(::ChainActive().Tip(), params, pos);
+}
+
+/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip. */
+int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    return VersionBitsStateSinceHeight(::ChainActive().Tip(), params, pos, versionbitscache);
+}
 }
 
 static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id)
