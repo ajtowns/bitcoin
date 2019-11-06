@@ -28,6 +28,7 @@
 #include <txmempool.h>
 #include <util/system.h>
 #include <util/strencodings.h>
+#include <versionbits.h>
 
 #include <memory>
 #include <typeinfo>

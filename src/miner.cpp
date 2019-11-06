@@ -20,6 +20,7 @@
 #include <timedata.h>
 #include <util/moneystr.h>
 #include <util/system.h>
+#include <versionbits.h>
 
 #include <algorithm>
 #include <utility>
