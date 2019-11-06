@@ -122,4 +122,9 @@ inline bool DeploymentActiveAt(const CBlockIndex* pindex, const Consensus::Param
     return ThresholdState::ACTIVE == VersionBitsState(pindex->pprev, params, pos, versionbitscache);
 }
 
+/**
+ * Determine what nVersion a new block should use.
+ */
+int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params);
+
 #endif // BITCOIN_VERSIONBITS_H
