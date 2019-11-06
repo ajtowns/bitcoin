@@ -212,3 +212,5 @@ void VersionBitsCache::Clear()
         caches[d].clear();
     }
 }
+
+VersionBitsCache versionbitscache;

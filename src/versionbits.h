@@ -7,6 +7,7 @@
 
 #include <chain.h>
 #include <map>
+#include <sync.h>
 
 /** What block version to use for new blocks (pre versionbits) */
 static const int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
@@ -78,6 +79,9 @@ struct VersionBitsCache
 
     void Clear();
 };
+
+extern CCriticalSection cs_main;
+extern VersionBitsCache versionbitscache GUARDED_BY(cs_main);
 
 ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
 BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);

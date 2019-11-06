@@ -1775,8 +1775,6 @@ void ThreadScriptCheck(int worker_num) {
     scriptcheckqueue.Thread();
 }
 
-VersionBitsCache versionbitscache GUARDED_BY(cs_main);
-
 int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
