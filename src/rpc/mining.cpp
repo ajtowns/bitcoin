@@ -32,6 +32,7 @@
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
+#include <versionbits.h>
 #include <versionbitsinfo.h>
 #include <warnings.h>
 
