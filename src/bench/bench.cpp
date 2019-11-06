@@ -7,6 +7,7 @@
 #include <chainparams.h>
 #include <test/util/setup_common.h>
 #include <validation.h>
+#include <versionbits.h>
 
 #include <algorithm>
 #include <assert.h>
