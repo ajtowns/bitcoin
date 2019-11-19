@@ -3786,31 +3786,47 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     }
                 }
 
-            // use mockable current_time rather than nNow to allow for testing
-            const auto current_time = GetTime<std::chrono::microseconds>();
+                // use mockable current_time rather than nNow to allow for testing
+                const auto current_time = GetTime<std::chrono::microseconds>();
 
-            // Check for rebroadcasts
-            if (pto->m_next_rebroadcast < current_time) {
-                bool fFirst = (pto->m_next_rebroadcast.count() == 0);
-                pto->m_next_rebroadcast = PoissonNextSend(current_time, TX_REBROADCAST_INTERVAL);
+                // Check for rebroadcasts
+                if (pto->m_next_rebroadcast < current_time) {
+                    LogPrint(BCLog::NET, "Rebroadcast timer triggered\n");
+                    // schedule next rebroadcast
+                    bool fFirst = (pto->m_next_rebroadcast.count() == 0);
+                    pto->m_next_rebroadcast = PoissonNextSend(current_time, TX_REBROADCAST_INTERVAL);
 
-                if (!fFirst) {
-                    std::set<uint256> setRebroadcastTxs;
-                    mempool.GetRebroadcastTransactions(setRebroadcastTxs);
-
-                    for (const auto& hash : setRebroadcastTxs) {
-                        LogPrint(BCLog::NET, "Rebroadcast tx=%s peer=%d\n", hash.GetHex(), pto->GetId());
+                    // if there hasn't been a block since last cache, don't rebroadcast yet
+                    bool fSkipRun = ::ChainActive().Tip() == mempool.m_tip_at_cache_time && false;
+                    if (fSkipRun) {
+                        LogPrint(BCLog::NET, "Bumping rebroadcast because no new blocks since last cache run\n");
+                        mempool.m_next_min_fee_cache += REBROADCAST_FEE_RATE_CACHE_INTERVAL;
+                        pto->m_next_rebroadcast = current_time + std::chrono::minutes{10};
                     }
 
-                    pto->m_tx_relay->setInventoryTxToSend.insert(setRebroadcastTxs.begin(), setRebroadcastTxs.end());
+                    if (!fFirst && !fSkipRun) {
+                        std::set<uint256> setRebroadcastTxs;
+                        mempool.GetRebroadcastTransactions(setRebroadcastTxs);
 
-                    // also include wallet txns that haven't been successfully broadcast yet
-                    LogPrint(BCLog::NET, "%lu transactions are currently marked as unbroadcast\n", mempool.m_unbroadcast_txids.size());
+                        for (const auto& hash : setRebroadcastTxs) {
+                            LogPrint(BCLog::NET, "Rebroadcast tx=%s peer=%d\n", hash.GetHex(), pto->GetId());
+                        }
 
-                    // since set elements are unique, this will be a no-op if the txns are already in setInventoryTxToSend
-                    pto->m_tx_relay->setInventoryTxToSend.insert(mempool.m_unbroadcast_txids.begin(), mempool.m_unbroadcast_txids.end());
+                        // add rebroadcast txns
+                        pto->m_tx_relay->setInventoryTxToSend.insert(setRebroadcastTxs.begin(), setRebroadcastTxs.end());
+
+                        // also include wallet txns that haven't been successfully broadcast yet
+                        LogPrint(BCLog::NET, "Force initial broadcast of %lu transactions \n", mempool.m_unbroadcast_txids.size());
+                        // since set elements are unique, this will be a no-op if the txns are already in setInventoryTxToSend
+                        pto->m_tx_relay->setInventoryTxToSend.insert(mempool.m_unbroadcast_txids.begin(), mempool.m_unbroadcast_txids.end());
+                    }
                 }
-            }
+
+                // cache the min fee rate for a txn to be included in a block
+                // applied as rebroadcast filter above
+                if (mempool.m_next_min_fee_cache < current_time){
+                    mempool.CacheMinRebroadcastFee();
+                }
 
                 // Time to send but the peer has requested we not relay transactions.
                 if (fSendTrickle) {

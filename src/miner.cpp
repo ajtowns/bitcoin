@@ -140,7 +140,9 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
 
     int nPackagesSelected = 0;
     int nDescendantsUpdated = 0;
-    addPackageTxs(nPackagesSelected, nDescendantsUpdated);
+    CFeeRate min_fee_rate = CFeeRate(COIN, 1);
+
+    addPackageTxs(nPackagesSelected, nDescendantsUpdated, min_fee_rate);
 
     int64_t nTime1 = GetTimeMicros();
 
@@ -290,6 +292,45 @@ void BlockAssembler::SortForBlock(const CTxMemPool::setEntries& package, std::ve
     std::sort(sortedEntries.begin(), sortedEntries.end(), CompareTxIterByAncestorCount());
 }
 
+// This method is just a wrapper to addPackageTxs with all the setup required.
+CFeeRate BlockAssembler::minTxFeeRate()
+{
+    int nPackagesSelected = 0;
+    int nDescendantsUpdated = 0;
+    CFeeRate min_fee_rate = CFeeRate(COIN, 1);
+
+    resetBlock();
+    pblocktemplate.reset(new CBlockTemplate());
+
+    if(!pblocktemplate.get()){
+        return min_fee_rate;
+	}
+    pblock = &pblocktemplate->block; // pointer for convenience
+
+    // Add dummy coinbase tx as first transaction
+    pblock->vtx.emplace_back();
+    pblocktemplate->vTxFees.push_back(-1); // updated at end
+    pblocktemplate->vTxSigOpsCost.push_back(-1); // updated at end
+
+    CBlockIndex* pindexPrev = ::ChainActive().Tip();
+    assert(pindexPrev != nullptr);
+
+    pblock->nTime = GetAdjustedTime();
+    const int64_t nMedianTimePast = pindexPrev->GetMedianTimePast();
+
+    nLockTimeCutoff = (STANDARD_LOCKTIME_VERIFY_FLAGS & LOCKTIME_MEDIAN_TIME_PAST)
+                       ? nMedianTimePast
+                       : pblock->GetBlockTime();
+    fIncludeWitness = IsWitnessEnabled(pindexPrev, chainparams.GetConsensus());
+
+    {
+        LOCK2(cs_main, mempool.cs);
+        addPackageTxs(nPackagesSelected, nDescendantsUpdated, min_fee_rate);
+    }
+
+    return min_fee_rate;
+}
+
 // This transaction selection algorithm orders the mempool based
 // on feerate of a transaction including all unconfirmed ancestors.
 // Since we don't remove transactions from the mempool as we select them
@@ -300,7 +341,7 @@ void BlockAssembler::SortForBlock(const CTxMemPool::setEntries& package, std::ve
 // Each time through the loop, we compare the best transaction in
 // mapModifiedTxs with the next transaction in the mempool to decide what
 // transaction package to work on next.
-void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated)
+void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpdated, CFeeRate &minPackageFeeRate)
 {
     // mapModifiedTx will store sorted packages after they are modified
     // because some of their txs are already in the block
@@ -412,6 +453,12 @@ void BlockAssembler::addPackageTxs(int &nPackagesSelected, int &nDescendantsUpda
 
         // This transaction will make it in; reset the failed counter.
         nConsecutiveFailed = 0;
+
+        CFeeRate newFeeRate(packageFees, packageSize * WITNESS_SCALE_FACTOR);
+
+        if (newFeeRate < minPackageFeeRate) {
+            minPackageFeeRate = newFeeRate;
+        }
 
         // Package can be added. Sort the entries in a valid order.
         std::vector<CTxMemPool::txiter> sortedEntries;

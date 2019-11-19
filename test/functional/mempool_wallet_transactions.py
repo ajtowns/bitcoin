@@ -35,11 +35,10 @@ class MempoolWalletTransactionsTest(BitcoinTestFramework):
 
         node = self.nodes[0]
         min_relay_fee = node.getnetworkinfo()["relayfee"]
-
-        self.log.info("create high fee rate transactions")
-
-        node.settxfee(min_relay_fee * 3)
         utxos = create_confirmed_utxos(min_relay_fee, node, 2000)
+
+        self.log.info("populate mempool with transactions")
+        node.settxfee(min_relay_fee * 3)
 
         addresses = []
         for i in range(50):
@@ -57,13 +56,16 @@ class MempoolWalletTransactionsTest(BitcoinTestFramework):
             raw_tx_hex = node.createrawtransaction(inputs, outputs)
             signed_tx = node.signrawtransactionwithwallet(raw_tx_hex)
             node.sendrawtransaction(hexstring=signed_tx['hex'], maxfeerate=0)
+            if i%50 == 0:
+                self.sync_mempools()
 
         # confirm txns are more than max rebroadcast amount
         assert_greater_than(node.getmempoolinfo()['bytes'], MAX_REBROADCAST_WEIGHT)
         node.add_p2p_connection(P2PTxInvStore())
-        disconnect_nodes(node, 1)
+        self.sync_mempools()
 
         self.log.info("generate a wallet txn that won't be marked as broadcast")
+        disconnect_nodes(node, 1)
 
         us0 = utxos.pop()
         inputs = [{ "txid" : us0["txid"], "vout" : us0["vout"]}]
@@ -83,14 +85,17 @@ class MempoolWalletTransactionsTest(BitcoinTestFramework):
 
         assert(wallettxid not in tx_hshs)
 
-        # add p2p connection
+        # if we don't disconnect the first connection, it will respond with
+        # a GETDATA and removed from the unbroadcast set before the txn gets
+        # sent to the second connection.
+        node.disconnect_p2ps()
         conn = node.add_p2p_connection(P2PTxInvStore())
 
         # bump mocktime of node1 so rebroadcast is triggered
-        mocktime = int(time.time()) + 300 * 60 # hit rebroadcast interval
+        mocktime = int(time.time()) + 300 * 60
         node.setmocktime(mocktime)
 
-        # verify the wallet txn inv was sent due to mempool tracking
+        # verify the wallet txn inv was sent due to tracking unbroadcast set
         wallettxinv = int(wallettxid, 16)
         wait_until(lambda: wallettxinv in conn.get_invs())
 
