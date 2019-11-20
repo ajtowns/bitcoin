@@ -53,8 +53,12 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         assert_equal(tx_ids.sort(), invs.sort())
 
     def make_txn_at_fee_rate(self, input_utxo, outputs, outputs_sum, desired_fee_rate, change_address):
+        self.timer(0)
+
         node = self.nodes[0]
         inputs = [{'txid': input_utxo['txid'], 'vout': input_utxo['vout']}]
+
+        self.timer(1)
 
         # calculate how much input values add up to
         input_tx_hsh = input_utxo['txid']
@@ -65,6 +69,8 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         index = raw_tx['vin'][0]['vout']
         inputs_sum = inputs_list[index]['value']
 
+        self.timer(2)
+
         # vsize is in bytes, cache fee rate is BTC / kB. Thus divide by 1000
         tx_vsize_with_change = 1660
         desired_fee_btc = desired_fee_rate * tx_vsize_with_change / 1000
@@ -74,10 +80,13 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         outputs[change_address] = float(current_fee_btc - desired_fee_btc)
         outputs_sum += outputs[change_address]
 
+        self.timer(3)
+
         # form txn & submit to mempool
         raw_tx_hex = node.createrawtransaction(inputs, outputs)
         signed_tx = node.signrawtransactionwithwallet(raw_tx_hex)
         tx_hsh = node.sendrawtransaction(hexstring=signed_tx['hex'], maxfeerate=0)
+        self.timer(4)
 
         # retrieve mempool txn to calculate fee rate
         mempool_entry = node.getmempoolentry(tx_hsh)
@@ -91,7 +100,19 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         fee_rate = mempool_entry['fee']*1000/mempool_entry['vsize']
         assert_approx(float(fee_rate), float(desired_fee_rate))
 
+        self.timer('xxx')
+
         return tx_hsh
+
+    _c_timer = None
+    _c_start = None
+    _c_cum = {}
+    def timer(self, n):
+        t = time.time()
+        if self._c_timer is not None:
+            self._c_cum[self._c_timer] = (t - self._c_start) + self._c_cum.get(self._c_timer,0)
+        self._c_timer = n
+        self._c_start = t
 
     def test_simple_rebroadcast(self):
         self.log.info("Test simplest rebroadcast case")
@@ -178,6 +199,7 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
             # add another p2p connection since txns aren't rebroadcast
             # to the same peer (see filterInventoryKnown)
             new_conn = node.add_p2p_connection(P2PTxInvStore())
+            self.log.info("Added another p2p connection, whee!")
 
             # bump mocktime to try to get rebroadcast,
             # but not so much that the txn would be old
@@ -199,8 +221,11 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         node = self.nodes[0]
         mocktime = global_mocktime
         node.setmocktime(mocktime)
+        self.nodes[1].setmocktime(mocktime)
 
         min_relay_fee = node.getnetworkinfo()["relayfee"]
+
+        print(node.getpeerinfo())
 
         self.log.info("ABCD create confirmed utxos now")
         utxos = create_confirmed_utxos(min_relay_fee, node, 3000)
@@ -225,19 +250,24 @@ class MempoolRebroadcastTest(BitcoinTestFramework):
         self.log.info("expected num of nodes: %d", len(self.nodes))
         self.log.info("ABCD fill mempool with txns with fee at cache_fee_rate: %s", cache_fee_rate)
 
+        self.sync_mempools()
         start_time = time.time()
         # create lots of txns with that large output
         for i in range(len(utxos) - 500):
+            self.timer('zzz')
             tx_hsh = self.make_txn_at_fee_rate(utxos.pop(), outputs, outputs_sum, cache_fee_rate, change_address)
-
+            self.timer('yyy')
             if tx_hsh is None:
                 continue
 
             initial_tx_hshs.append(tx_hsh)
-
-            if i%50 == 0:
+            if i%250 == 0:
+                print("%d " % i)
+                print("timers:", self._c_cum)
+                self.timer('www')
                 self.sync_mempools()
-                print("%d " % i, end='')
+                self.timer('vvv')
+
 
         print("making the txns took %r" % (time.time()-start_time))
         self.sync_mempools()
