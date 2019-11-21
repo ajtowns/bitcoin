@@ -12,6 +12,7 @@
 #include <primitives/transaction.h>
 #include <pubkey.h>
 
+#include <optional>
 #include <vector>
 #include <stdint.h>
 
@@ -27,10 +28,12 @@ enum
     SIGHASH_NONE = 2,
     SIGHASH_SINGLE = 3,
     SIGHASH_ANYONECANPAY = 0x80,
+    SIGHASH_ANYPREVOUT = 0x40,
+    SIGHASH_ANYPREVOUTANYSCRIPT = 0xc0,
 
     SIGHASH_DEFAULT = 0, //!< Taproot only; implied when sighash byte is missing, and equivalent to SIGHASH_ALL
     SIGHASH_OUTPUT_MASK = 3,
-    SIGHASH_INPUT_MASK = 0x80,
+    SIGHASH_INPUT_MASK = 0xc0,
 };
 
 /** Script verification flags.
@@ -139,6 +142,9 @@ enum
 
     // Making unknown public key versions (in BIP 342 scripts) non-standard
     SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE = (1U << 20),
+
+    // Validating ANYPREVOUT public keys
+    SCRIPT_VERIFY_ANYPREVOUT = (1U << 21),
 };
 
 bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
@@ -184,6 +190,7 @@ enum class SigVersion
 enum class KeyVersion
 {
     TAPROOT = 0,     //!< 32 byte public key
+    ANYPREVOUT = 1,  //!< 1 or 33 byte public key, first byte is 0x01
 };
 
 struct VersionedXOnlyPubKey
@@ -215,6 +222,9 @@ struct ScriptExecutionData
     bool m_validation_weight_left_init = false;
     //! How much validation weight is left (decremented for every successful non-empty signature check).
     int64_t m_validation_weight_left;
+
+    /** The taproot internal key. */
+    std::optional<XOnlyPubKey> m_internal_key = std::nullopt;
 };
 
 /** Signature hash sizes */

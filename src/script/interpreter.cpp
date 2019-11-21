@@ -388,11 +388,23 @@ static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, Scr
             return set_error(serror, SCRIPT_ERR_TAPSCRIPT_VALIDATION_WEIGHT);
         }
     }
+
     if (pubkey.size() == 0) {
         return set_error(serror, SCRIPT_ERR_PUBKEYTYPE);
     } else if (pubkey.size() == 32) {
         if (success && !checker.CheckSchnorrSignature(sig, {KeyVersion::TAPROOT, XOnlyPubKey(pubkey)}, sigversion, execdata, serror)) {
             return false; // serror is set
+        }
+    } else if ((flags & SCRIPT_VERIFY_ANYPREVOUT) != 0 && (pubkey.size() == 1 || pubkey.size() == 33) && pubkey[0] == 0x01) {
+        if (pubkey.size() == 1) {
+            assert(execdata.m_internal_key);
+            if (success && !checker.CheckSchnorrSignature(sig, {KeyVersion::ANYPREVOUT, *execdata.m_internal_key}, sigversion, execdata, serror)) {
+                return false; // serror is set
+            }
+        } else { // pubkey_in.size() == 33
+            if (success && !checker.CheckSchnorrSignature(sig, {KeyVersion::ANYPREVOUT, XOnlyPubKey(MakeSpan(pubkey).subspan(1))}, sigversion, execdata, serror)) {
+                return false; // serror is set
+            }
         }
     } else {
         /*
@@ -1503,7 +1515,8 @@ template<typename T>
 bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, const KeyVersion keyversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
 {
     uint8_t ext_flag;
-    assert(keyversion == KeyVersion::TAPROOT);
+    assert(keyversion == KeyVersion::TAPROOT || keyversion == KeyVersion::ANYPREVOUT);
+    assert(keyversion == KeyVersion::ANYPREVOUT ? sigversion == SigVersion::TAPSCRIPT : true);
     switch (sigversion) {
     case SigVersion::TAPROOT:
         ext_flag = 0;
@@ -1529,7 +1542,21 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     // Hash type
     const uint8_t output_type = (hash_type == SIGHASH_DEFAULT) ? SIGHASH_ALL : (hash_type & SIGHASH_OUTPUT_MASK); // Default (no sighash byte) is equivalent to SIGHASH_ALL
     const uint8_t input_type = hash_type & SIGHASH_INPUT_MASK;
-    if (!(hash_type <= 0x03 || (hash_type >= 0x81 && hash_type <= 0x83))) return false;
+
+    switch(hash_type) {
+        case 0: case 1: case 2: case 3:
+        case 0x81: case 0x82: case 0x83:
+            break;
+        case 0x41: case 0x42: case 0x43:
+        case 0xc1: case 0xc2: case 0xc3:
+            if (keyversion == KeyVersion::ANYPREVOUT) {
+                break;
+            } else {
+                return false;
+            }
+        default:
+            return false;
+    }
     ss << hash_type;
 
     // Transaction level data
@@ -1554,6 +1581,12 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
         ss << tx_to.vin[in_pos].prevout;
         ss << cache.m_spent_outputs[in_pos];
         ss << tx_to.vin[in_pos].nSequence;
+    } else if (input_type == SIGHASH_ANYPREVOUT) {
+        ss << cache.m_spent_outputs[in_pos];
+        ss << tx_to.vin[in_pos].nSequence;
+    } else if (input_type == SIGHASH_ANYPREVOUTANYSCRIPT) {
+        ss << cache.m_spent_outputs[in_pos].nValue;
+        ss << tx_to.vin[in_pos].nSequence;
     } else {
         ss << in_pos;
     }
@@ -1572,7 +1605,9 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     // Additional data for BIP 342 signatures
     if (sigversion == SigVersion::TAPSCRIPT) {
         assert(execdata.m_tapleaf_hash_init);
-        ss << execdata.m_tapleaf_hash;
+        if (input_type != SIGHASH_ANYPREVOUTANYSCRIPT) {
+            ss << execdata.m_tapleaf_hash;
+        }
         ss << uint8_t(keyversion);
         assert(execdata.m_codeseparator_pos_init);
         ss << execdata.m_codeseparator_pos;
