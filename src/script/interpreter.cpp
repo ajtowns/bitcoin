@@ -396,7 +396,7 @@ static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, Scr
     if (pubkey.size() == 0) {
         return set_error(serror, SCRIPT_ERR_PUBKEYTYPE);
     } else if (pubkey.size() == 32) {
-        if (success && !checker.CheckSigSchnorr(sig, pubkey, sigversion, execdata)) {
+        if (success && !checker.CheckSigSchnorr(sig, pubkey, sigversion, KeyVersion::TAPROOT, execdata)) {
             return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
         }
     } else {
@@ -1440,10 +1440,12 @@ static const CHashWriter HasherTapBranch = TaggedHash("TapBranch");
 static const CHashWriter HasherTapTweak = TaggedHash("TapTweak");
 
 template<typename T>
-bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, const uint32_t in_pos, const uint8_t hash_type, const SigVersion sigversion, const PrecomputedTransactionData& cache)
+bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, const uint32_t in_pos, const uint8_t hash_type, const SigVersion sigversion, const KeyVersion keyversion, const PrecomputedTransactionData& cache)
 {
     assert(in_pos < tx_to.vin.size());
     assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+    assert(keyversion == KeyVersion::TAPROOT);
+
     assert(cache.ready && cache.m_amounts_spent_ready);
 
     CHashWriter ss = HasherTapSighash;
@@ -1453,7 +1455,13 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     ss << epoch;
 
     // Hash type
-    if ((hash_type > 3) && (hash_type < 0x81 || hash_type > 0x83)) return false;
+    switch(hash_type) {
+        case 0: case 1: case 2: case 3:
+        case 0x81: case 0x82: case 0x83:
+            break;
+        default:
+            return false;
+    }
     ss << hash_type;
     const uint8_t input_type = hash_type & SIGHASH_TAPINPUTMASK;
     const uint8_t output_type = hash_type & SIGHASH_TAPOUTPUTMASK;
@@ -1508,7 +1516,7 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     if (sigversion == SigVersion::TAPSCRIPT) {
         assert(execdata.m_tapleaf_hash_init);
         ss << execdata.m_tapleaf_hash;
-        ss << uint8_t(0); // key_version
+        ss << uint8_t(keyversion);
         ss << execdata.m_codeseparator_pos;
     }
 
@@ -1620,14 +1628,26 @@ bool GenericTransactionSignatureChecker<T>::CheckSig(const std::vector<unsigned 
     return true;
 }
 
+static inline Optional<XOnlyPubKey> GetTaprootPubKey(const std::vector<unsigned char>& pubkey_in, KeyVersion keyversion, const ScriptExecutionData& execdata)
+{
+    if (keyversion == KeyVersion::TAPROOT) {
+        if (pubkey_in.size() == 32) {
+            return XOnlyPubKey{uint256(pubkey_in)};
+        } else {
+            return nullopt;
+        }
+    }
+    return nullopt;
+}
+
 template <class T>
-bool GenericTransactionSignatureChecker<T>::CheckSigSchnorr(const std::vector<unsigned char>& sig_in, const std::vector<unsigned char>& pubkey_in, SigVersion sigversion, const ScriptExecutionData& execdata) const
+bool GenericTransactionSignatureChecker<T>::CheckSigSchnorr(const std::vector<unsigned char>& sig_in, const std::vector<unsigned char>& pubkey_in, SigVersion sigversion, KeyVersion keyversion, const ScriptExecutionData& execdata) const
 {
     std::vector<unsigned char> sig(sig_in);
     if (sig.empty()) return false;
 
-    if (pubkey_in.size() != 32) return false;
-    XOnlyPubKey pubkey{uint256(pubkey_in)};
+    const Optional<XOnlyPubKey> pubkey{GetTaprootPubKey(pubkey_in, keyversion, execdata)};
+    if (!pubkey) return false;
 
     uint8_t hashtype = SIGHASH_TAPDEFAULT;
     if (sig.size() == 65) {
@@ -1637,9 +1657,9 @@ bool GenericTransactionSignatureChecker<T>::CheckSigSchnorr(const std::vector<un
     }
     if (sig.size() != 64) return false;
     uint256 sighash;
-    bool ret = SignatureHashSchnorr(sighash, execdata, *txTo, nIn, hashtype, sigversion, *this->txdata);
+    bool ret = SignatureHashSchnorr(sighash, execdata, *txTo, nIn, hashtype, sigversion, keyversion, *this->txdata);
     if (!ret) return false;
-    return VerifySchnorrSignature(sig, pubkey, sighash);
+    return VerifySchnorrSignature(sig, *pubkey, sighash);
 }
 
 template <class T>
@@ -1835,7 +1855,7 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
         execdata.m_annex_init = true;
         if (stack.size() == 1) {
             // Key path spending
-            if (!checker.CheckSigSchnorr(stack[0], program, SigVersion::TAPROOT, execdata)) {
+            if (!checker.CheckSigSchnorr(stack[0], program, SigVersion::TAPROOT, KeyVersion::TAPROOT, execdata)) {
                 return set_error(serror, SCRIPT_ERR_TAPROOT_INVALID_SIG);
             }
             return set_success(serror);

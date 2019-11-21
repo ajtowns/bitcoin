@@ -465,11 +465,11 @@ class TAPROOTTest(BitcoinTestFramework):
                 # 15) OP_CHECKSIGADD with empty key that needs invalid signature
                 CScript([pubkey, OP_CHECKSIGVERIFY, OP_0, OP_0, OP_CHECKSIGADD, OP_NOT]),
                 # 16) OP_CHECKSIG with unknown pubkey type
-                CScript([OP_1, OP_CHECKSIG]),
+                CScript([OP_1NEGATE, OP_CHECKSIG]),
                 # 17) OP_CHECKSIGADD with unknown pubkey type
-                CScript([OP_0, OP_1, OP_CHECKSIGADD]),
+                CScript([OP_0, OP_1NEGATE, OP_CHECKSIGADD]),
                 # 18) OP_CHECKSIGVERIFY with unknown pubkey type
-                CScript([OP_1, OP_CHECKSIGVERIFY, OP_1]),
+                CScript([OP_1NEGATE, OP_CHECKSIGVERIFY, OP_1]),
                 # 19) script longer than 10000 bytes and over 201 non-push opcodes
                 CScript([OP_0, OP_0, OP_2DROP] * 10001 + [pubkey, OP_CHECKSIG]),
                 # 20) OP_CHECKSIGVERIFY with empty key
