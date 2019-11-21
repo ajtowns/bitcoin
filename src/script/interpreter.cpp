@@ -373,6 +373,11 @@ static bool EvalChecksigPreTapscript(const valtype& vchSig, const valtype& vchPu
     return true;
 }
 
+static bool IsAnyPrevoutPubkey(const valtype& pubkey)
+{
+    return (pubkey.size() == 1 || pubkey.size() == 33) && pubkey[0] == 0x01;
+}
+
 static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, ScriptExecutionData& execdata, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* serror, bool& success)
 {
     assert(sigversion == SigVersion::TAPSCRIPT);
@@ -397,6 +402,10 @@ static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, Scr
         return set_error(serror, SCRIPT_ERR_PUBKEYTYPE);
     } else if (pubkey.size() == 32) {
         if (success && !checker.CheckSigSchnorr(sig, pubkey, sigversion, KeyVersion::TAPROOT, execdata)) {
+            return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
+        }
+    } else if ((flags & SCRIPT_VERIFY_ANYPREVOUT) != 0 && IsAnyPrevoutPubkey(pubkey)) {
+        if (success && !checker.CheckSigSchnorr(sig, pubkey, sigversion, KeyVersion::ANYPREVOUT, execdata)) {
             return set_error(serror, SCRIPT_ERR_SIG_NULLFAIL);
         }
     } else {
@@ -1444,7 +1453,8 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
 {
     assert(in_pos < tx_to.vin.size());
     assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
-    assert(keyversion == KeyVersion::TAPROOT);
+    assert(keyversion == KeyVersion::TAPROOT || keyversion == KeyVersion::ANYPREVOUT);
+    assert(keyversion == KeyVersion::ANYPREVOUT ? sigversion == SigVersion::TAPSCRIPT : true);
 
     assert(cache.ready && cache.m_amounts_spent_ready);
 
@@ -1459,6 +1469,13 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
         case 0: case 1: case 2: case 3:
         case 0x81: case 0x82: case 0x83:
             break;
+        case 0x41: case 0x42: case 0x43:
+        case 0xc1: case 0xc2: case 0xc3:
+            if (keyversion == KeyVersion::ANYPREVOUT) {
+                break;
+            } else {
+                return false;
+            }
         default:
             return false;
     }
@@ -1491,10 +1508,15 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     }
 
     ss << spend_type;
-    ss << scriptPubKey;
+    if (input_type != SIGHASH_ANYPREVOUTANYSCRIPT) {
+        ss << scriptPubKey;
+    }
 
     if (input_type == SIGHASH_ANYONECANPAY) {
         ss << tx_to.vin[in_pos].prevout;
+        ss << cache.m_spent_outputs[in_pos].nValue;
+        ss << tx_to.vin[in_pos].nSequence;
+    } else if (input_type == SIGHASH_ANYPREVOUT || input_type == SIGHASH_ANYPREVOUTANYSCRIPT) {
         ss << cache.m_spent_outputs[in_pos].nValue;
         ss << tx_to.vin[in_pos].nSequence;
     } else {
@@ -1515,7 +1537,9 @@ bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata
     // Additional data for tapscript
     if (sigversion == SigVersion::TAPSCRIPT) {
         assert(execdata.m_tapleaf_hash_init);
-        ss << execdata.m_tapleaf_hash;
+        if (input_type != SIGHASH_ANYPREVOUTANYSCRIPT) {
+            ss << execdata.m_tapleaf_hash;
+        }
         ss << uint8_t(keyversion);
         ss << execdata.m_codeseparator_pos;
     }
@@ -1636,6 +1660,15 @@ static inline Optional<XOnlyPubKey> GetTaprootPubKey(const std::vector<unsigned 
         } else {
             return nullopt;
         }
+    } else if (keyversion == KeyVersion::ANYPREVOUT) {
+        if (pubkey_in.size() == 1) {
+            assert(execdata.m_internal_key);
+            return *execdata.m_internal_key;
+        } else if (pubkey_in.size() == 33) {
+            return XOnlyPubKey{uint256(std::vector<unsigned char>(pubkey_in.begin() + 1, pubkey_in.end()))};
+        } else {
+            return nullopt;
+        }
     }
     return nullopt;
 }
@@ -1643,6 +1676,7 @@ static inline Optional<XOnlyPubKey> GetTaprootPubKey(const std::vector<unsigned 
 template <class T>
 bool GenericTransactionSignatureChecker<T>::CheckSigSchnorr(const std::vector<unsigned char>& sig_in, const std::vector<unsigned char>& pubkey_in, SigVersion sigversion, KeyVersion keyversion, const ScriptExecutionData& execdata) const
 {
+    if (sigversion == SigVersion::TAPSCRIPT) assert(execdata.m_internal_key);
     std::vector<unsigned char> sig(sig_in);
     if (sig.empty()) return false;
 
@@ -1787,10 +1821,11 @@ static bool ExecuteWitnessProgram(std::vector<std::vector<unsigned char>> stack,
     return true;
 }
 
-static bool VerifyTaprootCommitment(const std::vector<unsigned char>& control, const std::vector<unsigned char>& program, const CScript& script, uint256* tapleaf_hash)
+static bool VerifyTaprootCommitment(const std::vector<unsigned char>& control, const std::vector<unsigned char>& program, const CScript& script, uint256* tapleaf_hash, Optional<XOnlyPubKey>* internal_key)
 {
     int path_len = (control.size() - TAPROOT_CONTROL_BASE_SIZE) / TAPROOT_CONTROL_NODE_SIZE;
     XOnlyPubKey p{uint256(std::vector<unsigned char>(control.begin() + 1, control.begin() + TAPROOT_CONTROL_BASE_SIZE))};
+    if (internal_key) *internal_key = p;
     XOnlyPubKey q{uint256(program)};
     uint256 k = (CHashWriter(HasherTapLeaf) << uint8_t(control[0] & TAPROOT_LEAF_MASK) << script).GetSHA256();
     if (tapleaf_hash) *tapleaf_hash = k;
@@ -1868,7 +1903,7 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
             if (control.size() < TAPROOT_CONTROL_BASE_SIZE || control.size() > TAPROOT_CONTROL_MAX_SIZE || ((control.size() - TAPROOT_CONTROL_BASE_SIZE) % TAPROOT_CONTROL_NODE_SIZE) != 0) {
                 return set_error(serror, SCRIPT_ERR_TAPROOT_WRONG_CONTROL_SIZE);
             }
-            if (!VerifyTaprootCommitment(control, program, scriptPubKey, &execdata.m_tapleaf_hash)) {
+            if (!VerifyTaprootCommitment(control, program, scriptPubKey, &execdata.m_tapleaf_hash, &execdata.m_internal_key)) {
                 return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_MISMATCH);
             }
             execdata.m_tapleaf_hash_init = true;

@@ -26,10 +26,12 @@ enum
     SIGHASH_NONE = 2,
     SIGHASH_SINGLE = 3,
     SIGHASH_ANYONECANPAY = 0x80,
+    SIGHASH_ANYPREVOUT = 0x40,
+    SIGHASH_ANYPREVOUTANYSCRIPT = 0xc0,
 
     SIGHASH_TAPDEFAULT = 0,
     SIGHASH_TAPOUTPUTMASK = 3,
-    SIGHASH_TAPINPUTMASK = 0x80,
+    SIGHASH_TAPINPUTMASK = 0xc0,
 };
 
 /** Script verification flags.
@@ -138,6 +140,9 @@ enum
 
     // Making unknown public key versions in tapscript non-standard
     SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE = (1U << 21),
+
+    // Validating ANYPREVOUT public keys
+    SCRIPT_VERIFY_ANYPREVOUT = (1U << 22),
 };
 
 bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
@@ -173,6 +178,7 @@ enum class SigVersion
 enum class KeyVersion
 {
     TAPROOT = 0,     //!< 32 byte public key
+    ANYPREVOUT = 1,  //!< 1 or 33 byte public key, first byte is 0x01
 };
 
 struct ScriptExecutionData
@@ -195,6 +201,9 @@ struct ScriptExecutionData
     bool m_validation_weight_left_init = false;
     /** How much validation weight is left (decremented for every succesful signature check). */
     int64_t m_validation_weight_left;
+
+    /** The taproot internal key. */
+    Optional<XOnlyPubKey> m_internal_key = nullopt;
 };
 
 /** Signature hash sizes */
