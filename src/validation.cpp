@@ -1673,6 +1673,11 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consens
     // Enforce Taproot (BIP340-BIP342)
     if (DeploymentActiveAt(*pindex, consensusparams, Consensus::DEPLOYMENT_TAPROOT)) {
         flags |= SCRIPT_VERIFY_TAPROOT;
+
+        // Enforce ANYPREVOUT (BIP118/pr943)
+        if (DeploymentActiveAt(*pindex, consensusparams, Consensus::DEPLOYMENT_ANYPREVOUT)) {
+            flags |= SCRIPT_VERIFY_ANYPREVOUT;
+        }
     }
 
     // Enforce BIP147 NULLDUMMY (activated simultaneously with segwit)
