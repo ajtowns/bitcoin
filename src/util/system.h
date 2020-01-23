@@ -190,6 +190,17 @@ protected:
      */
     std::vector<util::SettingsValue> GetSettingsList(const std::string& arg) const;
 
+    /**
+     * Check that arg has the right flags for use in a given context. Raises
+     * logic_error if this isn't the case, indicating the argument was
+     * registered with bad AddArg flags.
+     *
+     * Returns true if the arg is registered and has checking enabled. Returns
+     * false if the arg was never registered or checking was disabled with
+     * ALLOW_ANY.
+     */
+    bool CheckArgFlags(const std::string& name, unsigned int require, unsigned int forbid, const char* context) const;
+
 public:
     ArgsManager();
 

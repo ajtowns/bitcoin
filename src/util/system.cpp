@@ -350,8 +350,25 @@ Optional<unsigned int> ArgsManager::GetArgFlags(const std::string& name) const
     return nullopt;
 }
 
+bool ArgsManager::CheckArgFlags(const std::string& name,
+    unsigned int require,
+    unsigned int forbid,
+    const char* context) const
+{
+    Optional<unsigned int> flags = GetArgFlags(name);
+    if (!flags || *flags & ArgsManager::ALLOW_ANY) return false;
+    if ((*flags & require) != require || (*flags & forbid) != 0) {
+        throw std::logic_error(
+            strprintf("Bug: Can't call %s on arg %s registered with flags 0x%08x (requires 0x%x, disallows 0x%x)",
+                context, name, *flags, require, forbid));
+    }
+    return true;
+}
+
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
 {
+    bool coerce = !CheckArgFlags(strArg, /* require= */ ALLOW_STRING | ALLOW_LIST, /* forbid= */ 0, __func__);
+    (void)coerce; // unused
     std::vector<std::string> result;
     for (const util::SettingsValue& value : GetSettingsList(strArg)) {
         result.push_back(value.isFalse() ? "0" : value.isTrue() ? "1" : value.get_str());
@@ -371,18 +388,24 @@ bool ArgsManager::IsArgNegated(const std::string& strArg) const
 
 std::string ArgsManager::GetArg(const std::string& strArg, const std::string& strDefault) const
 {
+    bool coerce = !CheckArgFlags(strArg, /* require= */ ALLOW_STRING, /* forbid= */ ALLOW_LIST, __func__);
+    (void)coerce; // unused
     const util::SettingsValue value = GetSetting(strArg);
     return value.isNull() ? strDefault : value.isFalse() ? "0" : value.isTrue() ? "1" : value.get_str();
 }
 
 int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 {
+    bool coerce = !CheckArgFlags(strArg, /* require= */ ALLOW_INT, /* forbid= */ ALLOW_LIST, __func__);
+    (void)coerce; // unused
     const util::SettingsValue value = GetSetting(strArg);
     return value.isNull() ? nDefault : value.isFalse() ? 0 : value.isTrue() ? 1 : value.isNum() ? value.get_int64() : atoi64(value.get_str());
 }
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
+    bool coerce = !CheckArgFlags(strArg, /* require= */ 0, /* forbid= */ ALLOW_LIST, __func__);
+    (void)coerce; // unused
     const util::SettingsValue value = GetSetting(strArg);
     return value.isNull() ? fDefault : value.isBool() ? value.get_bool() : InterpretBool(value.get_str());
 }
@@ -397,15 +420,17 @@ bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strVa
 
 bool ArgsManager::SoftSetBoolArg(const std::string& strArg, bool fValue)
 {
-    if (fValue)
-        return SoftSetArg(strArg, std::string("1"));
-    else
-        return SoftSetArg(strArg, std::string("0"));
+    LOCK(cs_args);
+    CheckArgFlags(strArg, /* require= */ ALLOW_BOOL, /* forbid= */ 0, __func__);
+    if (IsArgSet(strArg)) return false;
+    m_settings.forced_settings[SettingName(strArg)] = fValue;
+    return true;
 }
 
 void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strValue)
 {
     LOCK(cs_args);
+    CheckArgFlags(strArg, /* require= */ ALLOW_STRING, /* forbid= */ 0, __func__);
     m_settings.forced_settings[SettingName(strArg)] = strValue;
 }
 
