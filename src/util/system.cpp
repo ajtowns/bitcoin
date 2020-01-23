@@ -6,6 +6,7 @@
 #include <util/system.h>
 
 #include <chainparamsbase.h>
+#include <optional.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/translation.h>
