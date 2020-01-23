@@ -170,26 +170,17 @@ static std::string SettingName(const std::string& arg)
 }
 
 /**
- * Interpret -nofoo as if the user supplied -foo=0.
- *
- * This method also tracks when the -no form was supplied, and if so,
- * checks whether there was a double-negative (-nofoo=0 -> -foo=1).
- *
- * If there was not a double negative, it removes the "no" from the key
- * and returns false.
- *
- * If there was a double negative, it removes "no" from the key, and
- * returns true.
- *
- * If there was no "no", it returns the string value untouched.
+ * Interpret key portion of a "key=value" config string. Strip "section." and
+ * "no" prefixes from the key if they are present, updating the section output
+ * argument if a section was found, and returning false if the key was negated,
+ * true otherwise.
  *
  * Where an option was negated can be later checked using the
  * IsArgNegated() method. One use case for this is to have a way to disable
  * options that are not normally boolean (e.g. using -nodebuglogfile to request
  * that debug log output is not sent to any file at all).
  */
-
-static util::SettingsValue InterpretOption(std::string& section, std::string& key, const std::string& value)
+static bool InterpretKey(std::string& section, std::string& key)
 {
     // Split section name from key name for keys like "testnet.foo" or "regtest.bar"
     size_t option_index = key.find('.');
@@ -199,14 +190,9 @@ static util::SettingsValue InterpretOption(std::string& section, std::string& ke
     }
     if (key.substr(0, 2) == "no") {
         key.erase(0, 2);
-        // Double negatives like -nofoo=0 are supported (but discouraged)
-        if (!InterpretBool(value)) {
-            LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, value);
-            return true;
-        }
         return false;
     }
-    return value;
+    return true;
 }
 
 /**
@@ -216,13 +202,26 @@ static util::SettingsValue InterpretOption(std::string& section, std::string& ke
  * See "here's how the flags are meant to behave" in
  * https://github.com/bitcoin/bitcoin/pull/16097#issuecomment-514627823
  */
-static bool CheckValid(const std::string& key, const util::SettingsValue& val, unsigned int flags, std::string& error)
+static Optional<util::SettingsValue> InterpretValue(const std::string& key,
+    const std::string* value,
+    bool negated,
+    unsigned int flags,
+    std::string& error)
 {
-    if (val.isBool() && !(flags & (ArgsManager::ALLOW_ANY | ArgsManager::ALLOW_BOOL))) {
-        error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
-        return false;
+    assert(value);
+    if (negated) {
+        if (!(flags & (ArgsManager::ALLOW_ANY | ArgsManager::ALLOW_BOOL))) {
+            error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
+            return nullopt;
+        }
+        // Double negatives like -nokey=0 are supported (but discouraged)
+        if (value && !InterpretBool(*value)) {
+            LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, *value);
+            return util::SettingsValue{true};
+        }
+        return util::SettingsValue{false};
     }
-    return true;
+    return util::SettingsValue{*value};
 }
 
 ArgsManager::ArgsManager()
@@ -310,18 +309,18 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
         // Transform -foo to foo
         key.erase(0, 1);
         std::string section;
-        util::SettingsValue value = InterpretOption(section, key, val);
+        bool negated = !InterpretKey(section, key);
         Optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
-            if (!CheckValid(key, value, *flags, error)) {
-                return false;
-            }
+            Optional<util::SettingsValue> value = InterpretValue(key, &val, negated, *flags, error);
+            if (!value) return false;
+
             // Weird behavior preserved for backwards compatibility: command
             // line options with section prefixes are allowed but ignored. It
             // would be better if these options triggered the Invalid parameter
             // error below.
             if (section.empty()) {
-                m_settings.command_line_options[key].push_back(value);
+                m_settings.command_line_options[key].push_back(*value);
             }
         } else {
             error = strprintf("Invalid parameter -%s", key);
@@ -716,13 +715,12 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
     for (const std::pair<std::string, std::string>& option : options) {
         std::string section;
         std::string key = option.first;
-        util::SettingsValue value = InterpretOption(section, key, option.second);
+        bool negated = !InterpretKey(section, key);
         Optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
-            if (!CheckValid(key, value, *flags, error)) {
-                return false;
-            }
-            m_settings.ro_config[section][key].push_back(value);
+            Optional<util::SettingsValue> value = InterpretValue(key, &option.second, negated, *flags, error);
+            if (!value) return false;
+            m_settings.ro_config[section][key].push_back(*value);
         } else {
             if (ignore_invalid_keys) {
                 LogPrintf("Ignoring unknown configuration value %s\n", option.first);
