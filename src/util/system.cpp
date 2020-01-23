@@ -208,7 +208,6 @@ static Optional<util::SettingsValue> InterpretValue(const std::string& key,
     unsigned int flags,
     std::string& error)
 {
-    assert(value);
     if (negated) {
         if (!(flags & (ArgsManager::ALLOW_ANY | ArgsManager::ALLOW_BOOL))) {
             error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
@@ -221,7 +220,7 @@ static Optional<util::SettingsValue> InterpretValue(const std::string& key,
         }
         return util::SettingsValue{false};
     }
-    return util::SettingsValue{*value};
+    return util::SettingsValue{value ? *value : ""};
 }
 
 ArgsManager::ArgsManager()
@@ -287,7 +286,7 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
 #endif
 
         if (key == "-") break; //bitcoin-tx using stdin
-        std::string val;
+        Optional<std::string> val;
         size_t is_index = key.find('=');
         if (is_index != std::string::npos) {
             val = key.substr(is_index + 1);
@@ -312,7 +311,7 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
         bool negated = !InterpretKey(section, key);
         Optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
-            Optional<util::SettingsValue> value = InterpretValue(key, &val, negated, *flags, error);
+            Optional<util::SettingsValue> value = InterpretValue(key, val.get_ptr(), negated, *flags, error);
             if (!value) return false;
 
             // Weird behavior preserved for backwards compatibility: command
