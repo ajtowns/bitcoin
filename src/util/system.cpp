@@ -426,6 +426,16 @@ void ArgsManager::AddArg(const std::string& name, const std::string& help, unsig
     if (flags & ArgsManager::NETWORK_ONLY) {
         m_network_only_args.emplace(arg_name);
     }
+
+    if ((flags & (ALLOW_BOOL | ALLOW_INT | ALLOW_STRING)) && (flags & ALLOW_ANY)) {
+        throw std::logic_error(strprintf("Bug: bad %s flags. ALLOW_{BOOL|INT|STRING} flags would have no effect with "
+                                         "ALLOW_ANY present (ALLOW_ANY disables validation)", arg_name));
+    }
+
+    if ((flags & ALLOW_INT) && (flags & ALLOW_STRING)) {
+        throw std::logic_error(strprintf("Bug: bad %s flags. ALLOW_INT would have no effect with ALLOW_STRING present "
+                                         "(any valid integer is also a valid string)", arg_name));
+    }
 }
 
 void ArgsManager::AddHiddenArgs(const std::vector<std::string>& names)

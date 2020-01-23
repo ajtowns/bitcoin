@@ -430,6 +430,14 @@ BOOST_AUTO_TEST_CASE(util_CheckSingleValue)
     BOOST_CHECK(test.ReadConfigStream(stream, "file.conf", error));
 }
 
+BOOST_AUTO_TEST_CASE(util_CheckBadFlagCombinations)
+{
+    TestArgsManager test;
+    using M = ArgsManager;
+    BOOST_CHECK_THROW(test.AddArg("-arg1", "name", M::ALLOW_INT | M::ALLOW_ANY, OptionsCategory::OPTIONS), std::logic_error);
+    BOOST_CHECK_THROW(test.AddArg("-arg2", "name", M::ALLOW_INT | M::ALLOW_STRING, OptionsCategory::OPTIONS), std::logic_error);
+}
+
 BOOST_AUTO_TEST_CASE(util_ParseParameters)
 {
     TestArgsManager testArgs;
