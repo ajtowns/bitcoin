@@ -218,7 +218,7 @@ static util::SettingsValue InterpretOption(std::string& section, std::string& ke
  */
 static bool CheckValid(const std::string& key, const util::SettingsValue& val, unsigned int flags, std::string& error)
 {
-    if (val.isBool() && !(flags & ArgsManager::ALLOW_BOOL)) {
+    if (val.isBool() && !(flags & (ArgsManager::ALLOW_ANY | ArgsManager::ALLOW_BOOL))) {
         error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
         return false;
     }

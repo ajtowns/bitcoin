@@ -376,6 +376,20 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=1", Expect{"1"}.String("1").Int(1).Bool(true).List({"1"}));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=2", Expect{"2"}.String("2").Int(2).Bool(true).List({"2"}));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=abc", Expect{"abc"}.String("abc").Int(0).Bool(false).List({"abc"}));
+
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, nullptr, Expect{{}}.DefaultString().DefaultInt().DefaultBool().List({}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=0", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=1", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=2", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=abc", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value", Expect{""}.String("").Int(0).Bool(true).List({""}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=", Expect{""}.String("").Int(0).Bool(true).List({""}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=0", Expect{"0"}.String("0").Int(0).Bool(false).List({"0"}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=1", Expect{"1"}.String("1").Int(1).Bool(true).List({"1"}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=2", Expect{"2"}.String("2").Int(2).Bool(true).List({"2"}));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=abc", Expect{"abc"}.String("abc").Int(0).Bool(false).List({"abc"}));
 }
 
 BOOST_FIXTURE_TEST_CASE(util_CheckBoolStringsNotSpecial, CheckValueTest)
