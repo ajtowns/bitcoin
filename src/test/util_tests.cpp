@@ -427,7 +427,8 @@ BOOST_AUTO_TEST_CASE(util_CheckSingleValue)
     test.SetupArgs({{"-single", ArgsManager::ALLOW_INT}});
     std::istringstream stream("single=1\nsingle=2\n");
     std::string error;
-    BOOST_CHECK(test.ReadConfigStream(stream, "file.conf", error));
+    BOOST_CHECK(!test.ReadConfigStream(stream, "file.conf", error));
+    BOOST_CHECK_EQUAL(error, "Multiple values specified for -single in same section of config file.");
 }
 
 BOOST_AUTO_TEST_CASE(util_CheckBadFlagCombinations)

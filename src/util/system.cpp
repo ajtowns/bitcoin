@@ -752,6 +752,10 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
         bool negated = !InterpretKey(section, key);
         Optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
+            if (!(*flags & (ALLOW_ANY | ALLOW_LIST)) && m_settings.ro_config[section].count(key)) {
+                error = strprintf("Multiple values specified for -%s in same section of config file.", key);
+                return false;
+            }
             Optional<util::SettingsValue> value = InterpretValue(key, &option.second, negated, *flags, error);
             if (!value) return false;
             m_settings.ro_config[section][key].push_back(*value);
