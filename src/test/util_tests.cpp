@@ -257,16 +257,16 @@ public:
             BOOST_CHECK_EQUAL(test.GetArg("-value", "zzzzz"), "zzzzz");
         } else if (expect.string_value) {
             BOOST_CHECK_EQUAL(test.GetArg("-value", "zzzzz"), expect.string_value);
-        } else {
-            BOOST_CHECK(!success);
+        } else if (success) {
+            BOOST_CHECK_THROW(test.GetArg("-value", "zzzzz"), std::logic_error);
         }
 
         if (expect.default_int) {
             BOOST_CHECK_EQUAL(test.GetArg("-value", 99999), 99999);
         } else if (expect.int_value) {
             BOOST_CHECK_EQUAL(test.GetArg("-value", 99999), *expect.int_value);
-        } else {
-            BOOST_CHECK(!success);
+        } else if (success) {
+            BOOST_CHECK_THROW(test.GetArg("-value", 99999), std::logic_error);
         }
 
         if (expect.default_bool) {
@@ -275,15 +275,16 @@ public:
         } else if (expect.bool_value) {
             BOOST_CHECK_EQUAL(test.GetBoolArg("-value", false), *expect.bool_value);
             BOOST_CHECK_EQUAL(test.GetBoolArg("-value", true), *expect.bool_value);
-        } else {
-            BOOST_CHECK(!success);
+        } else if (success) {
+            BOOST_CHECK_THROW(test.GetBoolArg("-value", false), std::logic_error);
+            BOOST_CHECK_THROW(test.GetBoolArg("-value", true), std::logic_error);
         }
 
         if (expect.list_value) {
             auto l = test.GetArgs("-value");
             BOOST_CHECK_EQUAL_COLLECTIONS(l.begin(), l.end(), expect.list_value->begin(), expect.list_value->end());
-        } else {
-            BOOST_CHECK(!success);
+        } else if (success) {
+            BOOST_CHECK_THROW(test.GetArgs("-value"), std::logic_error);
         }
     }
     }
