@@ -226,6 +226,8 @@ public:
 
     void CheckValue(unsigned int flags, const char* arg, const Expect& expect)
     {
+    BOOST_TEST_CONTEXT("CheckValue("<<flags<<", \""<<(arg?arg:"(nullptr)")<<"\", _)") {
+
         TestArgsManager test;
         test.SetupArgs({{"-value", flags}});
         const char* argv[] = {"ignored", arg};
@@ -238,7 +240,9 @@ public:
             BOOST_CHECK_EQUAL(settings_list.size(), 0);
         } else {
             BOOST_CHECK_EQUAL(settings_list.size(), 1);
-            BOOST_CHECK_EQUAL(settings_list[0].write(), expect.setting.write());
+            if (settings_list.size() >= 1) {
+                BOOST_CHECK_EQUAL(settings_list[0].write(), expect.setting.write());
+            }
         }
 
         if (expect.error) {
@@ -281,6 +285,7 @@ public:
         } else {
             BOOST_CHECK(!success);
         }
+    }
     }
 };
 
