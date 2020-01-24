@@ -409,7 +409,7 @@ int64_t ArgsManager::GetArg(const std::string& strArg, int64_t nDefault) const
 
 bool ArgsManager::GetBoolArg(const std::string& strArg, bool fDefault) const
 {
-    bool coerce = !CheckArgFlags(strArg, /* require= */ 0, /* forbid= */ ALLOW_LIST, __func__);
+    bool coerce = !CheckArgFlags(strArg, /* require= */ ALLOW_BOOL, /* forbid= */ ALLOW_LIST, __func__);
     (void)coerce; // unused
     const util::SettingsValue value = GetSetting(strArg);
     return value.isNull() ? fDefault : value.isBool() ? value.get_bool() : InterpretBool(value.get_str());
