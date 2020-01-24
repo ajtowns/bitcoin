@@ -224,6 +224,14 @@ public:
         Expect& Error(const char* e) { error = e; return *this; }
     };
 
+    inline void CheckValues(const char* arg) { }
+    template<typename... Args>
+    inline void CheckValues(const char* arg, unsigned int flags, const Expect& expect, Args... args)
+    {
+        CheckValue(flags, arg, expect);
+        CheckValues(arg, args...);
+    }
+
     void CheckValue(unsigned int flags, const char* arg, const Expect& expect)
     {
     BOOST_TEST_CONTEXT("CheckValue("<<flags<<", \""<<(arg?arg:"(nullptr)")<<"\", _)") {
@@ -293,104 +301,135 @@ public:
 BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 {
     using M = ArgsManager;
+    CheckValues(nullptr,
+                M::ALLOW_ANY,                    Expect{{}}.DefaultString().DefaultInt().DefaultBool().List({}),
+                M::ALLOW_BOOL,                   Expect{{}}.DefaultBool(),
+                M::ALLOW_INT,                    Expect{{}}.DefaultInt().DefaultBool(),
+                M::ALLOW_STRING,                 Expect{{}}.DefaultString().DefaultBool(),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.DefaultInt().DefaultBool(),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{{}}.DefaultString().DefaultBool(),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.List({})
+               );
 
-    CheckValue(M::ALLOW_ANY, nullptr, Expect{{}}.DefaultString().DefaultInt().DefaultBool().List({}));
-    CheckValue(M::ALLOW_ANY, "-novalue", Expect{false}.String("0").Int(0).Bool(false).List({}));
-    CheckValue(M::ALLOW_ANY, "-novalue=", Expect{false}.String("0").Int(0).Bool(false).List({}));
-    CheckValue(M::ALLOW_ANY, "-novalue=0", Expect{true}.String("1").Int(1).Bool(true).List({"1"}));
-    CheckValue(M::ALLOW_ANY, "-novalue=1", Expect{false}.String("0").Int(0).Bool(false).List({}));
-    CheckValue(M::ALLOW_ANY, "-novalue=2", Expect{false}.String("0").Int(0).Bool(false).List({}));
-    CheckValue(M::ALLOW_ANY, "-novalue=abc", Expect{true}.String("1").Int(1).Bool(true).List({"1"}));
-    CheckValue(M::ALLOW_ANY, "-value", Expect{""}.String("").Int(0).Bool(true).List({""}));
-    CheckValue(M::ALLOW_ANY, "-value=", Expect{""}.String("").Int(0).Bool(true).List({""}));
-    CheckValue(M::ALLOW_ANY, "-value=0", Expect{"0"}.String("0").Int(0).Bool(false).List({"0"}));
-    CheckValue(M::ALLOW_ANY, "-value=1", Expect{"1"}.String("1").Int(1).Bool(true).List({"1"}));
-    CheckValue(M::ALLOW_ANY, "-value=2", Expect{"2"}.String("2").Int(2).Bool(true).List({"2"}));
-    CheckValue(M::ALLOW_ANY, "-value=abc", Expect{"abc"}.String("abc").Int(0).Bool(false).List({"abc"}));
+    CheckValues("-novalue",
+                M::ALLOW_ANY,                    Expect{false}.String("0").Int(0).Bool(false).List({}),
+                M::ALLOW_BOOL,                   Expect{false}.Bool(false),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{false}.Int(0).Bool(false),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{false}.String("0").Bool(false),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultBool());
-    CheckValue(M::ALLOW_BOOL, "-novalue", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
-    CheckValue(M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
-    CheckValue(M::ALLOW_BOOL, "-novalue=1", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
-    CheckValue(M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
-    CheckValue(M::ALLOW_BOOL, "-value", Expect{""}.Bool(true));
-    CheckValue(M::ALLOW_BOOL, "-value=", Expect{""}.Bool(true));
-    CheckValue(M::ALLOW_BOOL, "-value=0", Expect{"0"}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-value=1", Expect{"1"}.Bool(true));
-    CheckValue(M::ALLOW_BOOL, "-value=2", Expect{"2"}.Bool(true));
-    CheckValue(M::ALLOW_BOOL, "-value=abc", Expect{"abc"}.Bool(false));
+    CheckValues("-novalue=1",
+                M::ALLOW_ANY,                    Expect{false}.String("0").Int(0).Bool(false).List({}),
+                M::ALLOW_BOOL,                   Expect{false}.Bool(false),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{false}.Int(0).Bool(false),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{false}.String("0").Bool(false),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_INT, nullptr, Expect{{}}.DefaultInt().DefaultBool());
-    CheckValue(M::ALLOW_INT, "-novalue", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-novalue=", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-novalue=0", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-novalue=1", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-novalue=2", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-novalue=abc", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_INT, "-value", Expect{""}.Int(0).Bool(true));
-    CheckValue(M::ALLOW_INT, "-value=", Expect{""}.Int(0).Bool(true));
-    CheckValue(M::ALLOW_INT, "-value=0", Expect{"0"}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT, "-value=1", Expect{"1"}.Int(1).Bool(true));
-    CheckValue(M::ALLOW_INT, "-value=2", Expect{"2"}.Int(2).Bool(true));
-    CheckValue(M::ALLOW_INT, "-value=abc", Expect{"abc"}.Int(0).Bool(false));
+    CheckValues("-novalue=",
+                M::ALLOW_ANY,                    Expect{false}.String("0").Int(0).Bool(false).List({}),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Can not negate -value at the same time as setting value ''."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Can not negate -value at the same time as setting value ''."),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{{}}.Error("Can not negate -value at the same time as setting value ''."),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_STRING, nullptr, Expect{{}}.DefaultString().DefaultBool());
-    CheckValue(M::ALLOW_STRING, "-novalue", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-novalue=", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-novalue=0", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-novalue=1", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-novalue=2", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-novalue=abc", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING, "-value", Expect{""}.String("").Bool(true));
-    CheckValue(M::ALLOW_STRING, "-value=", Expect{""}.String("").Bool(true));
-    CheckValue(M::ALLOW_STRING, "-value=0", Expect{"0"}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING, "-value=1", Expect{"1"}.String("1").Bool(true));
-    CheckValue(M::ALLOW_STRING, "-value=2", Expect{"2"}.String("2").Bool(true));
-    CheckValue(M::ALLOW_STRING, "-value=abc", Expect{"abc"}.String("abc").Bool(false));
+    CheckValues("-novalue=0",
+                M::ALLOW_ANY,                    Expect{true}.String("1").Int(1).Bool(true).List({"1"}),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultInt().DefaultBool());
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=1", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value", Expect{""}.Int(0).Bool(true));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=", Expect{""}.Int(0).Bool(true));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=0", Expect{"0"}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=1", Expect{"1"}.Int(1).Bool(true));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=2", Expect{"2"}.Int(2).Bool(true));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=abc", Expect{"abc"}.Int(0).Bool(false));
+    CheckValues("-novalue=2",
+                M::ALLOW_ANY,                    Expect{false}.String("0").Int(0).Bool(false).List({}),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultString().DefaultBool());
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=1", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value", Expect{""}.String("").Bool(true));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=", Expect{""}.String("").Bool(true));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=0", Expect{"0"}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=1", Expect{"1"}.String("1").Bool(true));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=2", Expect{"2"}.String("2").Bool(true));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=abc", Expect{"abc"}.String("abc").Bool(false));
+    CheckValues("-novalue=abc",
+                M::ALLOW_ANY,                    Expect{true}.String("1").Int(1).Bool(true).List({"1"}),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden")
+               );
 
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, nullptr, Expect{{}}.List({}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=0", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=1", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=2", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-novalue=abc", Expect{{}}.Error("Negating of -value is meaningless and therefore forbidden"));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value", Expect{""}.List({""}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=", Expect{""}.List({""}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=0", Expect{"0"}.List({"0"}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=1", Expect{"1"}.List({"1"}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=2", Expect{"2"}.List({"2"}));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_LIST, "-value=abc", Expect{"abc"}.List({"abc"}));
+    CheckValues("-value",
+                M::ALLOW_ANY,                    Expect{""}.String("").Int(0).Bool(true).List({""}),
+                M::ALLOW_BOOL,                   Expect{""}.Bool(true),
+                M::ALLOW_INT,                    Expect{""}.Int(0).Bool(true),
+                M::ALLOW_STRING,                 Expect{""}.String("").Bool(true),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{""}.Int(0).Bool(true),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{""}.String("").Bool(true),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{""}.List({""})
+               );
+
+    CheckValues("-value=",
+                M::ALLOW_ANY,                    Expect{""}.String("").Int(0).Bool(true).List({""}),
+                M::ALLOW_BOOL,                   Expect{""}.Bool(true),
+                M::ALLOW_INT,                    Expect{""}.Int(0).Bool(true),
+                M::ALLOW_STRING,                 Expect{""}.String("").Bool(true),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{""}.Int(0).Bool(true),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{""}.String("").Bool(true),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{""}.List({""})
+               );
+
+    CheckValues("-value=0",
+                M::ALLOW_ANY,                    Expect{"0"}.String("0").Int(0).Bool(false).List({"0"}),
+                M::ALLOW_BOOL,                   Expect{"0"}.Bool(false),
+                M::ALLOW_INT,                    Expect{"0"}.Int(0).Bool(false),
+                M::ALLOW_STRING,                 Expect{"0"}.String("0").Bool(false),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"0"}.Int(0).Bool(false),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{"0"}.String("0").Bool(false),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{"0"}.List({"0"})
+               );
+
+    CheckValues("-value=1",
+                M::ALLOW_ANY,                    Expect{"1"}.String("1").Int(1).Bool(true).List({"1"}),
+                M::ALLOW_BOOL,                   Expect{"1"}.Bool(true),
+                M::ALLOW_INT,                    Expect{"1"}.Int(1).Bool(true),
+                M::ALLOW_STRING,                 Expect{"1"}.String("1").Bool(true),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"1"}.Int(1).Bool(true),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{"1"}.String("1").Bool(true),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{"1"}.List({"1"})
+               );
+
+    CheckValues("-value=2",
+                M::ALLOW_ANY,                    Expect{"2"}.String("2").Int(2).Bool(true).List({"2"}),
+                M::ALLOW_BOOL,                   Expect{"2"}.Bool(true),
+                M::ALLOW_INT,                    Expect{"2"}.Int(2).Bool(true),
+                M::ALLOW_STRING,                 Expect{"2"}.String("2").Bool(true),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"2"}.Int(2).Bool(true),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{"2"}.String("2").Bool(true),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{"2"}.List({"2"})
+               );
+
+    CheckValues("-value=abc",
+                M::ALLOW_ANY,                    Expect{"abc"}.String("abc").Int(0).Bool(false).List({"abc"}),
+                M::ALLOW_BOOL,                   Expect{"abc"}.Bool(false),
+                M::ALLOW_INT,                    Expect{"abc"}.Int(0).Bool(false),
+                M::ALLOW_STRING,                 Expect{"abc"}.String("abc").Bool(false),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"abc"}.Int(0).Bool(false),
+                M::ALLOW_STRING | M::ALLOW_BOOL, Expect{"abc"}.String("abc").Bool(false),
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{"abc"}.List({"abc"})
+               );
 }
 
 BOOST_FIXTURE_TEST_CASE(util_CheckBoolStringsNotSpecial, CheckValueTest)
