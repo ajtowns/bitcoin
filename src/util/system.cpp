@@ -213,7 +213,12 @@ static Optional<util::SettingsValue> InterpretValue(const std::string& key,
             error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
             return nullopt;
         }
-        // Double negatives like -nokey=0 are supported (but discouraged)
+        // In future we'll only allow non-confusing negation, -nokey or -nokey=1
+        if ((flags & ArgsManager::ALLOW_BOOL) && value && *value != "1") {
+            error = strprintf("Can not negate -%s at the same time as setting value '%s'.", key, *value);
+            return nullopt;
+        }
+        // Otherwise Double negatives like -nokey=0 are supported (but discouraged)
         if (value && !InterpretBool(*value)) {
             LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, *value);
             return util::SettingsValue{true};

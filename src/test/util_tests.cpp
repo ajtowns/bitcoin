@@ -310,11 +310,11 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 
     CheckValue(M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultBool());
     CheckValue(M::ALLOW_BOOL, "-novalue", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=0", Expect{true}.Bool(true));
+    CheckValue(M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
+    CheckValue(M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
     CheckValue(M::ALLOW_BOOL, "-novalue=1", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=2", Expect{false}.Bool(false));
-    CheckValue(M::ALLOW_BOOL, "-novalue=abc", Expect{true}.Bool(true));
+    CheckValue(M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
+    CheckValue(M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
     CheckValue(M::ALLOW_BOOL, "-value", Expect{""}.Bool(true));
     CheckValue(M::ALLOW_BOOL, "-value=", Expect{""}.Bool(true));
     CheckValue(M::ALLOW_BOOL, "-value=0", Expect{"0"}.Bool(false));
@@ -352,11 +352,11 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultInt().DefaultBool());
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=0", Expect{true}.Int(1).Bool(true));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=1", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=2", Expect{false}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=abc", Expect{true}.Int(1).Bool(true));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value", Expect{""}.Int(0).Bool(true));
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=", Expect{""}.Int(0).Bool(true));
     CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=0", Expect{"0"}.Int(0).Bool(false));
@@ -366,11 +366,11 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, nullptr, Expect{{}}.DefaultString().DefaultBool());
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=0", Expect{true}.String("1").Bool(true));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=", Expect{{}}.Error("Can not negate -value at the same time as setting value ''."));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=0", Expect{{}}.Error("Can not negate -value at the same time as setting value '0'."));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=1", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=2", Expect{false}.String("0").Bool(false));
-    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=abc", Expect{true}.String("1").Bool(true));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=2", Expect{{}}.Error("Can not negate -value at the same time as setting value '2'."));
+    CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-novalue=abc", Expect{{}}.Error("Can not negate -value at the same time as setting value 'abc'."));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value", Expect{""}.String("").Bool(true));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=", Expect{""}.String("").Bool(true));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=0", Expect{"0"}.String("0").Bool(false));
@@ -405,8 +405,8 @@ BOOST_FIXTURE_TEST_CASE(util_CheckBoolStringsNotSpecial, CheckValueTest)
     // atoi("true")==0), for now it is safer to just disallow strings like
     // "true" and "false" for ALLOW_BOOL arguments as long as there are still
     // other boolean arguments interpreted with ALLOW_ANY.
-    CheckValue(M::ALLOW_BOOL, "-novalue=true", Expect{true}.Bool(true));
-    CheckValue(M::ALLOW_BOOL, "-novalue=false", Expect{true}.Bool(true));
+    CheckValue(M::ALLOW_BOOL, "-novalue=true", Expect{{}}.Error("Can not negate -value at the same time as setting value 'true'."));
+    CheckValue(M::ALLOW_BOOL, "-novalue=false", Expect{{}}.Error("Can not negate -value at the same time as setting value 'false'."));
 
     // Similarly, check "true" and "false" are not treated specially when
     // ALLOW_BOOL is combined with ALLOW_INT and ALLOW_STRING. (The only
