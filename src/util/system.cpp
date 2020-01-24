@@ -225,7 +225,32 @@ static Optional<util::SettingsValue> InterpretValue(const std::string& key,
         }
         return util::SettingsValue{false};
     }
-    return util::SettingsValue{value ? *value : ""};
+
+    if (!value) {
+        if (flags & (ArgsManager::ALLOW_BOOL | ArgsManager::ALLOW_ANY)) {
+            return util::SettingsValue{""};
+        } else {
+            error = strprintf("Must specify a value for -%s", key);
+            return nullopt;
+        }
+    }
+
+    if (flags & ArgsManager::ALLOW_ANY) return util::SettingsValue{*value};
+    if (flags & ArgsManager::ALLOW_STRING) return util::SettingsValue{*value};
+
+    if (flags & ArgsManager::ALLOW_INT) {
+        int64_t parsed_int;
+        if (ParseInt64(*value, &parsed_int)) {
+            return util::SettingsValue(*value);
+        }
+    }
+
+    if ((flags & ArgsManager::ALLOW_BOOL) && (*value == "0" || *value == "1")) {
+        return util::SettingsValue(*value);
+    }
+
+    error = strprintf("Invalid setting -%s='%s'.", key, *value);
+    return nullopt;
 }
 
 ArgsManager::ArgsManager()

@@ -374,19 +374,19 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
     CheckValues("-value",
                 M::ALLOW_ANY,                    Expect{""}.String("").Int(0).Bool(true).List({""}),
                 M::ALLOW_BOOL,                   Expect{""}.Bool(true),
-                M::ALLOW_INT,                    Expect{""}.Int(0),
-                M::ALLOW_STRING,                 Expect{""}.String(""),
+                M::ALLOW_INT,                    Expect{{}}.Error("Must specify a value for -value"),
+                M::ALLOW_STRING,                 Expect{{}}.Error("Must specify a value for -value"),
                 M::ALLOW_INT | M::ALLOW_BOOL,    Expect{""}.Int(0).Bool(true),
                 M::ALLOW_STRING | M::ALLOW_BOOL, Expect{""}.String("").Bool(true),
-                M::ALLOW_STRING | M::ALLOW_LIST, Expect{""}.List({""})
+                M::ALLOW_STRING | M::ALLOW_LIST, Expect{{}}.Error("Must specify a value for -value")
                );
 
     CheckValues("-value=",
                 M::ALLOW_ANY,                    Expect{""}.String("").Int(0).Bool(true).List({""}),
-                M::ALLOW_BOOL,                   Expect{""}.Bool(true),
-                M::ALLOW_INT,                    Expect{""}.Int(0),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Invalid setting -value=''."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Invalid setting -value=''."),
                 M::ALLOW_STRING,                 Expect{""}.String(""),
-                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{""}.Int(0).Bool(true),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Invalid setting -value=''."),
                 M::ALLOW_STRING | M::ALLOW_BOOL, Expect{""}.String("").Bool(true),
                 M::ALLOW_STRING | M::ALLOW_LIST, Expect{""}.List({""})
                );
@@ -413,7 +413,7 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 
     CheckValues("-value=2",
                 M::ALLOW_ANY,                    Expect{"2"}.String("2").Int(2).Bool(true).List({"2"}),
-                M::ALLOW_BOOL,                   Expect{"2"}.Bool(true),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Invalid setting -value='2'."),
                 M::ALLOW_INT,                    Expect{"2"}.Int(2),
                 M::ALLOW_STRING,                 Expect{"2"}.String("2"),
                 M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"2"}.Int(2).Bool(true),
@@ -423,10 +423,10 @@ BOOST_FIXTURE_TEST_CASE(util_CheckValue, CheckValueTest)
 
     CheckValues("-value=abc",
                 M::ALLOW_ANY,                    Expect{"abc"}.String("abc").Int(0).Bool(false).List({"abc"}),
-                M::ALLOW_BOOL,                   Expect{"abc"}.Bool(false),
-                M::ALLOW_INT,                    Expect{"abc"}.Int(0),
+                M::ALLOW_BOOL,                   Expect{{}}.Error("Invalid setting -value='abc'."),
+                M::ALLOW_INT,                    Expect{{}}.Error("Invalid setting -value='abc'."),
                 M::ALLOW_STRING,                 Expect{"abc"}.String("abc"),
-                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{"abc"}.Int(0).Bool(false),
+                M::ALLOW_INT | M::ALLOW_BOOL,    Expect{{}}.Error("Invalid setting -value='abc'."),
                 M::ALLOW_STRING | M::ALLOW_BOOL, Expect{"abc"}.String("abc").Bool(false),
                 M::ALLOW_STRING | M::ALLOW_LIST, Expect{"abc"}.List({"abc"})
                );
@@ -454,8 +454,8 @@ BOOST_FIXTURE_TEST_CASE(util_CheckBoolStringsNotSpecial, CheckValueTest)
     // values. This is useful for arguments like "-upgradewallet" or "-listen"
     // that primarily toggle features on and off, but also accept optional int
     // or string values to influence behavior.)
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=true", Expect{"true"}.Int(0).Bool(false));
-    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=false", Expect{"false"}.Int(0).Bool(false));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=true", Expect{{}}.Error("Invalid setting -value='true'."));
+    CheckValue(M::ALLOW_INT | M::ALLOW_BOOL, "-value=false", Expect{{}}.Error("Invalid setting -value='false'."));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=true", Expect{"true"}.String("true").Bool(false));
     CheckValue(M::ALLOW_STRING | M::ALLOW_BOOL, "-value=false", Expect{"false"}.String("false").Bool(false));
 }
