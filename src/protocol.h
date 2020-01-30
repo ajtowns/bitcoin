@@ -234,6 +234,12 @@ extern const char *GETBLOCKTXN;
  * @since protocol version 70014 as described by BIP 152
  */
 extern const char *BLOCKTXN;
+/**
+ * Indicates that a node prefers to relay transactions via wtxid, rather than
+ * txid.
+ * @since protocol version 70016 as described by BIP XXX.
+ */
+extern const char *WTXIDRELAY;
 };
 
 /* Get a vector of all valid message types (see above) */

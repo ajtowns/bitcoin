@@ -2030,6 +2030,10 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
         if (pfrom->fInbound)
             PushNodeVersion(pfrom, connman, GetAdjustedTime());
 
+        if (nVersion >= WTXID_RELAY_VERSION) {
+            connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::WTXIDRELAY));
+        }
+
         connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERACK));
 
         pfrom->nServices = nServices;
@@ -2165,7 +2169,20 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
             nCMPCTBLOCKVersion = 1;
             connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
         }
+
         pfrom->fSuccessfullyConnected = true;
+        return true;
+    }
+
+    // Feature negotiation of wtxidrelay should happen between VERSION and
+    // VERACK, to avoid relay problems from switching after a connection is up
+    if (strCommand == NetMsgType::WTXIDRELAY) {
+        if (pfrom->nVersion >= WTXID_RELAY_VERSION) {
+            LOCK(cs_main);
+            if (!State(pfrom->GetId())->m_wtxid_relay) {
+                State(pfrom->GetId())->m_wtxid_relay = true;
+            }
+        }
         return true;
     }
 
