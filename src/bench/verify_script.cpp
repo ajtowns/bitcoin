@@ -71,27 +71,47 @@ static void VerifyScriptBench(benchmark::State& state)
     }
 }
 
-static void VerifyNestedIfScript(benchmark::State& state) {
+template<int N,int X=100>
+static inline void VerifyNestedIfScriptN(benchmark::State& state) {
     std::vector<std::vector<unsigned char>> stack;
+    static_assert(N <= X, "can't have more than 201 ops, so 100 IF and 100 ENDIF");
+    static_assert(3*X+1000 < 10000, "script is too large");
     CScript script;
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < N; ++i) {
         script << OP_1 << OP_IF;
+    }
+    for (int i = N; i < X; ++i) {
+        script << OP_1 << OP_DROP;
     }
     for (int i = 0; i < 1000; ++i) {
         script << OP_1;
     }
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < N; ++i) {
         script << OP_ENDIF;
     }
+    for (int i = N; i < X; ++i) {
+        script << OP_NOP;
+    }
+    assert(script.size() < 10000);
     while (state.KeepRunning()) {
         auto stack_copy = stack;
         ScriptError error;
-        bool ret = EvalScript(stack_copy, script, 0, BaseSignatureChecker(), SigVersion::BASE, &error);
+        bool ret = EvalScript(stack_copy, script, (1U<<17), BaseSignatureChecker(), SigVersion::BASE, &error);
         assert(ret);
     }
 }
-
+static void VerifyNestedIfScript(benchmark::State& state) {
+    return VerifyNestedIfScriptN<100>(state);
+}
+static void VerifyNestedIfScript50(benchmark::State& state) {
+    return VerifyNestedIfScriptN<50>(state);
+}
+static void VerifyNestedIfScript400(benchmark::State& state) {
+    return VerifyNestedIfScriptN<400,400>(state);
+}
 
 BENCHMARK(VerifyScriptBench, 6300);
 
 BENCHMARK(VerifyNestedIfScript, 100);
+BENCHMARK(VerifyNestedIfScript50, 100);
+BENCHMARK(VerifyNestedIfScript400, 100);
