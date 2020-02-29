@@ -171,16 +171,25 @@ BOOST_AUTO_TEST_CASE(mockforward)
     size_t num_tasks = scheduler.getQueueInfo(first, last);
     BOOST_CHECK_EQUAL(num_tasks, 3ul);
 
-    const boost::chrono::system_clock::time_point::duration min = boost::chrono::seconds(60);
+    BOOST_TEST_PASSPOINT();
 
     std::thread scheduler_thread([&]() { scheduler.serviceQueue(); });
+
+    BOOST_TEST_PASSPOINT();
 
     // bump the scheduler forward 5 minutes
     scheduler.MockForward(boost::chrono::seconds(5*60));
 
+    BOOST_TEST_PASSPOINT();
+
     // ensure scheduler has chance to process all tasks queued for before 1 ms from now.
     scheduler.scheduleFromNow([&scheduler]{ scheduler.stop(false); }, 1);
+
+    BOOST_TEST_PASSPOINT();
+
     scheduler_thread.join();
+
+    BOOST_TEST_PASSPOINT();
 
     // check that the queue only has one job remaining
     num_tasks = scheduler.getQueueInfo(first, last);
