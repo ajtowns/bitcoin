@@ -2,6 +2,20 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+
+#include <pthread.h>
+#include <errno.h>
+inline int my_pthread_cond_timedwait(pthread_cond_t *cond,
+       pthread_mutex_t *mutex,
+       const struct timespec *abstime)
+{
+    if (abstime->tv_sec < 0) return EISDIR;
+    if (abstime->tv_nsec < 0) return ENOTDIR;
+    if (abstime->tv_nsec >= 1000000000) return ENOTBLK;
+    return pthread_cond_timedwait(cond,mutex,abstime);
+}
+#define pthread_cond_timedwait(c,m,t) my_pthread_cond_timedwait(c,m,t)
+
 #include <scheduler.h>
 
 #include <random.h>
