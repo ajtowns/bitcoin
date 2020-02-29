@@ -171,6 +171,8 @@ BOOST_AUTO_TEST_CASE(mockforward)
     size_t num_tasks = scheduler.getQueueInfo(first, last);
     BOOST_CHECK_EQUAL(num_tasks, 3ul);
 
+    const boost::chrono::system_clock::time_point::duration min = boost::chrono::seconds(60);
+
     std::thread scheduler_thread([&]() { scheduler.serviceQueue(); });
 
     // bump the scheduler forward 5 minutes

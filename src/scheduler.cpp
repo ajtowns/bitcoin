@@ -9,9 +9,11 @@ inline int my_pthread_cond_timedwait(pthread_cond_t *cond,
        pthread_mutex_t *mutex,
        const struct timespec *abstime)
 {
-    if (abstime->tv_sec < 0) return EISDIR;
-    if (abstime->tv_nsec < 0) return ENOTDIR;
-    if (abstime->tv_nsec >= 1000000000) return ENOTBLK;
+    if (abstime->tv_nsec < 0) {
+        if (abstime->tv_sec < 0) return EISDIR;
+        else return ENOTDIR;
+    }
+    if (abstime->tv_nsec >= 1000000000l) return ENOTBLK;
     return pthread_cond_timedwait(cond,mutex,abstime);
 }
 #define pthread_cond_timedwait(c,m,t) my_pthread_cond_timedwait(c,m,t)
@@ -66,6 +68,7 @@ void CScheduler::serviceQueue()
 
 // wait_until needs boost 1.50 or later; older versions have timed_wait:
 #if BOOST_VERSION < 105000
+static_assert(false, "do not want");
             while (!shouldStop() && !taskQueue.empty() &&
                    newTaskScheduled.timed_wait(lock, toPosixTime(taskQueue.begin()->first))) {
                 // Keep waiting until timeout
@@ -75,6 +78,7 @@ void CScheduler::serviceQueue()
             // Explicitly use a template here to avoid hitting that overload.
             while (!shouldStop() && !taskQueue.empty()) {
                 boost::chrono::system_clock::time_point timeToWaitFor = taskQueue.begin()->first;
+                if (timeToWaitFor.time_since_epoch().count() <= 0) timeToWaitFor = boost::chrono::system_clock::now() + boost::chrono::hours(20);
                 if (newTaskScheduled.wait_until<>(lock, timeToWaitFor) == boost::cv_status::timeout)
                     break; // Exit loop after timeout, it means we reached the time of the event
             }
@@ -116,6 +120,7 @@ void CScheduler::stop(bool drain)
 
 void CScheduler::schedule(CScheduler::Function f, boost::chrono::system_clock::time_point t)
 {
+    assert(t.time_since_epoch() > boost::chrono::hours(100));
     {
         boost::unique_lock<boost::mutex> lock(newTaskMutex);
         taskQueue.insert(std::make_pair(t, f));
