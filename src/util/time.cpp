@@ -56,18 +56,18 @@ int64_t GetMockTime()
 
 int64_t GetTimeMillis()
 {
-    int64_t now = (boost::posix_time::microsec_clock::universal_time() -
-                   boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_milliseconds();
-    assert(now > 0);
-    return now;
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    assert(now.count() > 0);
+    return now.count();
 }
 
 int64_t GetTimeMicros()
 {
-    int64_t now = (boost::posix_time::microsec_clock::universal_time() -
-                   boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_microseconds();
-    assert(now > 0);
-    return now;
+    auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    assert(now.count() > 0);
+    return now.count();
 }
 
 int64_t GetSystemTimeInSeconds()
