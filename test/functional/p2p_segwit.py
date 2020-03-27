@@ -146,6 +146,7 @@ class TestP2PConn(P2PInterface):
     def __init__(self):
         super().__init__()
         self.getdataset = set()
+        self.last_wtxidrelay = []
 
     # Avoid sending out msg_getdata in the mininode thread as a reply to invs.
     # They are not needed and would only lead to races because we send msg_getdata out in the test thread
@@ -156,10 +157,19 @@ class TestP2PConn(P2PInterface):
         for inv in message.inv:
             self.getdataset.add(inv.hash)
 
-    def announce_tx_and_wait_for_getdata(self, tx, timeout=60, success=True):
+    def on_wtxidrelay(self, message):
+        self.last_wtxidrelay.append(message)
+
+    def announce_tx_and_wait_for_getdata(self, tx, timeout=60, success=True, wtxid=False):
         with mininode_lock:
             self.last_message.pop("getdata", None)
-        self.send_message(msg_inv(inv=[CInv(1, tx.sha256)]))
+
+        if wtxid:
+            wtxid = tx.calc_sha256(True)
+            self.send_message(msg_inv(inv=[CInv(5, wtxid)]))
+        else:
+            self.send_message(msg_inv(inv=[CInv(1, tx.sha256)]))
+
         if success:
             self.wait_for_getdata(timeout)
         else:
@@ -277,6 +287,7 @@ class SegWitTest(BitcoinTestFramework):
         self.test_upgrade_after_activation()
         self.test_witness_sigops()
         self.test_superfluous_witness()
+        self.test_wtxid_relay()
 
     # Individual tests
 
@@ -2017,6 +2028,10 @@ class SegWitTest(BitcoinTestFramework):
 
         # TODO: test p2sh sigop counting
 
+        # Cleanup and prep for next test
+        self.utxo.pop(0)
+        self.utxo.append(UTXO(tx2.sha256, 0, tx2.vout[0].nValue))
+
     def test_superfluous_witness(self):
         # Serialization of tx that puts witness flag to 3 always
         def serialize_with_bogus_witness(tx):
@@ -2059,6 +2074,40 @@ class SegWitTest(BitcoinTestFramework):
         assert_raises_rpc_error(-22, "TX decode failed", self.nodes[0].decoderawtransaction, serialize_with_bogus_witness(tx).hex())
         with self.nodes[0].assert_debug_log(['Unknown transaction optional data']):
             self.nodes[0].p2p.send_and_ping(msg_bogus_tx(tx))
+
+    @subtest
+    def test_wtxid_relay(self):
+        # Check wtxidrelay feature nogotiation message through connecting a new peer
+        self.wtx_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK | NODE_WITNESS)
+
+        def received_wtxidrelay():
+            return (len(self.wtx_node.last_wtxidrelay) > 0)
+        wait_until(received_wtxidrelay, timeout=60, lock=mininode_lock)
+
+        # Create a a Segwit output from the latest UTXO
+        # and announce it to the network
+        witness_program = CScript([OP_TRUE])
+        witness_hash = sha256(witness_program)
+        script_pubkey = CScript([OP_0, witness_hash])
+
+        tx = CTransaction()
+        tx.vin.append(CTxIn(COutPoint(self.utxo[0].sha256, self.utxo[0].n), b""))
+        tx.vout.append(CTxOut(self.utxo[0].nValue - 1000, script_pubkey))
+        tx.rehash()
+
+        test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
+
+        # Create a Segwit transaction
+        tx2 = CTransaction()
+        tx2.vin.append(CTxIn(COutPoint(tx.sha256, 0), b""))
+        tx2.vout.append(CTxOut(tx.vout[0].nValue - 1000, script_pubkey))
+        tx2.wit.vtxinwit.append(CTxInWitness())
+        tx2.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
+        tx.rehash()
+
+        # Announce Segwit transaction with wtxid
+        # and wait for getdata
+        self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=True)
 
 
 if __name__ == '__main__':
