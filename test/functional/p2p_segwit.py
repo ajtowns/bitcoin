@@ -165,6 +165,7 @@ class TestP2PConn(P2PInterface):
         self.nServices = message.nServices
 
     def on_getdata(self, message):
+        self.lastgetdata = message.inv
         for inv in message.inv:
             self.getdataset.add(inv.hash)
 
@@ -2103,20 +2104,47 @@ class SegWitTest(BitcoinTestFramework):
         tx.vout.append(CTxOut(self.utxo[0].nValue - 1000, script_pubkey))
         tx.rehash()
 
-        test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
-
         # Create a Segwit transaction
         tx2 = CTransaction()
         tx2.vin.append(CTxIn(COutPoint(tx.sha256, 0), b""))
         tx2.vout.append(CTxOut(tx.vout[0].nValue - 1000, script_pubkey))
         tx2.wit.vtxinwit.append(CTxInWitness())
         tx2.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
-        tx.rehash()
+        tx2.rehash()
+
+        self.test_node.sync_with_ping()
 
         # Announce Segwit transaction with wtxid
         # and wait for getdata
         self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=True)
+        with mininode_lock:
+            lgd = self.test_node.lastgetdata[:]
+        # XXX: should be 5, not 1|MSG_WITNESS_FLAG
+        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx2.calc_sha256(True))])
 
+        # Announce Segwit transaction without wtxid
+        # and wait for getdata
+        self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=False)
+        with mininode_lock:
+            lgd = self.test_node.lastgetdata[:]
+        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx2.sha256)])
+
+        # Send tx2 through; it's an orphan so won't be accepted
+        with mininode_lock:
+            self.test_node.last_message.pop("getdata", None)
+        test_transaction_acceptance(self.nodes[0], self.test_node, tx2, with_witness=True, accepted=False)
+
+        # Expect a request for tx
+        self.test_node.wait_for_getdata(60)
+        with mininode_lock:
+            lgd = self.test_node.lastgetdata[:]
+        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx.sha256)])
+
+        # Send tx through
+        test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
+
+        # Check tx2 is there now
+        assert_equal(tx2.hash in self.nodes[0].getrawmempool(), True)
 
 if __name__ == '__main__':
     SegWitTest().main()
