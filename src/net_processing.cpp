@@ -74,6 +74,8 @@ static constexpr std::chrono::microseconds INBOUND_PEER_TX_DELAY{std::chrono::se
 static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seconds{60}};
 /** Maximum delay (in microseconds) for transaction requests to avoid biasing some peers over others. */
 static constexpr std::chrono::microseconds MAX_GETDATA_RANDOM_DELAY{std::chrono::seconds{2}};
+/** Delay between receiving a NOTFOUND and trying the next peer. */
+static constexpr std::chrono::microseconds MAX_NOTFOUND_RETRY_RANDOM_DELAY{std::chrono::seconds{2}};
 /** How long to wait (in microseconds) before expiring an in-flight getdata request to a peer */
 static constexpr std::chrono::microseconds TX_EXPIRY_INTERVAL{GETDATA_TX_INTERVAL * 10};
 static_assert(INBOUND_PEER_TX_DELAY >= MAX_GETDATA_RANDOM_DELAY,
@@ -345,8 +347,10 @@ struct CNodeState {
          */
         std::multimap<std::chrono::microseconds, uint256> m_tx_process_time;
 
-        //! Store all the transactions a peer has recently announced
-        std::set<uint256> m_tx_announced;
+        /* Store all the transactions a peer has recently announced,
+         * along with their process time
+         */
+        std::map<uint256, std::chrono::microseconds> m_tx_announced;
 
         //! Store transactions which were requested by us, with timestamp
         std::map<uint256, std::chrono::microseconds> m_tx_in_flight;
@@ -382,10 +386,12 @@ struct CNodeState {
         void EraseTx(const uint256& txid);
 
         //! Called when this peer returned NOTFOUND for this tx
-        void EraseTxIfInFlight(const uint256& txid);
+        bool EraseTxIfInFlight(const uint256& txid);
 
         //! Called regularly to ensure a backlog of inflight txs doesn't stall a node permanently
         void ExpireOldInFlightTx(std::chrono::microseconds current_time, CNode* pto);
+        bool GetBetterTimeForTx(const uint256& txid, std::chrono::microseconds* best_time);
+        void ShortenProcessTime(const uint256& txid, std::chrono::microseconds new_time, std::chrono::microseconds old_time);
     };
 
     TxDownloadState m_tx_download;
@@ -765,6 +771,24 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     return process_time;
 }
 
+static void RetryProcessTx(CConnman& connman, const uint256& txid, const std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    CNodeState::TxDownloadState* best_dlstate = nullptr;
+    std::chrono::microseconds best_process_time = std::chrono::microseconds::max();
+
+    for (auto& el : mapNodeState) {
+         CNodeState::TxDownloadState* dlstate = &el.second.m_tx_download;
+         if (dlstate->GetBetterTimeForTx(txid, &best_process_time)) {
+             best_dlstate = dlstate;
+         }
+    }
+
+    if (best_dlstate == nullptr) return;
+    std::chrono::microseconds new_process_time = current_time + GetRandMicros(MAX_NOTFOUND_RETRY_RANDOM_DELAY);
+    best_dlstate->ShortenProcessTime(txid, new_process_time, best_process_time);
+    UpdateTxRequestTime(txid, new_process_time - GETDATA_TX_INTERVAL);
+}
+
 bool CNodeState::TxDownloadState::AddTx(const uint256& txid, std::chrono::microseconds process_time)
 {
     if (m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
@@ -774,7 +798,7 @@ bool CNodeState::TxDownloadState::AddTx(const uint256& txid, std::chrono::micros
         // this announcement
         return false;
     }
-    m_tx_announced.insert(txid);
+    m_tx_announced.emplace(txid, process_time);
     m_tx_process_time.emplace(process_time, txid);
     return true;
 }
@@ -801,6 +825,7 @@ void CNodeState::TxDownloadState::MarkInFlight(const uint256& txid, std::chrono:
 void CNodeState::TxDownloadState::ReplaceTx(const uint256& txid, std::chrono::microseconds next_process_time)
 {
     m_tx_process_time.emplace(next_process_time, txid);
+    m_tx_announced[txid] = next_process_time;
 }
 
 void CNodeState::TxDownloadState::EraseTx(const uint256& txid)
@@ -809,7 +834,7 @@ void CNodeState::TxDownloadState::EraseTx(const uint256& txid)
     m_tx_in_flight.erase(txid);
 }
 
-void CNodeState::TxDownloadState::EraseTxIfInFlight(const uint256& txid)
+bool CNodeState::TxDownloadState::EraseTxIfInFlight(const uint256& txid)
 {
     // If we receive a NOTFOUND message for a txid we requested, erase
     // it from our data structures for this peer.
@@ -817,10 +842,11 @@ void CNodeState::TxDownloadState::EraseTxIfInFlight(const uint256& txid)
     if (in_flight_it == m_tx_in_flight.end()) {
         // Skip any further work if this is a spurious NOTFOUND
         // message.
-        return;
+        return false;
     }
     m_tx_in_flight.erase(in_flight_it);
     m_tx_announced.erase(txid);
+    return true;
 }
 
 void CNodeState::TxDownloadState::ExpireOldInFlightTx(std::chrono::microseconds current_time, CNode* pto)
@@ -838,6 +864,35 @@ void CNodeState::TxDownloadState::ExpireOldInFlightTx(std::chrono::microseconds 
             m_tx_in_flight.erase(it++);
         } else {
             ++it;
+        }
+    }
+}
+
+bool CNodeState::TxDownloadState::GetBetterTimeForTx(const uint256& txid, std::chrono::microseconds* best_time)
+{
+    if (m_tx_in_flight.size() >= MAX_PEER_TX_IN_FLIGHT) return false; // can't download more
+
+    auto it = m_tx_announced.find(txid);
+    if (it == m_tx_announced.end()) return false; // not advertised by this peer
+
+    if (it->second >= *best_time) return false; // not better
+
+    *best_time = it->second;
+    return true;
+}
+
+
+void CNodeState::TxDownloadState::ShortenProcessTime(const uint256& txid, std::chrono::microseconds new_time, std::chrono::microseconds old_time)
+{
+    if (new_time >= old_time) return; // no point
+
+    auto end = m_tx_process_time.end();
+    for (auto it = m_tx_process_time.lower_bound(old_time); it != end && it->first == old_time; ++it) {
+        if (it->second == txid) {
+            m_tx_process_time.erase(it);
+            m_tx_announced[txid] = new_time;
+            m_tx_process_time.emplace(new_time, txid);
+            break;
         }
     }
 }
@@ -3325,10 +3380,12 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
         std::vector<CInv> vInv;
         vRecv >> vInv;
         if (vInv.size() <= MAX_PEER_TX_IN_FLIGHT + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            const auto current_time = GetTime<std::chrono::microseconds>();
             for (CInv &inv : vInv) {
                 if (inv.type == MSG_TX || inv.type == MSG_WITNESS_TX) {
-
-                    state->m_tx_download.EraseTxIfInFlight(inv.hash);
+                    if (state->m_tx_download.EraseTxIfInFlight(inv.hash)) {
+                        RetryProcessTx(*connman, inv.hash, current_time);
+                    }
                 }
             }
         }
