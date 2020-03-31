@@ -771,8 +771,13 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     return process_time;
 }
 
+static uint64_t xxx_time_spent GUARDED_BY(cs_main) = 0;
+static uint64_t xxx_invocations GUARDED_BY(cs_main) = 0;
+
 static void RetryProcessTx(CConnman& connman, const uint256& txid, const std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
+    uint64_t time_start = GetTimeMicros();
+
     CNodeState::TxDownloadState* best_dlstate = nullptr;
     std::chrono::microseconds best_process_time = std::chrono::microseconds::max();
 
@@ -783,10 +788,17 @@ static void RetryProcessTx(CConnman& connman, const uint256& txid, const std::ch
          }
     }
 
-    if (best_dlstate == nullptr) return;
-    std::chrono::microseconds new_process_time = current_time + GetRandMicros(MAX_NOTFOUND_RETRY_RANDOM_DELAY);
-    best_dlstate->ShortenProcessTime(txid, new_process_time, best_process_time);
-    UpdateTxRequestTime(txid, new_process_time - GETDATA_TX_INTERVAL);
+    if (best_dlstate != nullptr) {
+        std::chrono::microseconds new_process_time = current_time + GetRandMicros(MAX_NOTFOUND_RETRY_RANDOM_DELAY);
+        best_dlstate->ShortenProcessTime(txid, new_process_time, best_process_time);
+        UpdateTxRequestTime(txid, new_process_time - GETDATA_TX_INTERVAL);
+    }
+
+    xxx_time_spent += GetTimeMicros() - time_start;
+    ++xxx_invocations;
+    if (xxx_invocations % 1000 == 0) {
+        LogPrintf("Time spent in RetryProcessTx %d.%03ds, %d us per call (%d calls)\n", xxx_time_spent / 1000000, (xxx_time_spent / 1000) % 1000, xxx_time_spent/xxx_invocations, xxx_invocations);
+    }
 }
 
 bool CNodeState::TxDownloadState::AddTx(const uint256& txid, std::chrono::microseconds process_time)
