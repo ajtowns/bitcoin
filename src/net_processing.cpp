@@ -337,7 +337,9 @@ struct CNodeState {
      *   the reject filter, then we will eventually redownload from other
      *   peers.
      */
-    struct TxDownloadState {
+    class TxDownloadState {
+
+    private:
         /* Track when to attempt download of announced transactions (process
          * time in micros -> txid)
          */
@@ -351,6 +353,39 @@ struct CNodeState {
 
         //! Periodically check for stuck getdata requests
         std::chrono::microseconds m_check_expiry_timer{0};
+
+        /* Invariants:
+         *   - m_tx_announced isn't too big
+         *   - every tx in m_tx_announced is in m_tx_process_time or m_tx_in_flight
+         *   - entries are cleared out from m_tx_process_time as current_time
+         *     advances
+         *   - entries are cleared out from m_tx_in_flight when the peer responds
+         *     to the request or after an expiry time
+         */
+
+    public:
+        TxDownloadState() { }
+
+        //! Called when INV received, with the time the tx should be processed
+        bool AddTx(const uint256& txid, std::chrono::microseconds process_time);
+
+        //! Returns true and fills in txid if a tx is ready to request
+        bool GetTx(uint256& txid, std::chrono::microseconds current_time);
+
+        //! Called when tx returned by GetTx is currently unsuitable and should be retried later
+        void ReplaceTx(const uint256& txid, std::chrono::microseconds next_process_time);
+
+        //! Called when tx returned by GetTx is to be requested
+        void MarkInFlight(const uint256& txid, std::chrono::microseconds current_time);
+
+        //! Called to stop tracking a tx after it has been received
+        void EraseTx(const uint256& txid);
+
+        //! Called when this peer returned NOTFOUND for this tx
+        void EraseTxIfInFlight(const uint256& txid);
+
+        //! Called regularly to ensure a backlog of inflight txs doesn't stall a node permanently
+        void ExpireOldInFlightTx(std::chrono::microseconds current_time, CNode* pto);
     };
 
     TxDownloadState m_tx_download;
@@ -730,23 +765,90 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     return process_time;
 }
 
-void RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+bool CNodeState::TxDownloadState::AddTx(const uint256& txid, std::chrono::microseconds process_time)
 {
-    CNodeState::TxDownloadState& peer_download_state = state->m_tx_download;
-    if (peer_download_state.m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
-            peer_download_state.m_tx_process_time.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
-            peer_download_state.m_tx_announced.count(txid)) {
+    if (m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
+            m_tx_process_time.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
+            m_tx_announced.count(txid)) {
         // Too many queued announcements from this peer, or we already have
         // this announcement
+        return false;
+    }
+    m_tx_announced.insert(txid);
+    m_tx_process_time.emplace(process_time, txid);
+    return true;
+}
+
+bool CNodeState::TxDownloadState::GetTx(uint256& txid, std::chrono::microseconds current_time)
+{
+    if (m_tx_process_time.empty()) return false;
+    if (m_tx_process_time.begin()->first > current_time) return false;
+    if (m_tx_in_flight.size() >= MAX_PEER_TX_IN_FLIGHT) return false;
+
+    txid = m_tx_process_time.begin()->second;
+
+    // Erase this entry from tx_process_time (it may be added back for
+    // processing at a later time)
+    m_tx_process_time.erase(m_tx_process_time.begin());
+    return true;
+}
+
+void CNodeState::TxDownloadState::MarkInFlight(const uint256& txid, std::chrono::microseconds current_time)
+{
+    m_tx_in_flight.emplace(txid, current_time);
+}
+
+void CNodeState::TxDownloadState::ReplaceTx(const uint256& txid, std::chrono::microseconds next_process_time)
+{
+    m_tx_process_time.emplace(next_process_time, txid);
+}
+
+void CNodeState::TxDownloadState::EraseTx(const uint256& txid)
+{
+    m_tx_announced.erase(txid);
+    m_tx_in_flight.erase(txid);
+}
+
+void CNodeState::TxDownloadState::EraseTxIfInFlight(const uint256& txid)
+{
+    // If we receive a NOTFOUND message for a txid we requested, erase
+    // it from our data structures for this peer.
+    auto in_flight_it = m_tx_in_flight.find(txid);
+    if (in_flight_it == m_tx_in_flight.end()) {
+        // Skip any further work if this is a spurious NOTFOUND
+        // message.
         return;
     }
-    peer_download_state.m_tx_announced.insert(txid);
+    m_tx_in_flight.erase(in_flight_it);
+    m_tx_announced.erase(txid);
+}
 
+void CNodeState::TxDownloadState::ExpireOldInFlightTx(std::chrono::microseconds current_time, CNode* pto)
+{
+    if (m_check_expiry_timer > current_time) return;
+
+    // On average, we do this check every TX_EXPIRY_INTERVAL. Randomize
+    // so that we're not doing this for all peers at the same time.
+    m_check_expiry_timer = current_time + TX_EXPIRY_INTERVAL / 2 + GetRandMicros(TX_EXPIRY_INTERVAL);
+
+    for (auto it=m_tx_in_flight.begin(); it != m_tx_in_flight.end();) {
+        if (it->second <= current_time - TX_EXPIRY_INTERVAL) {
+            LogPrint(BCLog::NET, "timeout of inflight tx %s from peer=%d\n", it->first.ToString(), pto->GetId());
+            m_tx_announced.erase(it->first);
+            m_tx_in_flight.erase(it++);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
     // Calculate the time to try requesting this transaction. Use
     // fPreferredDownload as a proxy for outbound peers.
     const auto process_time = CalculateTxGetDataTime(txid, current_time, !state->fPreferredDownload);
 
-    peer_download_state.m_tx_process_time.emplace(process_time, txid);
+    state->m_tx_download.AddTx(txid, process_time);
 }
 
 } // namespace
@@ -2525,8 +2627,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
         TxValidationState state;
 
         CNodeState* nodestate = State(pfrom->GetId());
-        nodestate->m_tx_download.m_tx_announced.erase(inv.hash);
-        nodestate->m_tx_download.m_tx_in_flight.erase(inv.hash);
+        nodestate->m_tx_download.EraseTx(inv.hash);
         EraseTxRequest(inv.hash);
 
         std::list<CTransactionRef> lRemovedTxn;
@@ -3226,16 +3327,8 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
         if (vInv.size() <= MAX_PEER_TX_IN_FLIGHT + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             for (CInv &inv : vInv) {
                 if (inv.type == MSG_TX || inv.type == MSG_WITNESS_TX) {
-                    // If we receive a NOTFOUND message for a txid we requested, erase
-                    // it from our data structures for this peer.
-                    auto in_flight_it = state->m_tx_download.m_tx_in_flight.find(inv.hash);
-                    if (in_flight_it == state->m_tx_download.m_tx_in_flight.end()) {
-                        // Skip any further work if this is a spurious NOTFOUND
-                        // message.
-                        continue;
-                    }
-                    state->m_tx_download.m_tx_in_flight.erase(in_flight_it);
-                    state->m_tx_download.m_tx_announced.erase(inv.hash);
+
+                    state->m_tx_download.EraseTxIfInFlight(inv.hash);
                 }
             }
         }
@@ -4020,27 +4113,10 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         // were unresponsive in the past.
         // Eventually we should consider disconnecting peers, but this is
         // conservative.
-        if (state.m_tx_download.m_check_expiry_timer <= current_time) {
-            for (auto it=state.m_tx_download.m_tx_in_flight.begin(); it != state.m_tx_download.m_tx_in_flight.end();) {
-                if (it->second <= current_time - TX_EXPIRY_INTERVAL) {
-                    LogPrint(BCLog::NET, "timeout of inflight tx %s from peer=%d\n", it->first.ToString(), pto->GetId());
-                    state.m_tx_download.m_tx_announced.erase(it->first);
-                    state.m_tx_download.m_tx_in_flight.erase(it++);
-                } else {
-                    ++it;
-                }
-            }
-            // On average, we do this check every TX_EXPIRY_INTERVAL. Randomize
-            // so that we're not doing this for all peers at the same time.
-            state.m_tx_download.m_check_expiry_timer = current_time + TX_EXPIRY_INTERVAL / 2 + GetRandMicros(TX_EXPIRY_INTERVAL);
-        }
+        state.m_tx_download.ExpireOldInFlightTx(current_time, pto);
 
-        auto& tx_process_time = state.m_tx_download.m_tx_process_time;
-        while (!tx_process_time.empty() && tx_process_time.begin()->first <= current_time && state.m_tx_download.m_tx_in_flight.size() < MAX_PEER_TX_IN_FLIGHT) {
-            const uint256 txid = tx_process_time.begin()->second;
-            // Erase this entry from tx_process_time (it may be added back for
-            // processing at a later time, see below)
-            tx_process_time.erase(tx_process_time.begin());
+        uint256 txid;
+        while (state.m_tx_download.GetTx(txid, current_time)) {
             CInv inv(MSG_TX | GetFetchFlags(pto), txid);
             if (!AlreadyHave(inv, m_mempool)) {
                 // If this transaction was last requested more than 1 minute ago,
@@ -4054,22 +4130,20 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                         vGetData.clear();
                     }
                     UpdateTxRequestTime(inv.hash, current_time);
-                    state.m_tx_download.m_tx_in_flight.emplace(inv.hash, current_time);
+                    state.m_tx_download.MarkInFlight(inv.hash, current_time);
                 } else {
                     // This transaction is in flight from someone else; queue
                     // up processing to happen after the download times out
                     // (with a slight delay for inbound peers, to prefer
                     // requests to outbound peers).
                     const auto next_process_time = CalculateTxGetDataTime(txid, current_time, !state.fPreferredDownload);
-                    tx_process_time.emplace(next_process_time, txid);
+                    state.m_tx_download.ReplaceTx(txid, next_process_time);
                 }
             } else {
                 // We have already seen this transaction, no need to download.
-                state.m_tx_download.m_tx_announced.erase(inv.hash);
-                state.m_tx_download.m_tx_in_flight.erase(inv.hash);
+                state.m_tx_download.EraseTx(inv.hash);
             }
         }
-
 
         if (!vGetData.empty())
             connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
