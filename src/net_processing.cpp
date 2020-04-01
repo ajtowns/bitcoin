@@ -279,7 +279,7 @@ private:
     static std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     {
         std::chrono::microseconds process_time;
-        const auto last_request_time = TxDownloadState::GetTxRequestTime(txid);
+        const auto last_request_time = GetTxRequestTime(txid);
         // First time requesting this tx
         if (last_request_time.count() == 0) {
             process_time = current_time;
@@ -295,9 +295,13 @@ private:
         return process_time;
     }
 
-    //! Used by RequestTx
-    bool AddTx(const uint256& txid, std::chrono::microseconds process_time)
+public:
+    TxDownloadState() { }
+
+    //! Called when INV received, with the current time
+    bool RequestTx(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     {
+        std::chrono::microseconds process_time = CalculateTxGetDataTime(txid, current_time, use_inbound_delay);
         if (m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
                 m_tx_process_time.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
                 m_tx_announced.count(txid)) {
@@ -310,25 +314,29 @@ private:
         return true;
     }
 
-public:
-    TxDownloadState() { }
-
-    //! Called when INV received, with the current time
-    static void RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
-
-    //! Returns true and fills in txid if a tx is ready to request
-    bool GetTx(uint256& txid, std::chrono::microseconds current_time)
+    //! Returns true and fills in txid of a tx that is ready to request
+    bool GetTx(uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
     {
-        if (m_tx_process_time.empty()) return false;
-        if (m_tx_process_time.begin()->first > current_time) return false;
         if (m_tx_in_flight.size() >= MAX_PEER_TX_IN_FLIGHT) return false;
 
-        txid = m_tx_process_time.begin()->second;
+        while (!m_tx_process_time.empty() && m_tx_process_time.begin()->first <= current_time) {
+            txid = m_tx_process_time.begin()->second;
+            m_tx_process_time.erase(m_tx_process_time.begin());
 
-        // Erase this entry from tx_process_time (it may be added back for
-        // processing at a later time)
-        m_tx_process_time.erase(m_tx_process_time.begin());
-        return true;
+            const auto last_request_time = GetTxRequestTime(txid);
+            if (last_request_time <= current_time - GETDATA_TX_INTERVAL) {
+                // Erase this entry from tx_process_time (it may be added back for
+                // processing at a later time)
+                return true;
+            }
+
+            // This transaction is in flight from someone else; queue
+            // up processing to happen after the download times out
+            // (with a slight delay for inbound peers, to prefer
+            // requests to outbound peers).
+            m_tx_process_time.emplace(CalculateTxGetDataTime(txid, current_time, use_inbound_delay), txid);
+        }
+        return false;
     }
 
     //! Called when tx returned by GetTx is to be requested
@@ -341,12 +349,6 @@ public:
             g_already_asked_for.update(it, current_time);
         }
         m_tx_in_flight.emplace(txid, current_time);
-    }
-
-    //! Called when tx returned by GetTx is currently unsuitable and should be retried later
-    void ReplaceTx(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-    {
-        m_tx_process_time.emplace(CalculateTxGetDataTime(txid, current_time, use_inbound_delay), txid);
     }
 
     //! Called to stop tracking a tx after it has been received
@@ -541,12 +543,6 @@ static CNodeState *State(NodeId pnode) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     if (it == mapNodeState.end())
         return nullptr;
     return &it->second;
-}
-
-void TxDownloadState::RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    std::chrono::microseconds process_time = CalculateTxGetDataTime(txid, current_time, !state->fPreferredDownload);
-    state->m_tx_download.AddTx(txid, process_time);
 }
 
 static void UpdatePreferredDownload(CNode* node, CNodeState* state) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -2373,7 +2369,8 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
                     pfrom->fDisconnect = true;
                     return true;
                 } else if (!fAlreadyHave && !fImporting && !fReindex && !::ChainstateActive().IsInitialBlockDownload()) {
-                    TxDownloadState::RequestTx(State(pfrom->GetId()), inv.hash, current_time);
+                    CNodeState *state = State(pfrom->GetId());
+                    state->m_tx_download.RequestTx(inv.hash, current_time, !state->fPreferredDownload);
                 }
             }
         }
@@ -2650,7 +2647,10 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
                 for (const CTxIn& txin : tx.vin) {
                     CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
                     pfrom->AddInventoryKnown(_inv);
-                    if (!AlreadyHave(_inv, mempool)) TxDownloadState::RequestTx(State(pfrom->GetId()), _inv.hash, current_time);
+                    if (!AlreadyHave(_inv, mempool)) {
+                        CNodeState *state = State(pfrom->GetId());
+                        state->m_tx_download.RequestTx(_inv.hash, current_time, !state->fPreferredDownload);
+                    }
                 }
                 AddOrphanTx(ptx, pfrom->GetId());
 
@@ -4095,27 +4095,16 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
         state.m_tx_download.ExpireOldInFlightTx(current_time, pto);
 
         uint256 txid;
-        while (state.m_tx_download.GetTx(txid, current_time)) {
+        while (state.m_tx_download.GetTx(txid, current_time, !state.fPreferredDownload)) {
             CInv inv(MSG_TX | GetFetchFlags(pto), txid);
             if (!AlreadyHave(inv, m_mempool)) {
-                // If this transaction was last requested more than 1 minute ago,
-                // then request.
-                const auto last_request_time = TxDownloadState::GetTxRequestTime(inv.hash);
-                if (last_request_time <= current_time - GETDATA_TX_INTERVAL) {
-                    LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
-                    vGetData.push_back(inv);
-                    if (vGetData.size() >= MAX_GETDATA_SZ) {
-                        connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-                        vGetData.clear();
-                    }
-                    state.m_tx_download.MarkInFlight(inv.hash, current_time);
-                } else {
-                    // This transaction is in flight from someone else; queue
-                    // up processing to happen after the download times out
-                    // (with a slight delay for inbound peers, to prefer
-                    // requests to outbound peers).
-                    state.m_tx_download.ReplaceTx(txid, current_time, !state.fPreferredDownload);
+                LogPrint(BCLog::NET, "Requesting %s peer=%d\n", inv.ToString(), pto->GetId());
+                vGetData.push_back(inv);
+                if (vGetData.size() >= MAX_GETDATA_SZ) {
+                    connman->PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                    vGetData.clear();
                 }
+                state.m_tx_download.MarkInFlight(inv.hash, current_time);
             } else {
                 // We have already seen this transaction, no need to download.
                 state.m_tx_download.EraseTx(inv.hash);
