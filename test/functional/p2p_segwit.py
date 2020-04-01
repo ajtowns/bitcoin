@@ -2119,14 +2119,13 @@ class SegWitTest(BitcoinTestFramework):
         self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=True)
         with mininode_lock:
             lgd = self.test_node.lastgetdata[:]
-        # XXX: should be 5, not 1|MSG_WITNESS_FLAG
-        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx2.calc_sha256(True))])
+        assert_equal(lgd, [CInv(5, tx2.calc_sha256(True))])
 
-        # Announce Segwit transaction without wtxid
+        # Announce Segwit transaction from non wtxidrelay peer
         # and wait for getdata
-        self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=False)
+        self.std_node.announce_tx_and_wait_for_getdata(tx2, wtxid=False)
         with mininode_lock:
-            lgd = self.test_node.lastgetdata[:]
+            lgd = self.std_node.lastgetdata[:]
         assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx2.sha256)])
 
         # Send tx2 through; it's an orphan so won't be accepted
@@ -2138,7 +2137,7 @@ class SegWitTest(BitcoinTestFramework):
         self.test_node.wait_for_getdata(60)
         with mininode_lock:
             lgd = self.test_node.lastgetdata[:]
-        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx.sha256)])
+        assert_equal(lgd, [CInv(5, tx.sha256)])
 
         # Send tx through
         test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
