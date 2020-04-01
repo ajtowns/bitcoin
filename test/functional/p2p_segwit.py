@@ -32,6 +32,8 @@ from test_framework.messages import (
     msg_tx,
     msg_block,
     msg_no_witness_tx,
+    msg_verack,
+    msg_wtxidrelay,
     ser_uint256,
     ser_vector,
     sha256,
@@ -79,6 +81,7 @@ from test_framework.util import (
     softfork_active,
     hex_str_to_bytes,
     assert_raises_rpc_error,
+    wait_until,
 )
 
 # The versionbit bit used to signal activation of SegWit
@@ -143,15 +146,23 @@ def test_witness_block(node, p2p, block, accepted, with_witness=True, reason=Non
 
 
 class TestP2PConn(P2PInterface):
-    def __init__(self):
+    def __init__(self, wtxidrelay=False):
         super().__init__()
         self.getdataset = set()
         self.last_wtxidrelay = []
+        self.lastgetdata = []
+        self.wtxidrelay = wtxidrelay
 
     # Avoid sending out msg_getdata in the mininode thread as a reply to invs.
     # They are not needed and would only lead to races because we send msg_getdata out in the test thread
     def on_inv(self, message):
         pass
+
+    def on_version(self, message):
+        if self.wtxidrelay:
+            self.send_message(msg_wtxidrelay())
+        self.send_message(msg_verack())
+        self.nServices = message.nServices
 
     def on_getdata(self, message):
         for inv in message.inv:
@@ -239,7 +250,7 @@ class SegWitTest(BitcoinTestFramework):
     def run_test(self):
         # Setup the p2p connections
         # self.test_node sets NODE_WITNESS|NODE_NETWORK
-        self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK | NODE_WITNESS)
+        self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn(wtxidrelay=True), services=NODE_NETWORK | NODE_WITNESS)
         # self.old_node sets only NODE_NETWORK
         self.old_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK)
         # self.std_node is for testing node1 (fRequireStandard=true)
@@ -1281,7 +1292,6 @@ class SegWitTest(BitcoinTestFramework):
         test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=True, accepted=False)
 
         # Verify that removing the witness succeeds.
-        self.test_node.announce_tx_and_wait_for_getdata(tx)
         test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
 
         # Now try to add extra witness data to a valid witness tx.
@@ -1306,8 +1316,6 @@ class SegWitTest(BitcoinTestFramework):
         tx3.rehash()
 
         # Node will not be blinded to the transaction
-        self.std_node.announce_tx_and_wait_for_getdata(tx3)
-        test_transaction_acceptance(self.nodes[1], self.std_node, tx3, True, False)
         self.std_node.announce_tx_and_wait_for_getdata(tx3)
         test_transaction_acceptance(self.nodes[1], self.std_node, tx3, True, False)
 
