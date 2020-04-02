@@ -2643,15 +2643,17 @@ bool ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vR
                 uint32_t nFetchFlags = GetFetchFlags(pfrom);
                 const auto current_time = GetTime<std::chrono::microseconds>();
 
-                for (const CTxIn& txin : tx.vin) {
-                    // Here, we only have the txid (and not wtxid) of the
-                    // inputs, so we will make a request using txid even to
-                    // a peer with which we've negotiated wtxid-based relay.
-                    // Eventually we should replace this with an improved
-                    // protocol for getting all unconfirmed parents.
-                    CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
-                    pfrom->AddKnownTx(txin.prevout.hash);
-                    if (!AlreadyHave(_inv, mempool)) RequestTx(State(pfrom->GetId()), _inv.hash, current_time);
+                if (!State(pfrom->GetId())->m_wtxid_relay) {
+                    for (const CTxIn& txin : tx.vin) {
+                        // Here, we only have the txid (and not wtxid) of the
+                        // inputs, so we only request parents from
+                        // non-wtxid-relay peers.
+                        // Eventually we should replace this with an improved
+                        // protocol for getting all unconfirmed parents.
+                        CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
+                        pfrom->AddKnownTx(txin.prevout.hash);
+                        if (!AlreadyHave(_inv, mempool)) RequestTx(State(pfrom->GetId()), _inv.hash, current_time);
+                    }
                 }
                 AddOrphanTx(ptx, pfrom->GetId());
 
