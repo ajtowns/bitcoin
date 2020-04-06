@@ -251,7 +251,7 @@ class SegWitTest(BitcoinTestFramework):
     def run_test(self):
         # Setup the p2p connections
         # self.test_node sets NODE_WITNESS|NODE_NETWORK
-        self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn(wtxidrelay=True), services=NODE_NETWORK | NODE_WITNESS)
+        self.test_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK | NODE_WITNESS)
         # self.old_node sets only NODE_NETWORK
         self.old_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK)
         # self.std_node is for testing node1 (fRequireStandard=true)
@@ -2086,14 +2086,16 @@ class SegWitTest(BitcoinTestFramework):
 
     @subtest
     def test_wtxid_relay(self):
-        # Check wtxidrelay feature nogotiation message through connecting a new peer
-        self.wtx_node = self.nodes[0].add_p2p_connection(TestP2PConn(), services=NODE_NETWORK | NODE_WITNESS)
+        # Use brand new nodes to avoid contamination from earlier tests
+        self.wtx_node = self.nodes[0].add_p2p_connection(TestP2PConn(wtxidrelay=True), services=NODE_NETWORK | NODE_WITNESS)
+        self.tx_node = self.nodes[0].add_p2p_connection(TestP2PConn(wtxidrelay=False), services=NODE_NETWORK | NODE_WITNESS)
 
+        # Check wtxidrelay feature negotiation message through connecting a new peer
         def received_wtxidrelay():
             return (len(self.wtx_node.last_wtxidrelay) > 0)
         wait_until(received_wtxidrelay, timeout=60, lock=mininode_lock)
 
-        # Create a a Segwit output from the latest UTXO
+        # Create a Segwit output from the latest UTXO
         # and announce it to the network
         witness_program = CScript([OP_TRUE])
         witness_hash = sha256(witness_program)
@@ -2112,35 +2114,33 @@ class SegWitTest(BitcoinTestFramework):
         tx2.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
         tx2.rehash()
 
-        self.test_node.sync_with_ping()
-
         # Announce Segwit transaction with wtxid
         # and wait for getdata
-        self.test_node.announce_tx_and_wait_for_getdata(tx2, wtxid=True)
+        self.wtx_node.announce_tx_and_wait_for_getdata(tx2, wtxid=True)
         with mininode_lock:
-            lgd = self.test_node.lastgetdata[:]
+            lgd = self.wtx_node.lastgetdata[:]
         assert_equal(lgd, [CInv(5, tx2.calc_sha256(True))])
 
         # Announce Segwit transaction from non wtxidrelay peer
         # and wait for getdata
-        self.std_node.announce_tx_and_wait_for_getdata(tx2, wtxid=False)
+        self.tx_node.announce_tx_and_wait_for_getdata(tx2, wtxid=False)
         with mininode_lock:
-            lgd = self.std_node.lastgetdata[:]
+            lgd = self.tx_node.lastgetdata[:]
         assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx2.sha256)])
 
         # Send tx2 through; it's an orphan so won't be accepted
         with mininode_lock:
-            self.test_node.last_message.pop("getdata", None)
-        test_transaction_acceptance(self.nodes[0], self.test_node, tx2, with_witness=True, accepted=False)
+            self.tx_node.last_message.pop("getdata", None)
+        test_transaction_acceptance(self.nodes[0], self.tx_node, tx2, with_witness=True, accepted=False)
 
-        # Expect a request for tx
-        self.test_node.wait_for_getdata(60)
+        # Expect a request for parent (tx) due to use of non-WTX peer
+        self.tx_node.wait_for_getdata(60)
         with mininode_lock:
-            lgd = self.test_node.lastgetdata[:]
-        assert_equal(lgd, [CInv(5, tx.sha256)])
+            lgd = self.tx_node.lastgetdata[:]
+        assert_equal(lgd, [CInv(1|MSG_WITNESS_FLAG, tx.sha256)])
 
         # Send tx through
-        test_transaction_acceptance(self.nodes[0], self.test_node, tx, with_witness=False, accepted=True)
+        test_transaction_acceptance(self.nodes[0], self.tx_node, tx, with_witness=False, accepted=True)
 
         # Check tx2 is there now
         assert_equal(tx2.hash in self.nodes[0].getrawmempool(), True)
