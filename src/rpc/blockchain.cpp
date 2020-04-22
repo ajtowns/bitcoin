@@ -1136,69 +1136,66 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name,
     softforks.pushKV(name, rv);
 }
 
-
-/** Get the BIP9 state for a given deployment at the current tip. */
-static ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+static void ModernDeploymentDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
-    return VersionBitsState(::ChainActive().Tip(), params, pos, versionbitscache);
-}
+    UniValue rv(UniValue::VOBJ);
+    rv.pushKV("type", "modern");
 
-/** Get the numerical statistics for the BIP9 state for a given deployment at the current tip. */
-static BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    return VersionBitsStatistics(::ChainActive().Tip(), params, pos);
-}
+    const CBlockIndex* tip = ::ChainActive().Tip();
 
-/** Get the block height at which the BIP9 deployment switched into the state for the block building on the current tip. */
-static int VersionBitsTipStateSinceHeight(const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    return VersionBitsStateSinceHeight(::ChainActive().Tip(), params, pos, versionbitscache);
-}
+    ThresholdConditionChecker checker = ThresholdConditionChecker::FromModernDeployment(consensusParams.vDeployments[id]);
 
-static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    // For BIP9 deployments.
-    // Deployments (e.g. testdummy) with timeout value before Jan 1, 2009 are hidden.
-    // A timeout value of 0 guarantees a softfork will never be activated.
-    // This is used when merging logic to implement a proposed softfork without a specified deployment schedule.
-    if (consensusParams.vDeployments[id].nTimeout <= 1230768000) return;
+    // For modern deployments.
+    UniValue depdesc(UniValue::VOBJ);
+    const ThresholdStateHeight stateheight = checker.GetStateHeightFor(tip, versionbitscache.caches[id]);
 
-    UniValue bip9(UniValue::VOBJ);
-    const ThresholdState thresholdState = VersionBitsTipState(consensusParams, id);
-    switch (thresholdState) {
-    case ThresholdState::DEFINED: bip9.pushKV("status", "defined"); break;
-    case ThresholdState::STARTED: bip9.pushKV("status", "started"); break;
-    case ThresholdState::LOCKED_IN: bip9.pushKV("status", "locked_in"); break;
-    case ThresholdState::ACTIVE: bip9.pushKV("status", "active"); break;
-    case ThresholdState::FAILED: bip9.pushKV("status", "failed"); break;
+    bool signal = false;
+    switch (stateheight.state) {
+    case ThresholdState::DISABLED: return;
+    case ThresholdState::DEFINED: depdesc.pushKV("status", "defined"); break;
+    case ThresholdState::SIGNAL:
+        depdesc.pushKV("status", "signalling");
+        signal = true;
+        break;
+    case ThresholdState::QUIET:
+        depdesc.pushKV("status", "quiet");
+        signal = true;
+        break;
+    case ThresholdState::UASF:
+        depdesc.pushKV("status", "uasf");
+        signal = true;
+        break;
+    case ThresholdState::LOCKED_IN: depdesc.pushKV("status", "locked_in"); break;
+    case ThresholdState::ACTIVE: depdesc.pushKV("status", "active"); break;
+    case ThresholdState::FAILED: depdesc.pushKV("status", "failed"); break;
     }
-    if (ThresholdState::STARTED == thresholdState)
-    {
-        bip9.pushKV("bit", consensusParams.vDeployments[id].bit);
-    }
-    bip9.pushKV("start_time", consensusParams.vDeployments[id].nStartTime);
-    bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
-    int64_t since_height = VersionBitsTipStateSinceHeight(consensusParams, id);
-    bip9.pushKV("since", since_height);
-    if (ThresholdState::STARTED == thresholdState)
-    {
+
+    depdesc.pushKV("since", stateheight.height);
+
+    const auto& dep = consensusParams.vDeployments[id];
+    if (signal) depdesc.pushKV("bit", dep.bit);
+    if (checker.signal_height < checker.quiet_height) depdesc.pushKV("signal_height", (int64_t) checker.signal_height);
+    if (checker.quiet_height < checker.uasf_height) depdesc.pushKV("quiet_height", (int64_t) checker.quiet_height);
+    if (checker.uasf_height < checker.mandatory_height) depdesc.pushKV("uasf_height", (int64_t) checker.uasf_height);
+    if (checker.mandatory_height < checker.MAX_HEIGHT) depdesc.pushKV("mandatory_height", (int64_t) checker.mandatory_height);
+
+    if (signal) {
+        ModernDeploymentStats statsStruct = checker.GetStateStatisticsFor(tip);
+
         UniValue statsUV(UniValue::VOBJ);
-        BIP9Stats statsStruct = VersionBitsTipStatistics(consensusParams, id);
-        statsUV.pushKV("period", statsStruct.period);
-        statsUV.pushKV("threshold", statsStruct.threshold);
+        statsUV.pushKV("period", checker.period);
+        statsUV.pushKV("threshold", checker.threshold);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
         statsUV.pushKV("possible", statsStruct.possible);
-        bip9.pushKV("statistics", statsUV);
+        depdesc.pushKV("statistics", statsUV);
     }
 
-    UniValue rv(UniValue::VOBJ);
-    rv.pushKV("type", "bip9");
-    rv.pushKV("bip9", bip9);
-    if (ThresholdState::ACTIVE == thresholdState) {
-        rv.pushKV("height", since_height);
+    rv.pushKV("modern", depdesc);
+    if (ThresholdState::ACTIVE == stateheight.state) {
+        rv.pushKV("height", stateheight.height);
     }
-    rv.pushKV("active", ThresholdState::ACTIVE == thresholdState);
+    rv.pushKV("active", ThresholdState::ACTIVE == stateheight.state);
 
     softforks.pushKV(name, rv);
 }
@@ -1229,17 +1226,17 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
                         {
                             {RPCResult::Type::OBJ, "xxxx", "name of the softfork",
                             {
-                                {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
-                                {RPCResult::Type::OBJ, "bip9", "status of bip9 softforks (only for \"bip9\" type)",
+                                {RPCResult::Type::STR, "type", "one of \"buried\", \"modern\""},
+                                {RPCResult::Type::OBJ, "modern", "status of bip9 softforks (only for \"bip9\" type)",
                                 {
                                     {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failed\""},
                                     {RPCResult::Type::NUM, "bit", "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" status)"},
                                     {RPCResult::Type::NUM_TIME, "start_time", "the minimum median time past of a block at which the bit gains its meaning"},
                                     {RPCResult::Type::NUM_TIME, "timeout", "the median time past of a block at which the deployment is considered failed if not yet locked in"},
                                     {RPCResult::Type::NUM, "since", "height of the first block to which the status applies"},
-                                    {RPCResult::Type::OBJ, "statistics", "numeric statistics about BIP9 signalling for a softfork (only for \"started\" status)",
+                                    {RPCResult::Type::OBJ, "statistics", "numeric statistics about signalling for a softfork (only for \"started\" status)",
                                     {
-                                        {RPCResult::Type::NUM, "period", "the length in blocks of the BIP9 signalling period"},
+                                        {RPCResult::Type::NUM, "period", "the length in blocks of the signalling period"},
                                         {RPCResult::Type::NUM, "threshold", "the number of blocks with the version bit set required to activate the feature"},
                                         {RPCResult::Type::NUM, "elapsed", "the number of blocks elapsed since the beginning of the current period"},
                                         {RPCResult::Type::NUM, "count", "the number of blocks with the version bit set in the current period"},
@@ -1298,7 +1295,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     BuriedForkDescPushBack(softforks, "csv", consensusParams.CSVHeight);
     BuriedForkDescPushBack(softforks, "segwit", consensusParams.SegwitHeight);
     for (int i = 0; i < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
-        BIP9SoftForkDescPushBack(softforks, VersionBitsDeploymentInfo[i].name, consensusParams, (Consensus::DeploymentPos)i);
+        ModernDeploymentDescPushBack(softforks, VersionBitsDeploymentInfo[i].name, consensusParams, (Consensus::DeploymentPos)i);
     }
     obj.pushKV("softforks",             softforks);
 

@@ -800,6 +800,7 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
         Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
         ThresholdState state = VersionBitsState(pindexPrev, consensusParams, pos, versionbitscache);
         switch (state) {
+            case ThresholdState::DISABLED:
             case ThresholdState::DEFINED:
             case ThresholdState::FAILED:
                 // Not exposed to GBT at all
@@ -808,7 +809,9 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
                 // Ensure bit is set in block version
                 pblock->nVersion |= VersionBitsMask(consensusParams, pos);
                 // FALL THROUGH to get vbavailable set...
-            case ThresholdState::STARTED:
+            case ThresholdState::SIGNAL:
+            case ThresholdState::QUIET:
+            case ThresholdState::UASF:
             {
                 const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
                 vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);

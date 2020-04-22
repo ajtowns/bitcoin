@@ -1837,22 +1837,20 @@ void ThreadScriptCheck(int worker_num) {
 /**
  * Threshold condition checker that triggers when unknown versionbits are seen on the network.
  */
-class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
+class WarningBitsConditionChecker : public ThresholdConditionChecker
 {
 private:
-    int bit;
+    const Consensus::Params& params;
 
 public:
-    explicit WarningBitsConditionChecker(int bitIn) : bit(bitIn) {}
+    explicit WarningBitsConditionChecker(const Consensus::Params& paramsIn, uint8_t bitIn)
+     : ThresholdConditionChecker{0,MAX_HEIGHT,MAX_HEIGHT,MAX_HEIGHT,paramsIn.nMinerConfirmationWindow, paramsIn.nRuleChangeActivationThreshold, bitIn}
+     , params(paramsIn)
+     {}
 
-    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
-    int64_t EndTime(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
-    int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
-    int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
-
-    bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override
+    bool Condition(const CBlockIndex* pindex) const override
     {
-        return pindex->nHeight >= params.MinBIP9WarningHeight &&
+        return pindex->nHeight >= params.MinModernDeploymentWarningHeight &&
                ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
                ((pindex->nVersion >> bit) & 1) != 0 &&
                ((ComputeBlockVersion(pindex->pprev, params) >> bit) & 1) == 0;
@@ -2448,9 +2446,9 @@ void static UpdateTip(const CBlockIndex* pindexNew, const CChainParams& chainPar
     {
         int nUpgraded = 0;
         const CBlockIndex* pindex = pindexNew;
-        for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {
-            WarningBitsConditionChecker checker(bit);
-            ThresholdState state = checker.GetStateFor(pindex, chainParams.GetConsensus(), warningcache[bit]);
+        for (uint8_t bit = 0; bit < VERSIONBITS_NUM_BITS; ++bit) {
+            WarningBitsConditionChecker checker(chainParams.GetConsensus(), bit);
+            ThresholdState state = checker.GetStateFor(pindex, warningcache[bit]);
             if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN) {
                 const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (versionbit %i)"), bit);
                 if (state == ThresholdState::ACTIVE) {
@@ -3527,7 +3525,7 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
  *  in ConnectBlock().
  *  Note that -reindex-chainstate skips the validation that happens here!
  */
-static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
+static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
