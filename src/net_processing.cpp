@@ -742,6 +742,18 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
     }
 }
 
+/** Allow other peers to move tx into their in_flight queue (ie, send
+ * a GETDATA) immediately, rather than only GETDATA_TX_INTERVAL after the
+ * previous request
+ */
+void ConditionalBackdateTxRequestTime(const uint256& txid, std::chrono::microseconds old_request_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    auto it = g_already_asked_for.find(txid);
+    if (it != g_already_asked_for.end() && it->second == old_request_time) {
+        g_already_asked_for.update(it, old_request_time - GETDATA_TX_INTERVAL);
+    }
+}
+
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 
 {
@@ -3303,6 +3315,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
                         // message.
                         continue;
                     }
+                    ConditionalBackdateTxRequestTime(inv.hash, in_flight_it->second);
                     state->m_tx_download.m_tx_in_flight.erase(in_flight_it);
                     state->m_tx_download.m_tx_announced.erase(inv.hash);
                 }
