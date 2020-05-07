@@ -25,11 +25,15 @@ bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusP
     if (!GetWitnessCommitmentSection(block, SIGNET_HEADER, signet_data)) {
         return error("CheckBlockSolution: Errors in block (block solution missing)");
     }
-    SimpleSignatureChecker bsc(GetSignetHash(block));
+
     CScript challenge(consensusParams.signet_challenge.begin(), consensusParams.signet_challenge.end());
     CScript solution = CScript(signet_data.begin(), signet_data.end());
+    CScriptWitness* witness = nullptr;
 
-    if (!VerifyScript(solution, challenge, nullptr, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc)) {
+    const CTransaction blocktx = BlockSignetTx(block);
+    TransactionSignatureChecker bsc(&blocktx, /*nIn=*/ 0, /*amount=*/ (1ul<<32));
+
+    if (!VerifyScript(solution, challenge, witness, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc)) {
         return error("CheckBlockSolution: Errors in block (block solution invalid)");
     }
     return true;
@@ -51,10 +55,18 @@ uint256 BlockSignetMerkleRoot(const CBlock& block, bool* mutated = nullptr)
     return ComputeMerkleRoot(std::move(leaves), mutated);
 }
 
-uint256 GetSignetHash(const CBlock& block)
+CTransaction BlockSignetTx(const CBlock& block)
 {
-    if (block.vtx.size() == 0) return block.GetHash();
-    return (CHashWriter(SER_DISK, PROTOCOL_VERSION) << block.nVersion << block.hashPrevBlock << BlockSignetMerkleRoot(block) << block.nTime << block.nBits).GetHash();
+    uint256 signet_merkle = BlockSignetMerkleRoot(block);
+    CScript sPK;
+    sPK << std::vector<unsigned char>(signet_merkle.begin(), signet_merkle.end());
+
+    CMutableTransaction tx;
+    tx.vin.emplace_back(COutPoint(block.hashPrevBlock, 0), CScript(), 0);
+    tx.vout.emplace_back((uint32_t)block.nVersion, sPK);
+    tx.nVersion = 1;
+    tx.nLockTime = block.nTime;
+    return tx;
 }
 
 bool GetWitnessCommitmentSection(const CBlock& block, const uint8_t header[4], std::vector<uint8_t>& result)

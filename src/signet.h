@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 class CBlock;
+class CTransaction;
 class CScript;
 class uint256;
 struct CMutableTransaction;
@@ -26,13 +27,12 @@ constexpr uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
 bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusParams);
 
 /**
- * Generate the signet hash for the given block
+ * Convert the block into a virtual transaction
  *
- * The signet hash differs from the regular block hash in two places:
- * 1. It hashes a modified merkle root with the signet signature removed.
- * 2. It skips the nonce.
+ * A valid scriptsig/witness for this transaction is then included
+ * as the block solution to "sign" the block.
  */
-uint256 GetSignetHash(const CBlock& block);
+CTransaction BlockSignetTx(const CBlock& block);
 
 /**
  * Attempt to get the data for the section with the given header in the witness commitment of the block.
