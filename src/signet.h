@@ -21,11 +21,6 @@ struct CMutableTransaction;
 constexpr uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
 
 /**
- * Check whether a block has a valid solution
- */
-bool CheckBlockSolution(const uint256& signet_hash, const std::vector<uint8_t>& signature, const Consensus::Params&);
-
-/**
  * Extract signature and check whether a block has a valid solution
  */
 bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusParams);
