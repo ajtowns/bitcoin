@@ -14,9 +14,6 @@
 #include <memory>
 #include <vector>
 
-/** The signet blockscript, for signet networks */
-extern CScript g_signet_blockscript;
-
 struct SeedSpec6 {
     uint8_t addr[16];
     uint16_t port;

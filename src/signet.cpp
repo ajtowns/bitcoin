@@ -13,8 +13,6 @@
 #include <script/standard.h>        // MANDATORY_SCRIPT_VERIFY_FLAGS
 #include <util/system.h>
 
-extern CScript g_signet_blockscript;
-
 int GetWitnessCommitmentIndex(const CBlock& block);
 template<typename T> int GetWitnessCommitmentIndex(const T& tx);
 
@@ -36,8 +34,9 @@ bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusP
 bool CheckBlockSolution(const uint256& signet_hash, const std::vector<uint8_t>& signature, const Consensus::Params& params)
 {
     SimpleSignatureChecker bsc(signet_hash);
+    CScript challenge(params.signet_challenge.begin(), params.signet_challenge.end());
     CScript solution = CScript(signature.begin(), signature.end());
-    return VerifyScript(solution, g_signet_blockscript, nullptr, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc);
+    return VerifyScript(solution, challenge, nullptr, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc);
 }
 
 uint256 BlockSignetMerkleRoot(const CBlock& block, bool* mutated = nullptr)

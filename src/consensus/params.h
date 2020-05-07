@@ -83,9 +83,10 @@ struct Params {
 
     /**
      * If true, witness commitments contain a payload equal to a Bitcoin Script solution
-     * to a signet challenge as defined in the chain params.
+     * to the signet challenge
      */
     bool signet_blocks{false};
+    std::vector<unsigned char> signet_challenge;
 };
 } // namespace Consensus
 
