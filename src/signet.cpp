@@ -11,6 +11,7 @@
 #include <primitives/transaction.h>
 #include <script/interpreter.h>
 #include <script/standard.h>        // MANDATORY_SCRIPT_VERIFY_FLAGS
+#include <streams.h>
 #include <util/system.h>
 
 int GetWitnessCommitmentIndex(const CBlock& block);
@@ -27,13 +28,25 @@ bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusP
     }
 
     CScript challenge(consensusParams.signet_challenge.begin(), consensusParams.signet_challenge.end());
-    CScript solution = CScript(signet_data.begin(), signet_data.end());
-    CScriptWitness* witness = nullptr;
+    CScript solution;
+    CScriptWitness witness;
+
+    if (consensusParams.signet_solution_via_witness) {
+        VectorReader reader(SER_NETWORK, INIT_PROTO_VERSION, signet_data, 0);
+        try {
+            reader >> witness.stack;
+        } catch (std::exception&) {
+            witness.stack.clear();
+        }
+        if (!reader.empty()) witness.stack.clear();
+    } else {
+        solution = CScript(signet_data.begin(), signet_data.end());
+    }
 
     const CTransaction blocktx = BlockSignetTx(block);
     TransactionSignatureChecker bsc(&blocktx, /*nIn=*/ 0, /*amount=*/ (1ul<<32));
 
-    if (!VerifyScript(solution, challenge, witness, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc)) {
+    if (!VerifyScript(solution, challenge, witness.stack.empty() ? nullptr : &witness, MANDATORY_SCRIPT_VERIFY_FLAGS, bsc)) {
         return error("CheckBlockSolution: Errors in block (block solution invalid)");
     }
     return true;

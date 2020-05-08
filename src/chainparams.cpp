@@ -65,6 +65,7 @@ public:
     CMainParams() {
         strNetworkID = CBaseChainParams::MAIN;
         consensus.signet_blocks = false;
+        consensus.signet_solution_via_witness = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000000002dc756eebf4f49723ed8d30cc28a5f108eb94b1ba88ac4f9c22");
@@ -175,6 +176,7 @@ public:
     CTestNetParams() {
         strNetworkID = CBaseChainParams::TESTNET;
         consensus.signet_blocks = false;
+        consensus.signet_solution_via_witness = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000dd30457c001f4095d208cc1296b0eed002427aa599874af7a432b105");
@@ -285,7 +287,13 @@ public:
 
         strNetworkID = CBaseChainParams::SIGNET;
         consensus.signet_blocks = true;
+        {
+            int version;
+            std::vector<unsigned char> program;
+            consensus.signet_solution_via_witness = CScript(bin.begin(), bin.end()).IsWitnessProgram(version, program);
+        }
         consensus.signet_challenge.assign(bin.begin(), bin.end());
+
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP34Height = 1;
         consensus.BIP65Height = 1;
@@ -342,6 +350,7 @@ public:
     explicit CRegTestParams(const ArgsManager& args) {
         strNetworkID =  CBaseChainParams::REGTEST;
         consensus.signet_blocks = false;
+        consensus.signet_solution_via_witness = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 150;
         consensus.BIP16Exception = uint256();
