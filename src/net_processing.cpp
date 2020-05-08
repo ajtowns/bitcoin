@@ -743,6 +743,7 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
 }
 
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+
 {
     std::chrono::microseconds process_time;
     const auto last_request_time = GetTxRequestTime(txid);
@@ -752,7 +753,11 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     } else {
         // Randomize the delay to avoid biasing some peers over others (such as due to
         // fixed ordering of peer processing in ThreadMessageHandler)
-        process_time = last_request_time + GETDATA_TX_INTERVAL + GetRandMicros(MAX_GETDATA_RANDOM_DELAY);
+        std::chrono::microseconds next_process_time = GetPoissonRand(current_time, std::chrono::seconds(20));
+        // reprocess_time should be no more than 2 seconds after the previous
+        // request timeout. Again, add some randomness to spread out requests
+        // and randomize order.
+        process_time = std::min(last_request_time + GETDATA_TX_INTERVAL + GetRandMicros(MAX_GETDATA_RANDOM_DELAY), next_process_time);
     }
 
     // We delay processing announcements from inbound peers
