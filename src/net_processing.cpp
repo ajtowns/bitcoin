@@ -742,7 +742,20 @@ void UpdateTxRequestTime(const uint256& txid, std::chrono::microseconds request_
     }
 }
 
+/** Allow other peers to move tx into their in_flight queue (ie, send
+ * a GETDATA) immediately, rather than only GETDATA_TX_INTERVAL after the
+ * previous request
+ */
+void ConditionalBackdateTxRequestTime(const uint256& txid, std::chrono::microseconds old_request_time, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    auto it = g_already_asked_for.find(txid);
+    if (it != g_already_asked_for.end() && it->second == old_request_time) {
+        g_already_asked_for.update(it, current_time - GETDATA_TX_INTERVAL);
+    }
+}
+
 std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chrono::microseconds current_time, bool use_inbound_delay) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+
 {
     std::chrono::microseconds process_time;
     const auto last_request_time = GetTxRequestTime(txid);
@@ -750,9 +763,24 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     if (last_request_time.count() == 0) {
         process_time = current_time;
     } else {
-        // Randomize the delay to avoid biasing some peers over others (such as due to
-        // fixed ordering of peer processing in ThreadMessageHandler)
+        // if the last request timesout, ensure we request sometime in the
+        // next four seconds (first 2s for outbound, last 2s for inbound)
+        // but also consider requesting earlier, in case the tx is NOTFOUND
+        // finally, don't allow the early requesting to overlap the 2s
+        // immediately after the timeout, which are dedicated to
+        // prioritising outbound peers
+        const std::chrono::microseconds early_process_time = PoissonNextSend(current_time, std::chrono::seconds(20));
         process_time = last_request_time + GETDATA_TX_INTERVAL + GetRandMicros(MAX_GETDATA_RANDOM_DELAY);
+        if (use_inbound_delay) {
+            // INBOUND_PEER_TX_DELAY is doubled to cope with the fact
+            // that we don't immediately run SendMessages when the
+            // process time is reached
+            if (early_process_time < last_request_time + GETDATA_TX_INTERVAL - 2*INBOUND_PEER_TX_DELAY) {
+                process_time = early_process_time;
+            }
+        } else {
+            process_time = std::min(process_time, early_process_time);
+        }
     }
 
     // We delay processing announcements from inbound peers
@@ -3281,6 +3309,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
         std::vector<CInv> vInv;
         vRecv >> vInv;
         if (vInv.size() <= MAX_PEER_TX_IN_FLIGHT + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            const auto current_time = GetTime<std::chrono::microseconds>();
             for (CInv &inv : vInv) {
                 if (inv.type == MSG_TX || inv.type == MSG_WITNESS_TX) {
                     // If we receive a NOTFOUND message for a txid we requested, erase
@@ -3291,6 +3320,7 @@ bool ProcessMessage(CNode* pfrom, const std::string& msg_type, CDataStream& vRec
                         // message.
                         continue;
                     }
+                    ConditionalBackdateTxRequestTime(inv.hash, in_flight_it->second, current_time);
                     state->m_tx_download.m_tx_in_flight.erase(in_flight_it);
                     state->m_tx_download.m_tx_announced.erase(inv.hash);
                 }
