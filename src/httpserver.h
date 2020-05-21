@@ -8,6 +8,8 @@
 #include <string>
 #include <functional>
 
+#include <util/ref.h>
+
 static const int DEFAULT_HTTP_THREADS=4;
 static const int DEFAULT_HTTP_WORKQUEUE=16;
 static const int DEFAULT_HTTP_SERVER_TIMEOUT=30;
@@ -36,12 +38,12 @@ void StopHTTPServer();
 bool UpdateHTTPServerLogging(bool enable);
 
 /** Handler for requests to a certain HTTP path */
-typedef std::function<bool(HTTPRequest* req, const std::string &)> HTTPRequestHandler;
+typedef std::function<bool(const util::Ref& context, HTTPRequest* req, const std::string&)> HTTPRequestHandler;
 /** Register handler for prefix.
  * If multiple handlers match a prefix, the first-registered one will
  * be invoked.
  */
-void RegisterHTTPHandler(const std::string &prefix, bool exactMatch, const HTTPRequestHandler &handler);
+void RegisterHTTPHandler(const std::string &prefix, bool exactMatch, const util::Ref& context, const HTTPRequestHandler &handler);
 /** Unregister handler for prefix */
 void UnregisterHTTPHandler(const std::string &prefix, bool exactMatch);
 

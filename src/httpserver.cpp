@@ -11,6 +11,7 @@
 #include <shutdown.h>
 #include <sync.h>
 #include <ui_interface.h>
+#include <util/ref.h>
 #include <util/strencodings.h>
 #include <util/system.h>
 #include <util/threadnames.h>
@@ -47,19 +48,20 @@ static const size_t MAX_HEADERS_SIZE = 8192;
 class HTTPWorkItem final : public HTTPClosure
 {
 public:
-    HTTPWorkItem(std::unique_ptr<HTTPRequest> _req, const std::string &_path, const HTTPRequestHandler& _func):
-        req(std::move(_req)), path(_path), func(_func)
+    HTTPWorkItem(std::unique_ptr<HTTPRequest> _req, const std::string &_path, const util::Ref& _context, const HTTPRequestHandler& _func):
+        req(std::move(_req)), path(_path), context(_context), func(_func)
     {
     }
     void operator()() override
     {
-        func(req.get(), path);
+        func(context, req.get(), path);
     }
 
     std::unique_ptr<HTTPRequest> req;
 
 private:
     std::string path;
+    util::Ref context;
     HTTPRequestHandler func;
 };
 
@@ -126,12 +128,13 @@ public:
 
 struct HTTPPathHandler
 {
-    HTTPPathHandler(std::string _prefix, bool _exactMatch, HTTPRequestHandler _handler):
-        prefix(_prefix), exactMatch(_exactMatch), handler(_handler)
+    HTTPPathHandler(std::string _prefix, bool _exactMatch, const util::Ref& _context, HTTPRequestHandler _handler):
+        prefix(_prefix), exactMatch(_exactMatch), context(_context), handler(_handler)
     {
     }
     std::string prefix;
     bool exactMatch;
+    util::Ref context;
     HTTPRequestHandler handler;
 };
 
@@ -263,7 +266,7 @@ static void http_request_cb(struct evhttp_request* req, void* arg)
 
     // Dispatch to worker thread
     if (i != iend) {
-        std::unique_ptr<HTTPWorkItem> item(new HTTPWorkItem(std::move(hreq), path, i->handler));
+        std::unique_ptr<HTTPWorkItem> item(new HTTPWorkItem(std::move(hreq), path, i->context, i->handler));
         assert(workQueue);
         if (workQueue->Enqueue(item.get()))
             item.release(); /* if true, queue took ownership */
@@ -638,10 +641,10 @@ HTTPRequest::RequestMethod HTTPRequest::GetRequestMethod() const
     }
 }
 
-void RegisterHTTPHandler(const std::string &prefix, bool exactMatch, const HTTPRequestHandler &handler)
+void RegisterHTTPHandler(const std::string &prefix, bool exactMatch, const util::Ref& context, const HTTPRequestHandler &handler)
 {
     LogPrint(BCLog::HTTP, "Registering HTTP handler for %s (exactmatch %d)\n", prefix, exactMatch);
-    pathHandlers.push_back(HTTPPathHandler(prefix, exactMatch, handler));
+    pathHandlers.push_back(HTTPPathHandler(prefix, exactMatch, context, handler));
 }
 
 void UnregisterHTTPHandler(const std::string &prefix, bool exactMatch)

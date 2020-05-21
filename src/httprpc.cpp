@@ -151,7 +151,7 @@ static bool RPCAuthorized(const std::string& strAuth, std::string& strAuthUserna
     return multiUserAuthorized(strUserPass);
 }
 
-static bool HTTPReq_JSONRPC(const util::Ref& context, HTTPRequest* req)
+static bool HTTPReq_JSONRPC(const util::Ref& context, HTTPRequest* req, const std::string&)
 {
     // JSONRPC handles only POST
     if (req->GetRequestMethod() != HTTPRequest::POST) {
@@ -294,10 +294,9 @@ bool StartHTTPRPC(const util::Ref& context)
     if (!InitRPCAuthentication())
         return false;
 
-    auto handle_rpc = [&context](HTTPRequest* req, const std::string&) { return HTTPReq_JSONRPC(context, req); };
-    RegisterHTTPHandler("/", true, handle_rpc);
+    RegisterHTTPHandler("/", true, context, HTTPReq_JSONRPC);
     if (g_wallet_init_interface.HasWalletSupport()) {
-        RegisterHTTPHandler("/wallet/", false, handle_rpc);
+        RegisterHTTPHandler("/wallet/", false, context, HTTPReq_JSONRPC);
     }
     struct event_base* eventBase = EventBase();
     assert(eventBase);

@@ -667,8 +667,7 @@ static const struct {
 void StartREST(const util::Ref& context)
 {
     for (const auto& up : uri_prefixes) {
-        auto handler = [&context, up](HTTPRequest* req, const std::string& prefix) { return up.handler(context, req, prefix); };
-        RegisterHTTPHandler(up.prefix, false, handler);
+        RegisterHTTPHandler(up.prefix, false, context, up.handler);
     }
 }
 
