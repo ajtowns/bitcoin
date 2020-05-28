@@ -94,6 +94,19 @@ class TestBitcoinCli(BitcoinTestFramework):
         assert_equal(self.nodes[0].cli("-named", "echo", "arg0=0", "arg1=1", "arg2=2", "arg1=3").send_cli(), ['0', '3', '2'])
         assert_raises_rpc_error(-8, "Parameter args specified multiple times", self.nodes[0].cli("-named", "echo", "args=[0,1,2,3]", "4", "5", "6", ).send_cli)
 
+        header_tests = [ ("@50", self.nodes[0].getblockhash(50)),
+                         ("@best", self.nodes[0].getbestblockhash()),
+                       ]
+        for at,hash in header_tests:
+            self.log.info("Compare response from getblockheader RPC %s/%s" % (at,hash))
+            rpc_response = self.nodes[0].getblockheader(hash)
+            cli_response = self.nodes[0].cli.getblockheader(hash)
+            cli_response_at = self.nodes[0].cli.getblockheader(at)
+            cli_response_at_named = self.nodes[0].cli.getblockheader(blockhash=at)
+            assert_equal(cli_response, rpc_response)
+            assert_equal(cli_response_at, rpc_response)
+            assert_equal(cli_response_at_named, rpc_response)
+
         user, password = get_auth_cookie(self.nodes[0].datadir, self.chain)
 
         self.log.info("Test -stdinrpcpass option")
