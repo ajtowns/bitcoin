@@ -1143,7 +1143,8 @@ static void ModernDeploymentDescPushBack(UniValue& softforks, const std::string 
 
     const CBlockIndex* tip = ::ChainActive().Tip();
 
-    ThresholdConditionChecker checker = ThresholdConditionChecker::FromModernDeployment(consensusParams.vDeployments[id]);
+    const Consensus::ModernDeployment& dep = consensusParams.vDeployments[id];
+    ThresholdConditionChecker checker = ThresholdConditionChecker(dep);
 
     // For modern deployments.
     UniValue depdesc(UniValue::VOBJ);
@@ -1153,16 +1154,16 @@ static void ModernDeploymentDescPushBack(UniValue& softforks, const std::string 
     switch (stateheight.state) {
     case ThresholdState::DISABLED: return;
     case ThresholdState::DEFINED: depdesc.pushKV("status", "defined"); break;
-    case ThresholdState::SIGNAL:
-        depdesc.pushKV("status", "signalling");
+    case ThresholdState::PRIMARY:
+        depdesc.pushKV("status", "primary");
         signal = true;
         break;
     case ThresholdState::QUIET:
         depdesc.pushKV("status", "quiet");
         signal = true;
         break;
-    case ThresholdState::UASF:
-        depdesc.pushKV("status", "uasf");
+    case ThresholdState::SECONDARY:
+        depdesc.pushKV("status", "secondary");
         signal = true;
         break;
     case ThresholdState::LOCKED_IN: depdesc.pushKV("status", "locked_in"); break;
@@ -1172,28 +1173,31 @@ static void ModernDeploymentDescPushBack(UniValue& softforks, const std::string 
 
     depdesc.pushKV("since", stateheight.height);
 
-    const auto& dep = consensusParams.vDeployments[id];
     if (signal) depdesc.pushKV("bit", dep.bit);
-    if (checker.signal_height < checker.quiet_height) depdesc.pushKV("signal_height", (int64_t) checker.signal_height);
-    if (checker.quiet_height < checker.uasf_height) depdesc.pushKV("quiet_height", (int64_t) checker.quiet_height);
-    if (checker.uasf_height < checker.mandatory_height) depdesc.pushKV("uasf_height", (int64_t) checker.uasf_height);
-    if (checker.mandatory_height < checker.MAX_HEIGHT) depdesc.pushKV("mandatory_height", (int64_t) checker.mandatory_height);
+    depdesc.pushKV("start_height", (int64_t) dep.start_height);
 
     if (signal) {
+        depdesc.pushKV("primary_periods", (int64_t) dep.primary_periods);
+        depdesc.pushKV("quiet_periods", (int64_t) dep.quiet_periods);
+        depdesc.pushKV("secondary_periods", (int64_t) dep.secondary_periods);
+        depdesc.pushKV("period", dep.period);
+        depdesc.pushKV("threshold", dep.threshold);
+
         ModernDeploymentStats statsStruct = checker.GetStateStatisticsFor(tip);
 
         UniValue statsUV(UniValue::VOBJ);
-        statsUV.pushKV("period", checker.period);
-        statsUV.pushKV("threshold", checker.threshold);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
         statsUV.pushKV("possible", statsStruct.possible);
         depdesc.pushKV("statistics", statsUV);
     }
+    depdesc.pushKV("guaranteed", dep.guaranteed);
 
     rv.pushKV("modern", depdesc);
     if (ThresholdState::ACTIVE == stateheight.state) {
         rv.pushKV("height", stateheight.height);
+    } else if (ThresholdState::LOCKED_IN == stateheight.state) {
+        rv.pushKV("height", stateheight.height + dep.period);
     }
     rv.pushKV("active", ThresholdState::ACTIVE == stateheight.state);
 

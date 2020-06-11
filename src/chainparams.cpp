@@ -58,21 +58,23 @@ static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce, uint32_t nBits
 }
 
 /**
- * Add a UASF-able deployment
+ * Add a deployment
  */
-template<int bit, int signal_height, uint16_t signal_periods=26, uint16_t quiet_periods=13, uint16_t uasf_periods=52, uint16_t period=2016, uint16_t threshold=1916>
-inline void SetDeployment(Consensus::Params& params, Consensus::DeploymentPos pos, const ArgsManager& args, bool force_uasf=false)
+template<int bit, int start_height, uint16_t primary_periods=26, uint16_t quiet_periods=13, uint16_t secondary_periods=52, uint16_t period=2016, uint16_t threshold=1916>
+inline void SetDeployment(Consensus::Params& params, Consensus::DeploymentPos pos, const ArgsManager& args, bool always_guaranteed=false)
 {
-    static_assert(signal_periods >= 0 && quiet_periods >= 0 && uasf_periods >= 0, "Must specify signal/quiet/uasf periods");
+    static_assert(primary_periods > 0 && quiet_periods >= 0 && secondary_periods > 0, "Must specify primary/quiet/secondary periods");
 
-    bool uasf = force_uasf;
-    for (const std::string& strDeployment : args.GetArgs("-uasf")) {
-        if (strDeployment == VersionBitsDeploymentInfo[(int)pos].name) {
-            uasf = true;
-            break;
+    bool guaranteed = always_guaranteed;
+    if (!guaranteed) {
+        for (const std::string& strDeployment : args.GetArgs("-guaranteedact")) {
+            if (strDeployment == VersionBitsDeploymentInfo[(int)pos].name) {
+                guaranteed = true;
+                break;
+            }
         }
     }
-    params.vDeployments[(int)pos] = Deployment<bit,signal_height,signal_periods,quiet_periods,uasf_periods,period,threshold>(uasf);
+    params.vDeployments[(int)pos] = Deployment<bit,start_height,primary_periods,quiet_periods,secondary_periods,period,threshold>(guaranteed);
 }
 
 /**
@@ -343,12 +345,12 @@ public:
     /**
      * Allows modifying the Version Bits regtest parameters.
      */
-    void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int signal_height, int16_t signal_periods)
+    void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int start_height, int16_t primary_periods)
     {
-        consensus.vDeployments[d].signal_height = signal_height;
-        consensus.vDeployments[d].signal_periods = signal_periods;
+        consensus.vDeployments[d].start_height = start_height;
+        consensus.vDeployments[d].primary_periods = primary_periods;
         consensus.vDeployments[d].quiet_periods = -1;
-        consensus.vDeployments[d].uasf_periods = 0;
+        consensus.vDeployments[d].secondary_periods = 0;
         consensus.vDeployments[d].threshold = consensus.nRuleChangeActivationThreshold;
         consensus.vDeployments[d].period = consensus.nMinerConfirmationWindow;
     }
@@ -376,20 +378,20 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
         if (vDeploymentParams.size() != 3) {
             throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end");
         }
-        int32_t signal_height;
-        int32_t signal_periods;
-        if (!ParseInt32(vDeploymentParams[1], &signal_height) || signal_height < 0) {
-            throw std::runtime_error(strprintf("Invalid signal_height (%s)", vDeploymentParams[1]));
+        int32_t start_height;
+        int32_t primary_periods;
+        if (!ParseInt32(vDeploymentParams[1], &start_height) || start_height < 0) {
+            throw std::runtime_error(strprintf("Invalid start_height (%s)", vDeploymentParams[1]));
         }
-        if (!ParseInt32(vDeploymentParams[2], &signal_periods) || signal_periods < 0 || signal_periods > 10000) {
-            throw std::runtime_error(strprintf("Invalid signal_periods (%s)", vDeploymentParams[2]));
+        if (!ParseInt32(vDeploymentParams[2], &primary_periods) || primary_periods < 0 || primary_periods > 10000) {
+            throw std::runtime_error(strprintf("Invalid primary_periods (%s)", vDeploymentParams[2]));
         }
         bool found = false;
         for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
             if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
-                UpdateVersionBitsParameters(Consensus::DeploymentPos(j), signal_height, signal_periods);
+                UpdateVersionBitsParameters(Consensus::DeploymentPos(j), start_height, primary_periods);
                 found = true;
-                LogPrintf("Setting version bits activation parameters for %s to signal_height=%ld, signal_periods=%ld\n", vDeploymentParams[0], signal_height, signal_periods);
+                LogPrintf("Setting version bits activation parameters for %s to start_height=%ld, primary_periods=%ld\n", vDeploymentParams[0], start_height, primary_periods);
                 break;
             }
         }

@@ -809,9 +809,9 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
                 // Ensure bit is set in block version
                 pblock->nVersion |= VersionBitsMask(consensusParams, pos);
                 // FALL THROUGH to get vbavailable set...
-            case ThresholdState::SIGNAL:
+            case ThresholdState::PRIMARY:
             case ThresholdState::QUIET:
-            case ThresholdState::UASF:
+            case ThresholdState::SECONDARY:
             {
                 const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
                 vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);

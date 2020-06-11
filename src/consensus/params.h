@@ -33,12 +33,12 @@ enum DeploymentPos
  */
 struct ModernDeployment {
     /** Start height for version bits miner confirmation. */
-    int signal_height;
+    int start_height;
 
-    /** Negative value means phase does not end */
-    int16_t signal_periods;
-    int16_t quiet_periods;
-    int16_t uasf_periods;
+    /** Number of periods in each phase. */
+    uint16_t primary_periods;
+    uint16_t quiet_periods;
+    uint16_t secondary_periods;
 
     /** Length of each period (normally same as nMinerConfirmationWindow)
      */
@@ -50,8 +50,8 @@ struct ModernDeployment {
     /** Bit position to select the particular bit in nVersion. */
     uint8_t bit;
 
-    /** UASF phase enabled? */
-    bool uasf_enabled;
+    /** Guaranteed activation? */
+    bool guaranteed;
 };
 
 /**

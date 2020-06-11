@@ -18,43 +18,36 @@ static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const uint8_t VERSIONBITS_NUM_BITS = 29;
 
-template<uint8_t bit, int16_t signal_height, int16_t signal_periods, int16_t quiet_periods, int16_t uasf_periods, uint16_t period, uint16_t threshold>
-inline constexpr Consensus::ModernDeployment Deployment(bool uasf_ok) {
+template<uint8_t bit, int start_height, uint16_t signal_periods, uint16_t quiet_periods, uint16_t secondary_periods, uint16_t period, uint16_t threshold>
+inline constexpr Consensus::ModernDeployment Deployment(bool guaranteed) {
     static_assert(0 <= bit && bit < VERSIONBITS_NUM_BITS && ((1L << bit) & VERSIONBITS_TOP_MASK) == 0, "Invalid version bit");
     static_assert(0 < period && period <= 52416, "Period out of range");
     static_assert(0 < threshold && threshold <= period, "Threshold out of range");
-    static_assert(0 <= signal_height, "Deployment signal_height cannot be negative");
-    static_assert(signal_height % period == 0, "Deployment signal_height must be divisible by period");
-    static_assert(signal_periods >= 0 || (signal_periods == -1 && quiet_periods == 0 && uasf_periods == 0), "If always signalling, quiet and uasf_periods must be 0");
-    static_assert(quiet_periods >= 0 || (quiet_periods == -1 && uasf_periods == 0), "If quiet period lasts forever, uasf_periods must be 0");
-    static_assert(uasf_periods >= 0, "Permanent uasf period does not make sense");
-    static_assert(signal_periods != 0 || uasf_periods != 0 || quiet_periods <= 0, "Buried deployment with quiet period does not make sense");
+    static_assert(start_height >= 0 || start_height + period == 0, "Deployment start_height cannot be negative unless using DeploymentAlwaysActive");
+    static_assert(start_height % period == 0, "Deployment start_height must be divisible by period");
 
-    return (uasf_ok ?
-             Consensus::ModernDeployment{signal_height, signal_periods, quiet_periods, uasf_periods, period, threshold, bit, uasf_ok}
-           : Consensus::ModernDeployment{signal_height, signal_periods, -1, 0, period, threshold, bit, false}
-           );
+    return Consensus::ModernDeployment{start_height, signal_periods, quiet_periods, secondary_periods, period, threshold, bit, guaranteed};
 }
 
 template<int bit>
 inline Consensus::ModernDeployment DeploymentDisabled() {
-    return Deployment<bit,0,0,-1,0,1,1>(true);
+    return Deployment<bit,std::numeric_limits<int>::max(),0,0,0,1,1>(false);
 }
 
 template<int bit,int height>
 inline Consensus::ModernDeployment DeploymentBuried() {
-    return Deployment<bit,height,0,0,0,1,1>(true);
+    return Deployment<bit,height-1,0,0,0,1,1>(true);
 }
 
 template<int bit>
 inline Consensus::ModernDeployment DeploymentAlwaysActive() {
-    return Deployment<bit,0,0,0,0,1,1>(true);
+    return Deployment<bit,-1,0,0,0,1,1>(true);
 }
 
 template<int bit, uint16_t period=2016, uint16_t threshold=1916>
 inline Consensus::ModernDeployment DeploymentAlwaysSignal() {
     // actually DEFINED for a period, then signal
-    return Deployment<bit,period,-1,0,0,period,threshold>(true);
+    return Deployment<bit,period,std::numeric_limits<uint16_t>::max(),0,0,period,threshold>(false);
 }
 
 /** Display status of an in-progress ModernDeployment softfork */
@@ -74,12 +67,12 @@ struct ModernDeploymentStats {
  */
 enum class ThresholdState {
     DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
-    SIGNAL,    // For blocks in the first signalling phase.
+    PRIMARY,   // For blocks in the primary signalling phase.
     QUIET,     // For blocks within the quiet period.
-    UASF,      // For blocks in the second signalling phase pre-mandatory lock in.
-    LOCKED_IN, // For one retarget period after the first retarget period with STARTED or PREFLAG blocks of which at least threshold have the associated bit set in nVersion.
-    ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
-    FAILED,    // For all blocks after STARTED if flag day activation is disabled (final state)
+    SECONDARY, // For blocks in the secondary signalling phase.
+    LOCKED_IN, // For one retarget period after the first period in PRIMARY or SECONDARY of which at least threshold have the associated bit set in nVersion, or after SECONDARY
+    ACTIVE,    // For all blocks after the LOCKED_IN period (final state)
+    FAILED,    // For all blocks after PRIMARY if activation is not guaranteed(final state)
     DISABLED,  // If activation is never possible (final state)
 };
 
@@ -102,24 +95,17 @@ protected:
     // can be overridden
     virtual bool Condition(const CBlockIndex* pindex) const;
 
-    ThresholdConditionChecker(int signal_, int quiet_, int uasf_, int mandatory_, uint16_t period_, uint16_t threshold_, uint8_t bit_) : signal_height{signal_}, quiet_height{quiet_}, uasf_height{uasf_}, mandatory_height{mandatory_}, period{period_}, threshold{threshold_}, bit{bit_} { }
+    /** Returns the state/height for pindex A based on parent pindexPrev B and parent's state */
+    ThresholdStateHeight GetStateHeightFor(const CBlockIndex* pindexPrev, ThresholdStateHeight prev_state) const;
 
 public:
-    static constexpr int MAX_HEIGHT = std::numeric_limits<int>::max();
+    const Consensus::ModernDeployment dep;
 
-    const int signal_height;
-    const int quiet_height;
-    const int uasf_height;
-    const int mandatory_height;
-    const int period;
-    const int threshold;
-    const int bit;
-
-    static ThresholdConditionChecker FromModernDeployment(const Consensus::ModernDeployment& dep);
+    explicit ThresholdConditionChecker(const Consensus::ModernDeployment& _dep) : dep{_dep} { }
 
     virtual ~ThresholdConditionChecker() { }
 
-    /** Returns the state and height-since for pindex A based on parent pindexPrev B. */
+    /** Returns the state/height for pindex A based on parent pindexPrev B using cache. */
     ThresholdStateHeight GetStateHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
 
     /** Returns the state for pindex A based on parent pindexPrev B. */

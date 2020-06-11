@@ -1844,7 +1844,7 @@ private:
 
 public:
     explicit WarningBitsConditionChecker(const Consensus::Params& paramsIn, uint8_t bitIn)
-     : ThresholdConditionChecker{0,MAX_HEIGHT,MAX_HEIGHT,MAX_HEIGHT,paramsIn.nMinerConfirmationWindow, paramsIn.nRuleChangeActivationThreshold, bitIn}
+     : ThresholdConditionChecker{Consensus::ModernDeployment{0, std::numeric_limits<int16_t>::max(), 0, 0, paramsIn.nMinerConfirmationWindow, paramsIn.nRuleChangeActivationThreshold, bitIn, false}}
      , params(paramsIn)
      {}
 
@@ -1852,8 +1852,8 @@ public:
     {
         return pindex->nHeight >= params.MinModernDeploymentWarningHeight &&
                ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
-               ((pindex->nVersion >> bit) & 1) != 0 &&
-               ((ComputeBlockVersion(pindex->pprev, params) >> bit) & 1) == 0;
+               ((pindex->nVersion >> dep.bit) & 1) != 0 &&
+               ((ComputeBlockVersion(pindex->pprev, params) >> dep.bit) & 1) == 0;
     }
 };
 

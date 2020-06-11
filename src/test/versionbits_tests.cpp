@@ -17,7 +17,7 @@ private:
     mutable ThresholdConditionCache cache;
 
 public:
-    TestConditionChecker(const Consensus::ModernDeployment& dep) : ThresholdConditionChecker{ThresholdConditionChecker::FromModernDeployment(dep)} {}
+    explicit TestConditionChecker(const Consensus::ModernDeployment& _dep) : ThresholdConditionChecker{_dep} {}
 
     ThresholdState GetStateFor(const CBlockIndex* pindexPrev) const { return ThresholdConditionChecker::GetStateFor(pindexPrev, cache); }
     ThresholdStateHeight GetStateHeightFor(const CBlockIndex* pindexPrev) const { return ThresholdConditionChecker::GetStateHeightFor(pindexPrev, cache); }
@@ -46,7 +46,7 @@ public:
             delete vpblock[i];
         }
         vpblock.clear();
-        resets++;
+        ++resets;
         num = 0;
         return *this;
     }
@@ -85,7 +85,7 @@ public:
         BOOST_REQUIRE(stateheights.begin() != stateheights.end());
         BOOST_REQUIRE(!vpblock.empty());
         ++num;
-        for (int skip : {1, 1800, 3500}) {
+        for (int skip : {dep.period}) { // {1, dep.period, 1800, 3500}) {
             for (int do_first : {0, 1, (int)stateheights.size()/2, (int)stateheights.size()}) {
                 bool did_first = false;
                 do_first -= (do_first % skip);
@@ -132,13 +132,13 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
     const Consensus::ModernDeployment dep_buried_8000 = DeploymentBuried<BIT,8000>();
     const Consensus::ModernDeployment dep_allsig = DeploymentAlwaysSignal<BIT,1000,900>();
     const Consensus::ModernDeployment dep_sig = Deployment<BIT,3000,10,5,10,1000,900>(false);
-    const Consensus::ModernDeployment dep_sig_uasf = Deployment<BIT,3000,10,5,10,1000,900>(true);
+    const Consensus::ModernDeployment dep_sig_guar = Deployment<BIT,3000,10,5,10,1000,900>(true);
     const Consensus::ModernDeployment dep_sig_short = Deployment<BIT,3000,20,10,20,500,450>(false);
 
     const ThresholdState DEF = ThresholdState::DEFINED,
-                         SIG = ThresholdState::SIGNAL,
+                         PRI = ThresholdState::PRIMARY,
                          QUI = ThresholdState::QUIET,
-                         UAS = ThresholdState::UASF,
+                         SEC = ThresholdState::SECONDARY,
                          LOC = ThresholdState::LOCKED_IN,
                          ACT = ThresholdState::ACTIVE,
                          FAI = ThresholdState::FAILED,
@@ -147,28 +147,28 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
     VersionBitsTester test;
     test.UnconditionalCheck(dep_disabled,    { {DIS, 0 } });
     test.UnconditionalCheck(dep_always,      { {ACT, 0 } });
-    test.UnconditionalCheck(dep_buried_5000, { {DEF, 0 }, {ACT, 5000} });
-    test.UnconditionalCheck(dep_buried_8000, { {DEF, 0 }, {ACT, 8000} });
+    test.UnconditionalCheck(dep_buried_5000, { {DEF, 0 }, {LOC, 4999}, {ACT, 5000} });
+    test.UnconditionalCheck(dep_buried_8000, { {DEF, 0 }, {LOC, 7999}, {ACT, 8000} });
 
     // What happens if everyone signals?
     for (auto ver : { vsig, vboth }) {
         test.Reset()
-            .Mine(30000, ver)
-            .Test(dep_allsig,      { {DEF, 0 }, {SIG, 1000}, {LOC, 2000}, {ACT, 3000} })
-            .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {LOC, 4000}, {ACT, 5000} })
-            .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {LOC, 4000}, {ACT, 5000} })
-            .Test(dep_sig_short,   { {DEF, 0 }, {SIG, 3000}, {LOC, 3500}, {ACT, 4000} })
+            .Mine(40000, ver)
+            .Test(dep_allsig,      { {DEF, 0 }, {PRI, 1000}, {LOC, 2000}, {ACT, 3000} })
+            .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {LOC, 4000}, {ACT, 5000} })
+            .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {LOC, 4000}, {ACT, 5000} })
+            .Test(dep_sig_short,   { {DEF, 0 }, {PRI, 3000}, {LOC, 3500}, {ACT, 4000} })
             .UnconditionalTests();
     }
 
     // What happens if no one signals?
     for (auto ver : { vnone, vother, vmiss }) {
         test.Reset()
-            .Mine(30000, ver)
-            .Test(dep_allsig,      { {DEF, 0 }, {SIG, 1000} })
-            .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {FAI, 13000} })
-            .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {QUI, 13000}, {UAS, 18000}, {LOC, 27000}, {ACT, 28000} })
-            .Test(dep_sig_short,   { {DEF, 0 }, {SIG, 3000}, {FAI, 13000} })
+            .Mine(40000, ver)
+            .Test(dep_allsig,      { {DEF, 0 }, {PRI, 1000} })
+            .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {FAI, 13000} })
+            .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {QUI, 13000}, {SEC, 18000}, {LOC, 28000}, {ACT, 29000} })
+            .Test(dep_sig_short,   { {DEF, 0 }, {PRI, 3000}, {FAI, 13000} })
             .UnconditionalTests();
     }
 
@@ -182,29 +182,29 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         .Mine(5000, vother)
         .Mine(7000, vboth)
         .Mine(30000, vnone)
-        .Test(dep_allsig,      { {DEF, 0 }, {SIG, 1000}, {LOC, 3000}, {ACT, 4000} })
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {LOC, 6000}, {ACT, 7000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {LOC, 6000}, {ACT, 7000} })
-        .Test(dep_sig_short,   { {DEF, 0 }, {SIG, 3000}, {LOC, 4000}, {ACT, 4500} })
+        .Test(dep_allsig,      { {DEF, 0 }, {PRI, 1000}, {LOC, 3000}, {ACT, 4000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {LOC, 6000}, {ACT, 7000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {LOC, 6000}, {ACT, 7000} })
+        .Test(dep_sig_short,   { {DEF, 0 }, {PRI, 3000}, {LOC, 4000}, {ACT, 4500} })
         .UnconditionalTests();
 
-    // Signalling in UASF period only
+    // Signalling in SECONDARY period only
     test.Reset()
         .Mine(18500, vnone)
         .Mine(21000, vsig)
         .Mine(30000, vnone)
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {FAI, 13000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {QUI, 13000}, {UAS, 18000}, {LOC, 20000}, {ACT, 21000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {FAI, 13000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {QUI, 13000}, {SEC, 18000}, {LOC, 20000}, {ACT, 21000} })
         .UnconditionalTests();
 
     // How about edge cases?
-    // Signalling in last block of SIGNAL
+    // Signalling in last block of PRIMARY 
     test.Reset()
         .Mine(12000, vnone)
         .Mine(13000, vsig)
         .Mine(30000, vnone)
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {LOC, 13000}, {ACT, 14000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {LOC, 13000}, {ACT, 14000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {LOC, 13000}, {ACT, 14000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {LOC, 13000}, {ACT, 14000} })
         .UnconditionalTests();
 
     // Signalling in first block of QUIET
@@ -212,8 +212,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         .Mine(13000, vnone)
         .Mine(14000, vsig)
         .Mine(30000, vnone)
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {FAI, 13000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {QUI, 13000}, {UAS, 18000}, {LOC, 27000}, {ACT, 28000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {FAI, 13000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {QUI, 13000}, {SEC, 18000}, {LOC, 28000}, {ACT, 29000} })
         .UnconditionalTests();
 
     // Just enough blocks
@@ -221,8 +221,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         .Mine(10100, vnone)
         .Mine(11000, vsig)
         .Mine(30000, vnone)
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {LOC, 11000}, {ACT, 12000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {LOC, 11000}, {ACT, 12000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {LOC, 11000}, {ACT, 12000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {LOC, 11000}, {ACT, 12000} })
         .UnconditionalTests();
 
     // Just enough blocks, but off by one
@@ -230,8 +230,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         .Mine(10101, vnone)
         .Mine(11001, vsig)
         .Mine(30000, vnone)
-        .Test(dep_sig,         { {DEF, 0 }, {SIG, 3000}, {FAI, 13000} })
-        .Test(dep_sig_uasf,    { {DEF, 0 }, {SIG, 3000}, {QUI, 13000}, {UAS, 18000}, {LOC, 27000}, {ACT, 28000} })
+        .Test(dep_sig,         { {DEF, 0 }, {PRI, 3000}, {FAI, 13000} })
+        .Test(dep_sig_guar,    { {DEF, 0 }, {PRI, 3000}, {QUI, 13000}, {SEC, 18000}, {LOC, 28000}, {ACT, 29000} })
         .UnconditionalTests();
 
 
@@ -245,31 +245,36 @@ static void sanity_check_bit_overlap(const std::string& chainName)
 
     std::vector<ThresholdConditionChecker> checkers;
 
+    const int BUFFER_PERIODS = 3; // locked in plus first two ACTIVE periods
+
     for (int i=0; i<(int) Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        checkers.emplace_back(ThresholdConditionChecker::FromModernDeployment(params.vDeployments[i]));
+        const auto& dep_i = params.vDeployments[i];
+        uint32_t bitmask_i = VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(i));
 
-        uint32_t bitmask = VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(i));
         // Make sure that no deployment tries to set an invalid bit.
-        BOOST_CHECK_EQUAL(bitmask & ~(uint32_t)VERSIONBITS_TOP_MASK, bitmask);
+        BOOST_CHECK_EQUAL(bitmask_i & ~(uint32_t)VERSIONBITS_TOP_MASK, bitmask_i);
 
-        // disabled
-        if (checkers[i].signal_height == checkers[i].MAX_HEIGHT) continue;
-        // buried
-        if (checkers[i].signal_height == checkers[i].mandatory_height) continue;
+        // Skip non-signalling deployments
+        if (dep_i.primary_periods == 0 && dep_i.secondary_periods == 0) continue;
 
-        // Verify that overlapping deployments are not using the
-        // same bit.
+        int final_i = dep_i.start_height + dep_i.period * ((int) dep_i.primary_periods + (int) dep_i.quiet_periods + (int) dep_i.secondary_periods + BUFFER_PERIODS);
+        BOOST_CHECK(dep_i.start_height <= final_i);
+
+        // Verify that overlapping deployments are not using the same bit.
         for (int j=0; j < i; j++) {
-            // disabled
-            if (checkers[j].signal_height == checkers[j].MAX_HEIGHT) continue;
-            // buried
-            if (checkers[j].signal_height == checkers[i].mandatory_height) continue;
+            const auto& dep_j = params.vDeployments[j];
 
-            // no overlap in signalling period
-            if (checkers[i].mandatory_height < checkers[j].signal_height || checkers[j].mandatory_height < checkers[i].signal_height) continue;
+            // Skip non-signalling deployments
+            if (dep_j.primary_periods == 0 && dep_j.secondary_periods == 0) continue;
+
+            int final_j = dep_j.start_height + dep_j.period * ((int) dep_j.primary_periods + (int) dep_j.quiet_periods + (int) dep_j.secondary_periods + BUFFER_PERIODS);
+
+            // Signalling periods don't overlap
+            if (final_j < dep_i.start_height) continue;
+            if (final_i < dep_j.start_height) continue;
 
             // otherwise must have different bits
-            BOOST_CHECK(VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(j)) != bitmask);
+            BOOST_CHECK(VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(j)) != bitmask_i);
         }
     }
 }
@@ -300,12 +305,8 @@ BOOST_AUTO_TEST_CASE(versionbits_height_sanity)
             BOOST_CHECK(0 <= dep.bit && dep.bit < VERSIONBITS_NUM_BITS && ((1L << dep.bit) & VERSIONBITS_TOP_MASK) == 0);
             BOOST_CHECK(0 < dep.period && dep.period <= 52416);
             BOOST_CHECK(0 < dep.threshold && dep.threshold <= dep.period);
-            BOOST_CHECK(0 <= dep.signal_height);
-            BOOST_CHECK(dep.signal_height % dep.period == 0);
-            BOOST_CHECK(dep.signal_periods >= 0 || (dep.signal_periods == -1 && dep.quiet_periods == 0 && dep.uasf_periods == 0));
-            BOOST_CHECK(dep.quiet_periods >= 0 || (dep.quiet_periods == -1 && dep.uasf_periods == 0));
-            BOOST_CHECK(dep.uasf_periods >= 0);
-            BOOST_CHECK(dep.signal_periods != 0 || dep.uasf_periods != 0 || dep.quiet_periods <= 0);
+            BOOST_CHECK(dep.start_height >= 0 || dep.start_height + dep.period == 0);
+            BOOST_CHECK(dep.start_height % dep.period == 0);
         }
     }
 }

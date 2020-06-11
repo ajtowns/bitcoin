@@ -6,100 +6,110 @@
 
 #include <consensus/params.h>
 
-constexpr int MAX_HEIGHT = std::numeric_limits<int>::max();
-
-inline int period_to_height(int previous_height, int previous_periods, int period) {
-    if (previous_height < MAX_HEIGHT && previous_periods >= 0) {
-        return previous_height + previous_periods * period;
-    } else {
-        return MAX_HEIGHT;
-    }
-}
-
-ThresholdConditionChecker ThresholdConditionChecker::FromModernDeployment(const Consensus::ModernDeployment& dep)
-{
-    int signal_height, quiet_height, uasf_height, mandatory_height;
-
-    signal_height = dep.signal_height;
-    quiet_height = period_to_height(signal_height, dep.signal_periods, dep.period);
-    if (dep.uasf_enabled) {
-        uasf_height = period_to_height(quiet_height, dep.quiet_periods, dep.period);
-        mandatory_height = period_to_height(uasf_height, dep.uasf_periods, dep.period);
-    } else {
-        uasf_height = mandatory_height = MAX_HEIGHT;
-    }
-
-    return ThresholdConditionChecker(signal_height, quiet_height, uasf_height, mandatory_height, dep.period, dep.threshold, dep.bit);
-}
-
 bool ThresholdConditionChecker::Condition(const CBlockIndex* pindex) const
 {
-    return ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (pindex->nVersion & (1L << bit)) != 0;
-}
-
-// What would the state be if there was no signalling?
-template<int N>
-static ThresholdStateHeight non_signalled_state(const ThresholdStateHeight (&states)[N], int height)
-{
-    for (const auto& s : states) {
-        if (height >= s.height) {
-            return s;
-        }
-    }
-    return {ThresholdState::DEFINED, 0};
+    return ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (pindex->nVersion & (1L << dep.bit)) != 0;
 }
 
 ThresholdState ThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
 {
-    int height = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
-    if (height >= mandatory_height) return ThresholdState::ACTIVE;
     return GetStateHeightFor(pindexPrev, cache).state;
+}
+
+ThresholdStateHeight ThresholdConditionChecker::GetStateHeightFor(const CBlockIndex* pindexPrev, ThresholdStateHeight prev_state) const
+{
+    int height = (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1);
+
+    if (height % dep.period != 0) return prev_state;
+
+    switch (prev_state.state) {
+    case ThresholdState::ACTIVE:
+    case ThresholdState::FAILED:
+    case ThresholdState::DISABLED:
+        // Final state
+        return prev_state;
+
+    case ThresholdState::LOCKED_IN:
+        // LOCKED_IN transitions to ACTIVE at next period boundary
+        return {ThresholdState::ACTIVE, height};
+
+    case ThresholdState::PRIMARY:
+    case ThresholdState::SECONDARY:
+        // Check for signalling in previous period
+        {
+            int matched = 0;
+            const CBlockIndex* walk = pindexPrev;
+            for (int i = 0; i < dep.period; ++i) {
+                if (walk == nullptr) break;
+                if (Condition(walk)) ++matched;
+                walk = walk->pprev;
+            }
+            if (matched >= dep.threshold) return {ThresholdState::LOCKED_IN, height};
+        }
+        break;
+
+    case ThresholdState::QUIET:
+    case ThresholdState::DEFINED:
+        // Remaining cases only transition on height
+        break;
+    }
+
+    if (height < dep.start_height) {
+        return {ThresholdState::DEFINED, 0};
+    }
+
+    const int periods = (height - dep.start_height) / dep.period;
+    ThresholdState next;
+    if (periods < dep.primary_periods) {
+        next = ThresholdState::PRIMARY;
+    } else if (!dep.guaranteed) {
+        next = ThresholdState::FAILED;
+    } else if (periods < dep.primary_periods + dep.quiet_periods) {
+        next = ThresholdState::QUIET;
+    } else if (periods < dep.primary_periods + dep.quiet_periods + dep.secondary_periods) {
+        next = ThresholdState::SECONDARY;
+    } else {
+        next = ThresholdState::LOCKED_IN;
+    }
+
+    if (next != prev_state.state) return {next, height};
+    return prev_state;
 }
 
 ThresholdStateHeight ThresholdConditionChecker::GetStateHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
 {
-    if (signal_height == quiet_height && uasf_height == MAX_HEIGHT) return {ThresholdState::DISABLED, 0};
+    if (!dep.guaranteed && dep.primary_periods == 0) return {ThresholdState::DISABLED, 0};
 
-    const ThresholdStateHeight states[] = {
-        { ThresholdState::ACTIVE,    mandatory_height },
-        { ThresholdState::LOCKED_IN, mandatory_height - (mandatory_height == MAX_HEIGHT ? 0 : period)},
-        { ThresholdState::UASF,      uasf_height },
-        { ThresholdState::QUIET,     quiet_height },
-        { ThresholdState::SIGNAL,    signal_height },
-    };
+    if (dep.guaranteed && dep.primary_periods == 0 && dep.secondary_periods == 0 && dep.quiet_periods == 0 && dep.start_height % dep.period == 0) {
+        int height = (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1);
+        if (height >= dep.start_height + dep.period) {
+            return {ThresholdState::ACTIVE, dep.start_height + dep.period};
+        } else if (height >= dep.start_height) {
+            return {ThresholdState::LOCKED_IN, dep.start_height};
+        } else {
+            return {ThresholdState::DEFINED, 0};
+        }
+    }
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     if (pindexPrev != nullptr) {
         int height = pindexPrev->nHeight;
-        if (height >= mandatory_height) {
-            // after mandatory_height, results won't change
-            height = mandatory_height - 1;
-        } else if (uasf_height == MAX_HEIGHT && height - period >= quiet_height) {
-            // if UASF/mandatory activation is disabled, first quiet period can be LOCKED_IN
-            // but otherwise results won't change
-            height = quiet_height + period - 1;
-        } else {
-            height = height - ((height + 1) % period);
-        }
+        height = height - ((height + 1) % dep.period);
         pindexPrev = pindexPrev->GetAncestor(height);
-        assert(pindexPrev == nullptr || pindexPrev->nHeight % period == period - 1);
+        assert(pindexPrev == nullptr || pindexPrev->nHeight % dep.period == dep.period - 1);
     }
 
     // walk backwards until a known state
 
     std::vector<const CBlockIndex*> to_compute;
     while (cache.count(pindexPrev) == 0) {
-        if (pindexPrev == nullptr) {
-            cache.insert({pindexPrev, non_signalled_state(states, 0)});
-            break;
-        } else if (pindexPrev->nHeight + 1 < signal_height) {
+        if (pindexPrev == nullptr || pindexPrev->nHeight + 1 < dep.start_height) {
             cache.insert({pindexPrev, {ThresholdState::DEFINED, 0}});
             break;
         }
 
         to_compute.push_back(pindexPrev);
-
-        pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - period);
+        pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - dep.period);
     }
 
     // can pull from cache
@@ -111,45 +121,21 @@ ThresholdStateHeight ThresholdConditionChecker::GetStateHeightFor(const CBlockIn
         pindexPrev = to_compute.back();
         to_compute.pop_back();
 
-        int height = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
-
-        if (stateheight.state == ThresholdState::ACTIVE) {
-             // final state, so stays the same
-        } else if (stateheight.state == ThresholdState::LOCKED_IN) {
-             stateheight = {ThresholdState::ACTIVE, height};
-        } else {
-             bool lock_in = false;
-             if (stateheight.state == ThresholdState::SIGNAL || stateheight.state == ThresholdState::UASF) {
-                 ModernDeploymentStats stats = GetStateStatisticsFor(pindexPrev);
-                 if (stats.count >= threshold) {
-                     lock_in = true;
-                 }
-             }
-             if (lock_in) {
-                 stateheight = {ThresholdState::LOCKED_IN, height};
-             } else {
-                 stateheight = non_signalled_state(states, height);
-             }
-        }
-
+        stateheight = GetStateHeightFor(pindexPrev, stateheight);
         cache.insert({pindexPrev, stateheight});
     }
-
-    // report failed activations specially
-    if (stateheight.state == ThresholdState::QUIET && uasf_height == MAX_HEIGHT) stateheight.state = ThresholdState::FAILED;
 
     return stateheight;
 }
 
 ModernDeploymentStats ThresholdConditionChecker::GetStateStatisticsFor(const CBlockIndex* pindex) const
 {
-    if (pindex == nullptr)
-        return ModernDeploymentStats{0,0,false};
+    if (pindex == nullptr) return ModernDeploymentStats{0,0,false};
 
     ModernDeploymentStats stats;
 
     // Find beginning of period
-    int blocks_to_check = (pindex->nHeight % period) + 1;
+    int blocks_to_check = (pindex->nHeight % dep.period) + 1;
     stats.elapsed = blocks_to_check;
 
     // Count from current block to beginning of period
@@ -162,14 +148,14 @@ ModernDeploymentStats ThresholdConditionChecker::GetStateStatisticsFor(const CBl
     }
 
     stats.count = count;
-    stats.possible = (period - threshold) >= (stats.elapsed - count);
+    stats.possible = (dep.period - dep.threshold) >= (stats.elapsed - count);
 
     return stats;
 }
 
 ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache)
 {
-    return ThresholdConditionChecker::FromModernDeployment(params.vDeployments[pos]).GetStateFor(pindexPrev, cache.caches[pos]);
+    return ThresholdConditionChecker(params.vDeployments[pos]).GetStateFor(pindexPrev, cache.caches[pos]);
 }
 
 uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos)
@@ -186,7 +172,7 @@ void VersionBitsCache::Clear()
 
 bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos dep)
 {
-    return ThresholdState::ACTIVE == ThresholdConditionChecker::FromModernDeployment(params.vDeployments[dep]).GetStateFor(pindexPrev, versionbitscache.caches[dep]);
+    return ThresholdState::ACTIVE == ThresholdConditionChecker(params.vDeployments[dep]).GetStateFor(pindexPrev, versionbitscache.caches[dep]);
 }
 
 int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
@@ -198,9 +184,9 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
         const Consensus::DeploymentPos dep = static_cast<Consensus::DeploymentPos>(i);
         ThresholdState state = VersionBitsState(pindexPrev, params, dep, versionbitscache);
         switch (state) {
-        case ThresholdState::SIGNAL:
+        case ThresholdState::PRIMARY:
         case ThresholdState::QUIET:
-        case ThresholdState::UASF:
+        case ThresholdState::SECONDARY:
         case ThresholdState::LOCKED_IN:
             nVersion |= VersionBitsMask(params, dep);
             break;
