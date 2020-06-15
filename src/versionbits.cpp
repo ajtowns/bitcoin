@@ -3,7 +3,12 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <versionbits.h>
+
 #include <consensus/params.h>
+
+static_assert((((1L<<VERSIONBITS_NUM_BITS) - 1) & VERSIONBITS_IGNORE_BITS) == 0, "Overlap between VERSIONBITS_NUM_BITS and VERSIONBITS_IGNORE_BITS");
+static_assert((VERSIONBITS_TOP_MASK & VERSIONBITS_IGNORE_BITS) == 0, "Overlap between VERSIONBITS_TOP_MASK and VERSIONBITS_IGNORE_BITS");
+static_assert((VERSIONBITS_TOP_MASK & VERSIONBITS_TOP_BITS) == VERSIONBITS_TOP_BITS, "VERSIONBITS_TOP_BITS not a subset of VERSIONBITS_TOP_MASK");
 
 ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, ThresholdConditionCache& cache) const
 {
