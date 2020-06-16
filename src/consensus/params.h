@@ -11,6 +11,15 @@
 
 namespace Consensus {
 
+enum BuriedDeployment
+{
+    // buried deployments get negative values to avoid overlap with SignalledDeployment
+    DEPLOYMENT_CLTV = -255,
+    DEPLOYMENT_DERSIG,
+    DEPLOYMENT_CSV,
+    DEPLOYMENT_SEGWIT,
+};
+
 enum DeploymentPos
 {
     DEPLOYMENT_TESTDUMMY,
@@ -80,7 +89,17 @@ struct Params {
     int64_t DifficultyAdjustmentInterval() const { return nPowTargetTimespan / nPowTargetSpacing; }
     uint256 nMinimumChainWork;
     uint256 defaultAssumeValid;
+
+    inline constexpr int DeploymentHeight(BuriedDeployment dep) const
+    {
+        return (dep == Consensus::DEPLOYMENT_CLTV)   ? BIP65Height :
+               (dep == Consensus::DEPLOYMENT_DERSIG) ? BIP66Height :
+               (dep == Consensus::DEPLOYMENT_CSV)    ? CSVHeight :
+               (dep == Consensus::DEPLOYMENT_SEGWIT) ? SegwitHeight :
+               std::numeric_limits<int>::max();
+    }
 };
+
 } // namespace Consensus
 
 #endif // BITCOIN_CONSENSUS_PARAMS_H
