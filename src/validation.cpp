@@ -10,6 +10,7 @@
 #include <chainparams.h>
 #include <checkqueue.h>
 #include <consensus/consensus.h>
+#include <consensus/deployment.h>
 #include <consensus/merkle.h>
 #include <consensus/tx_check.h>
 #include <consensus/tx_verify.h>
@@ -46,7 +47,6 @@
 #include <util/system.h>
 #include <util/translation.h>
 #include <validationinterface.h>
-#include <versionbits.h>
 #include <warnings.h>
 
 #include <string>
@@ -335,7 +335,7 @@ bool CheckSequenceLocks(const CTxMemPool& pool, const CTransaction& tx, int flag
 }
 
 // Returns the script flags which should be checked for a given block
-static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consensus::Params& chainparams);
+static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consensus::Params& chainparams) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 static void LimitMempoolSize(CTxMemPool& pool, size_t limit, std::chrono::seconds age)
     EXCLUSIVE_LOCKS_REQUIRED(pool.cs, ::cs_main)
@@ -1836,31 +1836,36 @@ void ThreadScriptCheck(int worker_num) {
 }
 
 /**
- * Threshold condition checker that triggers when unknown versionbits are seen on the network.
+ * condition checker that triggers when unknown version bits are seen on the network.
  */
-class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
+namespace {
+
+class WarningBitsCondition : public BIP8DeploymentStatus::Condition
 {
 private:
-    int bit;
+    const Consensus::Params& m_params;
+    DeploymentStatus& m_deploymentstatus;
+    // take a reference to g_deploymentstatus on construction to avoid locking warnings
+    // this means objects of this class must be constructed and destroyed
+    // while cs_main is held
 
 public:
-    explicit WarningBitsConditionChecker(int bitIn) : bit(bitIn) {}
+    explicit WarningBitsCondition(const Consensus::Params& params, DeploymentStatus& deploymentstatus) : m_params(params), m_deploymentstatus(deploymentstatus) { }
 
-    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
-    int64_t EndTime(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
-    int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
-    int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
+    Consensus::BIP8DeploymentParams DeploymentParams(uint8_t bit) const { return {m_params.nMinerConfirmationWindow, m_params.nRuleChangeActivationThreshold, 0, std::numeric_limits<int16_t>::max(), bit, false}; }
 
-    bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override
+    bool operator()(const CBlockIndex* pindex, const Consensus::BIP8DeploymentParams& dep) const override
     {
-        return pindex->nHeight >= params.MinBIP9WarningHeight &&
-               ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
-               ((pindex->nVersion >> bit) & 1) != 0 &&
-               ((ComputeBlockVersion(pindex->pprev, params) >> bit) & 1) == 0;
+        return pindex->nHeight >= m_params.MinBIP8DeploymentWarningHeight &&
+               ((pindex->nVersion & Consensus::VERSIONBITS_TOP_MASK) == Consensus::VERSIONBITS_TOP_BITS) &&
+               ((pindex->nVersion >> dep.bit) & 1) != 0 &&
+               ((m_deploymentstatus.ComputeBlockVersion(pindex->pprev, m_params) >> dep.bit) & 1) == 0;
     }
 };
 
-static ThresholdConditionCache warningcache[VERSIONBITS_NUM_BITS] GUARDED_BY(cs_main);
+} // anon namespace
+
+static BIP8DeploymentStatus warningcache[Consensus::VERSIONBITS_NUM_BITS] GUARDED_BY(cs_main);
 
 static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consensus::Params& consensusparams) EXCLUSIVE_LOCKS_REQUIRED(cs_main) {
     AssertLockHeld(cs_main);
@@ -2440,12 +2445,12 @@ void static UpdateTip(const CBlockIndex* pindexNew, const CChainParams& chainPar
     {
         int nUpgraded = 0;
         const CBlockIndex* pindex = pindexNew;
-        for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {
-            WarningBitsConditionChecker checker(bit);
-            ThresholdState state = checker.GetStateFor(pindex, chainParams.GetConsensus(), warningcache[bit]);
-            if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN) {
-                const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (versionbit %i)"), bit);
-                if (state == ThresholdState::ACTIVE) {
+        const WarningBitsCondition condition(chainParams.GetConsensus(), g_deploymentstatus);
+        for (uint8_t bit = 0; bit < Consensus::VERSIONBITS_NUM_BITS; ++bit) {
+            BIP8DeploymentStatus::State state = warningcache[bit].GetStateFor(pindex, condition.DeploymentParams(bit), condition);
+            if (state == BIP8DeploymentStatus::State::ACTIVE || state == BIP8DeploymentStatus::State::LOCKED_IN) {
+                const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (version bit %i)"), bit);
+                if (state == BIP8DeploymentStatus::State::ACTIVE) {
                     DoWarning(warning);
                 } else {
                     AppendWarning(warning_messages, warning);
@@ -2455,8 +2460,8 @@ void static UpdateTip(const CBlockIndex* pindexNew, const CChainParams& chainPar
         // Check the version of the last 100 blocks to see if we need to upgrade:
         for (int i = 0; i < 100 && pindex != nullptr; i++)
         {
-            int32_t nExpectedVersion = (ComputeBlockVersion(pindex->pprev, chainParams.GetConsensus()) | VERSIONBITS_IGNORE_BITS);
-            if (pindex->nVersion > VERSIONBITS_LAST_OLD_BLOCK_VERSION && (pindex->nVersion & ~nExpectedVersion) != 0)
+            int32_t nExpectedVersion = (g_deploymentstatus.ComputeBlockVersion(pindex->pprev, chainParams.GetConsensus()) | Consensus::VERSIONBITS_IGNORE_BITS);
+            if (pindex->nVersion > Consensus::VERSIONBITS_LAST_OLD_BLOCK_VERSION && (pindex->nVersion & ~nExpectedVersion) != 0)
                 ++nUpgraded;
             pindex = pindex->pprev;
         }
@@ -4589,8 +4594,8 @@ void UnloadBlockIndex()
     nLastBlockFile = 0;
     setDirtyBlockIndex.clear();
     setDirtyFileInfo.clear();
-    versionbitscache.Clear();
-    for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
+    g_deploymentstatus.Clear();
+    for (int b = 0; b < Consensus::VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();
     }
     fHavePruned = false;

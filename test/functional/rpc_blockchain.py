@@ -131,13 +131,12 @@ class BlockchainTest(BitcoinTestFramework):
             'csv': {'type': 'buried', 'active': False, 'height': 432},
             'segwit': {'type': 'buried', 'active': True, 'height': 0},
             'testdummy': {
-                'type': 'bip9',
-                'bip9': {
-                    'status': 'started',
-                    'bit': 28,
-                    'start_time': 0,
-                    'timeout': 0x7fffffffffffffff,  # testdummy does not have a timeout so is set to the max int64 value
+                'type': 'modern',
+                'modern': {
+                    'status': 'signalling',
                     'since': 144,
+                    'bit': 28,
+                    'signal_height': 144,
                     'statistics': {
                         'period': 144,
                         'threshold': 108,

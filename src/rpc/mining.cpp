@@ -7,9 +7,11 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <consensus/consensus.h>
+#include <consensus/deployment.h>
 #include <consensus/params.h>
 #include <consensus/validation.h>
 #include <core_io.h>
+#include <deploymentstatus.h>
 #include <key_io.h>
 #include <miner.h>
 #include <net.h>
@@ -32,8 +34,6 @@
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
-#include <versionbits.h>
-#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <memory>
@@ -478,10 +478,10 @@ static UniValue BIP22ValidationResult(const BlockValidationState& state)
     return "valid?";
 }
 
-static std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
-    const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
-    std::string s = vbinfo.name;
-    if (!vbinfo.gbt_force) {
+static std::string gbt_vb_name(const Consensus::BIP8Deployment pos) {
+    const auto& info = Consensus::DeploymentInfo[pos];
+    std::string s = info.name;
+    if (!info.gbt_force) {
         s.insert(s.begin(), '!');
     }
     return s;
@@ -522,7 +522,7 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
                             {
                                 {RPCResult::Type::STR, "", "rulename"},
                             }},
-                        {RPCResult::Type::OBJ_DYN, "vbavailable", "set of pending, supported versionbit (BIP 9) softfork deployments",
+                        {RPCResult::Type::OBJ_DYN, "vbavailable", "set of pending, supported softfork deployments",
                             {
                                 {RPCResult::Type::NUM, "rulename", "identifies the bit number as indicating acceptance and readiness for the named softfork rule"},
                             }},
@@ -796,40 +796,42 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
     aRules.push_back("csv");
     if (!fPreSegWit) aRules.push_back("!segwit");
     UniValue vbavailable(UniValue::VOBJ);
-    for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
-        Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
-        ThresholdState state = VersionBitsState(pindexPrev, consensusParams, pos, versionbitscache);
+    for (int j = 0; j < (int)Consensus::MAX_BIP8_DEPLOYMENTS; ++j) {
+        Consensus::BIP8Deployment pos = Consensus::BIP8Deployment(j);
+        BIP8DeploymentStatus::State state = g_deploymentstatus.GetStateFor(pindexPrev, consensusParams, pos);
         switch (state) {
-            case ThresholdState::DEFINED:
-            case ThresholdState::FAILED:
+            case BIP8DeploymentStatus::State::DEFINED:
+            case BIP8DeploymentStatus::State::FAILED:
                 // Not exposed to GBT at all
                 break;
-            case ThresholdState::LOCKED_IN:
+            case BIP8DeploymentStatus::State::LOCKED_IN:
+            case BIP8DeploymentStatus::State::SIGNAL:
                 // Ensure bit is set in block version
-                pblock->nVersion |= VersionBitsMask(consensusParams, pos);
+                pblock->nVersion |= g_deploymentstatus.Mask(consensusParams, pos);
                 // FALL THROUGH to get vbavailable set...
-            case ThresholdState::STARTED:
+            case BIP8DeploymentStatus::State::STARTED:
+            case BIP8DeploymentStatus::State::LAST_CHANCE:
             {
-                const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
+                const auto& info = Consensus::DeploymentInfo[pos];
                 vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
-                if (setClientRules.find(vbinfo.name) == setClientRules.end()) {
-                    if (!vbinfo.gbt_force) {
+                if (setClientRules.find(info.name) == setClientRules.end()) {
+                    if (!info.gbt_force) {
                         // If the client doesn't support this, don't indicate it in the [default] version
-                        pblock->nVersion &= ~VersionBitsMask(consensusParams, pos);
+                        pblock->nVersion &= ~g_deploymentstatus.Mask(consensusParams, pos);
                     }
                 }
                 break;
             }
-            case ThresholdState::ACTIVE:
+            case BIP8DeploymentStatus::State::ACTIVE:
             {
                 // Add to rules only
-                const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
+                const auto& info = Consensus::DeploymentInfo[pos];
                 aRules.push_back(gbt_vb_name(pos));
-                if (setClientRules.find(vbinfo.name) == setClientRules.end()) {
+                if (setClientRules.find(info.name) == setClientRules.end()) {
                     // Not supported by the client; make sure it's safe to proceed
-                    if (!vbinfo.gbt_force) {
+                    if (!info.gbt_force) {
                         // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
-                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", vbinfo.name));
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", info.name));
                     }
                 }
                 break;

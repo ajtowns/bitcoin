@@ -128,6 +128,7 @@ BITCOIN_CORE_H = \
   compat/sanity.h \
   compressor.h \
   consensus/consensus.h \
+  consensus/deployment.h \
   consensus/tx_check.h \
   consensus/tx_verify.h \
   core_io.h \
@@ -238,8 +239,6 @@ BITCOIN_CORE_H = \
   util/vector.h \
   validation.h \
   validationinterface.h \
-  versionbits.h \
-  versionbitsinfo.h \
   walletinitinterface.h \
   wallet/coincontrol.h \
   wallet/context.h \
@@ -295,6 +294,7 @@ libbitcoin_server_a_SOURCES = \
   interfaces/node.cpp \
   init.cpp \
   dbwrapper.cpp \
+  deploymentstatus.cpp \
   miner.cpp \
   net.cpp \
   net_processing.cpp \
@@ -324,7 +324,6 @@ libbitcoin_server_a_SOURCES = \
   ui_interface.cpp \
   validation.cpp \
   validationinterface.cpp \
-  versionbits.cpp \
   $(BITCOIN_CORE_H)
 
 if ENABLE_WALLET
@@ -433,6 +432,7 @@ libbitcoin_consensus_a_SOURCES = \
   amount.h \
   arith_uint256.cpp \
   arith_uint256.h \
+  consensus/deployment.cpp \
   consensus/merkle.cpp \
   consensus/merkle.h \
   consensus/params.h \
@@ -493,7 +493,6 @@ libbitcoin_common_a_SOURCES = \
   script/sign.cpp \
   script/signingprovider.cpp \
   script/standard.cpp \
-  versionbitsinfo.cpp \
   warnings.cpp \
   $(BITCOIN_CORE_H)
 

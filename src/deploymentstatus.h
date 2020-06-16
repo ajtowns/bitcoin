@@ -11,6 +11,8 @@
 #include <limits>
 #include <map>
 
+extern RecursiveMutex cs_main;
+
 /**
  * Determine if deployment is active
  * DeploymentFixed variants are inline since they can be almost entirely optimised out
@@ -30,5 +32,108 @@ inline bool DeploymentDisabled(const Consensus::Params& params, Consensus::Burie
 {
     return params.DeploymentHeight(dep) == std::numeric_limits<int>::max();
 }
+
+bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::BIP8Deployment pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+bool DeploymentActiveAt(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::BIP8Deployment pos) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+bool DeploymentDisabled(const Consensus::Params& params, Consensus::BIP8Deployment dep);
+
+/** Implementation of BIP xxx logic for conditional/guaranteed soft fork activation
+ *  Provides a cache to avoid repeated recalculations */
+class BIP8DeploymentStatus
+{
+public:
+    /** Evaluates if a block signals for activation */
+    class Condition {
+    public:
+        virtual bool operator()(const CBlockIndex* pindex, const Consensus::BIP8DeploymentParams& dep) const = 0;
+    };
+
+    /** BIP xxx defines a finite-state-machine to deploy a softfork in multiple stages.
+     *  State transitions happen during retarget period if conditions are met
+     *  In case of reorg, transitions can go backward. Without transition, state is
+     *  inherited between periods. All blocks of a period share the same state.
+     */
+    enum class State {
+        DEFINED,     // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
+        STARTED,     // For blocks in the signalling phase.
+        SIGNAL,      // For blocks in the first period after signalling for guaranteed activatoin
+        LAST_CHANCE, // For blocks in the first period after signalling otherwise
+        LOCKED_IN,   // For one period after the first period in STARTED of which at least threshold have the associated bit set in nVersion, after SIGNAL, or after LAST_CHANCE if all blocks were signalling
+        ACTIVE,      // For all blocks after the LOCKED_IN period (final state)
+        FAILED,      // For all blocks after LAST_CHANCE if any blocks did not signal
+    };
+
+    /** Returns the state for pindex A based on parent pindexPrev B */
+    State GetStateFor(const CBlockIndex* pindexPrev, const Consensus::BIP8DeploymentParams& dep, const Condition& condition);
+
+    /** Represents the current soft-fork state, and the height at which the chain entered the state */
+    struct StateHeight {
+        State state;
+        int height;
+    };
+
+    /** Returns the state/entry height for pindex A based on parent pindexPrev B */
+    StateHeight GetStateHeightFor(const CBlockIndex* pindexPrev, const Consensus::BIP8DeploymentParams& dep, const Condition& condition);
+
+    /** Holds the status of an in-progress BIP8Deployment softfork */
+    struct Stats {
+        /** Number of blocks elapsed since the beginning of the current period */
+        uint16_t elapsed;
+        /** Number of blocks with the version bit set since the beginning of the current period */
+        uint16_t count;
+        /** False if there are not enough blocks left in this period to pass activation threshold */
+        bool possible;
+    };
+
+    /** Returns the numerical statistics of an in-progress BIP8Deployment softfork in the current period */
+    static Stats GetStateStatisticsFor(const CBlockIndex* pindex, const Consensus::BIP8DeploymentParams& dep, const Condition& condition);
+
+    /** Returns if a deployment is always disabled */
+    static bool AlwaysDisabled(const Consensus::BIP8DeploymentParams& dep);
+
+    /** Resets the cache */
+    void clear() { return m_cache.clear(); }
+
+private:
+    // A map that gives the signalling state for blocks at the end of each signalling
+    // period. (All keys in the map will be a block with (height + 1) % Period() == 0)
+    // Value is 0 if signalling has failed to this point, or the number of periods
+    // since signalling succeeded including the period in which signalling succeeded.
+    std::map<const CBlockIndex*, StateHeight> m_cache;
+};
+
+class DeploymentStatus
+{
+private:
+    /** BIP xxx allows multiple softforks to be deployed in parallel. We cache per-period state for every one of them. */
+    BIP8DeploymentStatus m_mds[Consensus::MAX_BIP8_DEPLOYMENTS];
+
+public:
+    using State = BIP8DeploymentStatus::State;
+    using StateHeight = BIP8DeploymentStatus::StateHeight;
+    using Stats = BIP8DeploymentStatus::Stats;
+
+    State GetStateFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::BIP8Deployment pos);
+    StateHeight GetStateHeightFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::BIP8Deployment pos);
+
+    static uint32_t Mask(const Consensus::Params& params, Consensus::BIP8Deployment pos);
+    static Stats GetStateStatisticsFor(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::BIP8Deployment pos);
+
+    void Clear();
+
+    class Condition : public BIP8DeploymentStatus::Condition
+    {
+        bool operator()(const CBlockIndex* pindex, const Consensus::BIP8DeploymentParams& dep) const override;
+    };
+
+    /**
+     * Determine what nVersion a new block should use.
+     */
+    int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params);
+
+    static const Condition g_condition; // no guard needed for const object with no data
+};
+
+extern DeploymentStatus g_deploymentstatus GUARDED_BY(cs_main);
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H
