@@ -20,32 +20,38 @@ enum BuriedDeployment
     DEPLOYMENT_SEGWIT,
 };
 
-enum DeploymentPos
+enum SignalledDeployment
 {
     DEPLOYMENT_TESTDUMMY,
-    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbits.cpp
+    // NOTE: Also add new deployments to DeploymentInfo in consensus/deployment.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 
 /**
- * Struct for each individual consensus rule change using BIP9.
+ * Per-chain parameters for each signalled consensus rule change
+ * See Deployment<>() in consensus/deployment.h for safe initialisation.
  */
-struct BIP9Deployment {
+struct SignalledDeploymentParams {
+    /** Start height for version bits miner confirmation. */
+    int start_height;
+
+    /** Number of periods in each phase. */
+    uint16_t primary_periods;
+    uint16_t quiet_periods;
+    uint16_t secondary_periods;
+
+    /** Length of each period (normally same as nMinerConfirmationWindow)
+     */
+    uint16_t period;
+
+    /** Number of blocks signalling in a period to move to locked in */
+    uint16_t threshold;
+
     /** Bit position to select the particular bit in nVersion. */
-    int bit;
-    /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
-    int64_t nStartTime;
-    /** Timeout/expiry MedianTime for the deployment attempt. */
-    int64_t nTimeout;
+    uint8_t bit;
 
-    /** Constant for nTimeout very far in the future. */
-    static constexpr int64_t NO_TIMEOUT = std::numeric_limits<int64_t>::max();
-
-    /** Special value for nStartTime indicating that the deployment is always active.
-     *  This is useful for testing, as it means tests don't need to deal with the activation
-     *  process (which takes at least 3 BIP9 intervals). Only tests that specifically test the
-     *  behaviour during activation cannot use this. */
-    static constexpr int64_t ALWAYS_ACTIVE = -1;
+    /** Guaranteed activation? */
+    bool guaranteed;
 };
 
 /**
@@ -69,17 +75,17 @@ struct Params {
      * Note that segwit v0 script rules are enforced on all blocks except the
      * BIP 16 exception blocks. */
     int SegwitHeight;
-    /** Don't warn about unknown BIP 9 activations below this height.
+    /** Don't warn about unknown potential signalled activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
-    int MinBIP9WarningHeight;
+    int MinSignalledDeploymentWarningHeight;
     /**
      * Minimum blocks including miner confirmation of the total of 2016 blocks in a retargeting period,
-     * (nPowTargetTimespan / nPowTargetSpacing) which is also used for BIP9 deployments.
+     * (nPowTargetTimespan / nPowTargetSpacing) which is also used for deployments.
      * Examples: 1916 for 95%, 1512 for testchains.
      */
-    uint32_t nRuleChangeActivationThreshold;
-    uint32_t nMinerConfirmationWindow;
-    BIP9Deployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
+    uint16_t nRuleChangeActivationThreshold;
+    uint16_t nMinerConfirmationWindow;
+    SignalledDeploymentParams vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
     /** Proof of work parameters */
     uint256 powLimit;
     bool fPowAllowMinDifficultyBlocks;
