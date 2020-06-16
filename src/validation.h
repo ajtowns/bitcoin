@@ -290,10 +290,6 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
 /** Check a block is completely valid from start to finish (only works on top of our current best block) */
 bool TestBlockValidity(BlockValidationState& state, const CChainParams& chainparams, const CBlock& block, CBlockIndex* pindexPrev, bool fCheckPOW = true, bool fCheckMerkleRoot = true) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-/** Check whether witness commitments are required for a block, and whether to enforce NULLDUMMY (BIP 147) rules.
- *  Note that transaction witness validation rules are always enforced when P2SH is enforced. */
-bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
-
 /** Update uncommitted block structures (currently: only the witness reserved value). This is safe for submitted blocks. */
 void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
 
