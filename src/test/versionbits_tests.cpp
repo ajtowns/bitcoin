@@ -38,7 +38,7 @@ public:
 class TestAlwaysActiveConditionChecker : public TestConditionChecker
 {
 public:
-    int64_t StartHeight(const Consensus::Params& params) const override { return Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
+    int64_t StartHeight(const Consensus::Params& params) const override { return Consensus::VBitsDeployment::ALWAYS_ACTIVE; }
 };
 
 #define CHECKERS 6
