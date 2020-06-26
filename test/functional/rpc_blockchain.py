@@ -133,17 +133,20 @@ class BlockchainTest(BitcoinTestFramework):
             'testdummy': {
                 'type': 'modern',
                 'modern': {
-                    'status': 'signalling',
+                    'status': 'started',
                     'since': 144,
-                    'bit': 28,
-                    'signal_height': 144,
+                    'bit': 12,
+                    'start_height': 144,
+                    'signal_periods': 65535,
+                    'timeoutheight': 9437184,
+                    'period': 144,
+                    'threshold': 108,
                     'statistics': {
-                        'period': 144,
-                        'threshold': 108,
                         'elapsed': 57,
                         'count': 57,
                         'possible': True,
                     },
+                    'guaranteed': False,
                 },
                 'active': False}
         })
