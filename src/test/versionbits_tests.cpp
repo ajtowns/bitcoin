@@ -22,8 +22,11 @@ private:
     mutable ThresholdConditionCache cache;
 
 public:
+    ThresholdState m_timeoutbehaviour{ThresholdState::FAILING};
+
     int64_t StartHeight(const Consensus::Params& params) const override { return 100; }
     int64_t TimeoutHeight(const Consensus::Params& params) const override { return 200; }
+    ThresholdState TimeoutBehaviour(const Consensus::Params& params) const override { return m_timeoutbehaviour; }
     int Period(const Consensus::Params& params) const override { return 10; }
     int Threshold(const Consensus::Params& params) const override { return 9; }
     bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override { return (pindex->nVersion & 0x100); }
@@ -72,6 +75,13 @@ public:
 
     ~VersionBitsTester() {
          Reset();
+    }
+
+    VersionBitsTester& SetTimeoutBehaviour(const ThresholdState transition_to) {
+        for (unsigned int  i = 0; i < CHECKERS; i++) {
+            checker[i].m_timeoutbehaviour = transition_to;
+        }
+        return *this;
     }
 
     VersionBitsTester& Mine(unsigned int height, int32_t nTime, int32_t nVersion) {
@@ -211,6 +221,22 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(209, TestTime(20000), 0x100).TestFailing().TestStateSinceHeight(200)
                            .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
                            .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
+
+        // DEFINED -> STARTED -> LOCKEDIN via lockinontimeout -> ACTIVE
+                           .Reset().TestDefined()
+                           .SetTimeoutBehaviour(ThresholdState::LOCKED_IN)
+                           .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
+                           .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
+                           .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
+                           .Mine(101, TestTime(10010), 0).TestStarted().TestStateSinceHeight(100) // 1 old block
+                           .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
+                           .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
+                           .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
+                           .Mine(200, TestTime(20000), 0).TestLockedIn().TestStateSinceHeight(200)
+                           .Mine(209, TestTime(20000), 0x100).TestLockedIn().TestStateSinceHeight(200)
+                           .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
+                           .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
+                           .SetTimeoutBehaviour(ThresholdState::FAILING)
 
         // DEFINED multiple periods -> STARTED multiple periods -> FAILING -> FAILED
                            .Reset().TestDefined().TestStateSinceHeight(0)

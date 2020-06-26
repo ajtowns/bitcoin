@@ -1165,6 +1165,7 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     }
     bip9.pushKV("startheight", consensusParams.vDeployments[id].startheight);
     bip9.pushKV("timeoutheight", consensusParams.vDeployments[id].timeoutheight);
+    bip9.pushKV("lockinontimeout", consensusParams.vDeployments[id].lockinontimeout);
     int64_t since_height = VersionBitsTipStateSinceHeight(consensusParams, id);
     bip9.pushKV("since", since_height);
     if (ThresholdState::STARTED == thresholdState || ThresholdState::FAILING == thresholdState || ThresholdState::LOCKED_IN == thresholdState) {
@@ -1225,7 +1226,8 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
                                     {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failing\", \"failed\""},
                                     {RPCResult::Type::NUM, "bit", "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" status)"},
                                     {RPCResult::Type::NUM, "startheight", "the minimum height of a block at which the bit gains its meaning"},
-                                    {RPCResult::Type::NUM, "timeoutheight", "the height of a block at which the deployment is considered failed if not yet locked in"},
+                                    {RPCResult::Type::NUM, "timeoutheight", "the height of a block at which the deployment transitions to either failing or locked_in status"},
+                                    {RPCResult::Type::BOOL, "lockinontimeout", "true if timeoutheight transitions to locked_in, or false if it transitions to failing"},
                                     {RPCResult::Type::NUM, "since", "height of the first block to which the status applies"},
                                     {RPCResult::Type::OBJ, "statistics", "numeric statistics about BIP9 signalling for a softfork (only for \"started\" status)",
                                     {

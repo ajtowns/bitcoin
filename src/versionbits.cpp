@@ -72,7 +72,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 if (count >= nThreshold) {
                     stateNext = ThresholdState::LOCKED_IN;
                 } else if (height >= height_timeout) {
-                    stateNext = ThresholdState::FAILING;
+                    stateNext = TimeoutBehaviour(params);
                 }
                 break;
             }
@@ -182,6 +182,13 @@ private:
 protected:
     int64_t StartHeight(const Consensus::Params& params) const override { return params.vDeployments[id].startheight; }
     int64_t TimeoutHeight(const Consensus::Params& params) const override { return params.vDeployments[id].timeoutheight; }
+    ThresholdState TimeoutBehaviour(const Consensus::Params& params) const override {
+        if (params.vDeployments[id].lockinontimeout) {
+            return ThresholdState::LOCKED_IN;
+        } else {
+            return ThresholdState::FAILING;
+        }
+    }
     int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
     int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
 
