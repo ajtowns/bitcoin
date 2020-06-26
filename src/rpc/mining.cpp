@@ -802,6 +802,7 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
                 // Not exposed to GBT at all
                 break;
             case ThresholdState::LOCKED_IN:
+            case ThresholdState::FAILING:
                 // Ensure bit is set in block version
                 pblock->nVersion |= VersionBitsMask(consensusParams, pos);
                 // FALL THROUGH to get vbavailable set...

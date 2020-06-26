@@ -131,6 +131,17 @@ public:
         return *this;
     }
 
+    VersionBitsTester& TestFailing() {
+        const auto newest_block = vpblock.empty() ? nullptr : vpblock.back();
+        for (int i = 0; i < CHECKERS; i++) {
+            if (InsecureRandBits(i)) continue;
+            BOOST_CHECK_MESSAGE(checker[i].GetStateFor(newest_block) == ThresholdState::FAILING, strprintf("Test %i for FAILING", num));
+            BOOST_CHECK_MESSAGE(checker_always[i].GetStateFor(newest_block) == ThresholdState::ACTIVE, strprintf("Test %i for ACTIVE (always active)", num));
+        }
+        ++num;
+        return *this;
+    }
+
     VersionBitsTester& TestActive() {
         for (int i = 0; i < CHECKERS; i++) {
             if (InsecureRandBits(i) == 0) {
@@ -161,7 +172,7 @@ BOOST_FIXTURE_TEST_SUITE(versionbits_tests, TestingSetup)
 BOOST_AUTO_TEST_CASE(versionbits_test)
 {
     for (int i = 0; i < 64; i++) {
-        // DEFINED -> STARTED -> FAILED
+        // DEFINED -> STARTED -> FAILING -> FAILED
         VersionBitsTester().TestDefined().TestStateSinceHeight(0)
                            .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
@@ -170,8 +181,10 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
                            .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
                            .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
-                           .Mine(200, TestTime(20000), 0).TestFailed().TestStateSinceHeight(200)
-                           .Mine(300, TestTime(20010), 0x100).TestFailed().TestStateSinceHeight(200)
+                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
+                           .Mine(209, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
+                           .Mine(210, TestTime(20000), 0).TestFailed().TestStateSinceHeight(210)
+                           .Mine(300, TestTime(20010), 0x100).TestFailed().TestStateSinceHeight(210)
 
         // DEFINED -> STARTED -> LOCKEDIN at the last minute -> ACTIVE
                            .Reset().TestDefined()
@@ -185,7 +198,21 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(200, TestTime(30003), 0).TestActive().TestStateSinceHeight(120)
                            .Mine(300, TestTime(40000), 0).TestActive().TestStateSinceHeight(120)
 
-        // DEFINED multiple periods -> STARTED multiple periods -> FAILED
+        // DEFINED -> STARTED -> FAILING -> ACTIVE
+                           .Reset().TestDefined()
+                           .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
+                           .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
+                           .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
+                           .Mine(101, TestTime(10010), 0).TestStarted().TestStateSinceHeight(100) // 1 old block
+                           .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
+                           .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
+                           .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
+                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
+                           .Mine(209, TestTime(20000), 0x100).TestFailing().TestStateSinceHeight(200)
+                           .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
+                           .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
+
+        // DEFINED multiple periods -> STARTED multiple periods -> FAILING -> FAILED
                            .Reset().TestDefined().TestStateSinceHeight(0)
                            .Mine(9, TestTime(999), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(10, TestTime(1000), 0).TestDefined().TestStateSinceHeight(0)
@@ -193,8 +220,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(100, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
                            .Mine(103, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
                            .Mine(105, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
-                           .Mine(200, TestTime(20000), 0).TestFailed().TestStateSinceHeight(200)
-                           .Mine(300, TestTime(20000), 0x100).TestFailed().TestStateSinceHeight(200);
+                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
+                           .Mine(300, TestTime(20000), 0).TestFailed().TestStateSinceHeight(210);
     }
 
     // Sanity checks of version bit deployments

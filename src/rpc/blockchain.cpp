@@ -1155,24 +1155,27 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     switch (thresholdState) {
     case ThresholdState::DEFINED: bip9.pushKV("status", "defined"); break;
     case ThresholdState::STARTED: bip9.pushKV("status", "started"); break;
+    case ThresholdState::FAILING: bip9.pushKV("status", "failing"); break;
     case ThresholdState::LOCKED_IN: bip9.pushKV("status", "locked_in"); break;
     case ThresholdState::ACTIVE: bip9.pushKV("status", "active"); break;
     case ThresholdState::FAILED: bip9.pushKV("status", "failed"); break;
     }
-    if (ThresholdState::STARTED == thresholdState)
-    {
+    if (ThresholdState::STARTED == thresholdState || ThresholdState::FAILING == thresholdState || ThresholdState::LOCKED_IN == thresholdState) {
         bip9.pushKV("bit", consensusParams.vDeployments[id].bit);
     }
     bip9.pushKV("startheight", consensusParams.vDeployments[id].startheight);
     bip9.pushKV("timeoutheight", consensusParams.vDeployments[id].timeoutheight);
     int64_t since_height = VersionBitsTipStateSinceHeight(consensusParams, id);
     bip9.pushKV("since", since_height);
-    if (ThresholdState::STARTED == thresholdState)
-    {
+    if (ThresholdState::STARTED == thresholdState || ThresholdState::FAILING == thresholdState || ThresholdState::LOCKED_IN == thresholdState) {
         UniValue statsUV(UniValue::VOBJ);
         BIP9Stats statsStruct = VersionBitsTipStatistics(consensusParams, id);
         statsUV.pushKV("period", statsStruct.period);
-        statsUV.pushKV("threshold", statsStruct.threshold);
+        if (ThresholdState::STARTED == thresholdState) {
+            statsUV.pushKV("threshold", statsStruct.threshold);
+        } else if (ThresholdState::FAILING == thresholdState) {
+            statsUV.pushKV("threshold", statsStruct.period);
+        }
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
         statsUV.pushKV("possible", statsStruct.possible);
@@ -1219,7 +1222,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
                                 {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
                                 {RPCResult::Type::OBJ, "bip9", "status of bip9 softforks (only for \"bip9\" type)",
                                 {
-                                    {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failed\""},
+                                    {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failing\", \"failed\""},
                                     {RPCResult::Type::NUM, "bit", "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" status)"},
                                     {RPCResult::Type::NUM, "startheight", "the minimum height of a block at which the bit gains its meaning"},
                                     {RPCResult::Type::NUM, "timeoutheight", "the height of a block at which the deployment is considered failed if not yet locked in"},

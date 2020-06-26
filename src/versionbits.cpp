@@ -72,7 +72,20 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 if (count >= nThreshold) {
                     stateNext = ThresholdState::LOCKED_IN;
                 } else if (height >= height_timeout) {
-                    stateNext = ThresholdState::FAILED;
+                    stateNext = ThresholdState::FAILING;
+                }
+                break;
+            }
+            case ThresholdState::FAILING: {
+                // Only if every block signals does this become ACTIVE
+                stateNext = ThresholdState::ACTIVE;
+                const CBlockIndex* pindexCount = pindexPrev;
+                for (int i = 0; i < nPeriod; i++) {
+                    if (!Condition(pindexCount, params)) {
+                        stateNext = ThresholdState::FAILED;
+                        break;
+                    }
+                    pindexCount = pindexCount->pprev;
                 }
                 break;
             }
