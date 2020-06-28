@@ -1849,15 +1849,19 @@ private:
     // this means objects of this class must be constructed and destroyed
     // while cs_main is held
 
+    static inline constexpr int32_t round_up(int32_t n, uint16_t mod)
+    {
+        return (mod == 0 || n % mod == 0) ? n : n + mod - (n % mod);
+    }
+
 public:
     explicit WarningBitsCondition(const Consensus::Params& params, DeploymentStatus& deploymentstatus) : m_params(params), m_deploymentstatus(deploymentstatus) { }
 
-    Consensus::BIP8DeploymentParams DeploymentParams(uint8_t bit) const { return {m_params.nMinerConfirmationWindow, m_params.nRuleChangeActivationThreshold, 0, std::numeric_limits<int16_t>::max(), bit, false}; }
+    Consensus::BIP8DeploymentParams DeploymentParams(uint8_t bit) const { return {m_params.nMinerConfirmationWindow, m_params.nRuleChangeActivationThreshold, round_up(m_params.MinBIP8DeploymentWarningHeight, m_params.nMinerConfirmationWindow), std::numeric_limits<uint16_t>::max(), bit, false}; }
 
     bool operator()(const CBlockIndex* pindex, const Consensus::BIP8DeploymentParams& dep) const override
     {
-        return pindex->nHeight >= m_params.MinBIP8DeploymentWarningHeight &&
-               ((pindex->nVersion & Consensus::VERSIONBITS_TOP_MASK) == Consensus::VERSIONBITS_TOP_BITS) &&
+        return ((pindex->nVersion & Consensus::VERSIONBITS_TOP_MASK) == Consensus::VERSIONBITS_TOP_BITS) &&
                ((pindex->nVersion >> dep.bit) & 1) != 0 &&
                ((m_deploymentstatus.ComputeBlockVersion(pindex->pprev, m_params) >> dep.bit) & 1) == 0;
     }
@@ -2449,7 +2453,7 @@ void static UpdateTip(const CBlockIndex* pindexNew, const CChainParams& chainPar
         for (uint8_t bit = 0; bit < Consensus::VERSIONBITS_NUM_BITS; ++bit) {
             BIP8DeploymentStatus::State state = warningcache[bit].GetStateFor(pindex, condition.DeploymentParams(bit), condition);
             if (state == BIP8DeploymentStatus::State::ACTIVE || state == BIP8DeploymentStatus::State::LOCKED_IN) {
-                const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (version bit %i)"), bit);
+                const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (versionbit %i)"), bit);
                 if (state == BIP8DeploymentStatus::State::ACTIVE) {
                     DoWarning(warning);
                 } else {
