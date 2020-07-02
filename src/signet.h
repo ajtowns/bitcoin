@@ -5,22 +5,18 @@
 #ifndef BITCOIN_SIGNET_H
 #define BITCOIN_SIGNET_H
 
+#include <consensus/params.h>
+#include <primitives/transaction.h>
+#include <primitives/block.h>
+#include <uint256.h>
+
 #include <cstdint>
 #include <vector>
 #include <array>
 
 #include <span.h>
 
-class CBlock;
-class CScript;
-class uint256;
-struct CMutableTransaction;
-
-namespace Consensus {
-struct Params;
-}
-
-static const uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
+constexpr uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
 
 /**
  * Extract signature and check whether a block has a valid solution
