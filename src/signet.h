@@ -16,17 +16,15 @@
 
 #include <span.h>
 
-constexpr uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
-
 /**
  * Extract signature and check whether a block has a valid solution
  */
 bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusParams);
 
 /**
- * Generate the signet hash for the given block
+ * Generate the signet tx corresponding to the given block
  *
- * The signet hash differs from the regular block hash in two places:
+ * The signet tx commits to everything in the block except:
  * 1. It hashes a modified merkle root with the signet signature removed.
  * 2. It skips the nonce.
  */
@@ -45,10 +43,12 @@ bool GetWitnessCommitmentSection(const CBlock& block, Span<const uint8_t> header
  * This operation may fail and return false, if no witness commitment exists upon call time. Returns true on success.
  */
 bool SetWitnessCommitmentSection(CBlock& block, Span<const uint8_t> header, const std::vector<uint8_t>& data);
+bool SetWitnessCommitmentSection(CMutableTransaction& tx, Span<const uint8_t> header, const std::vector<uint8_t>& data);
 
 /**
  * The tx based equivalent of the above.
  */
-bool SetWitnessCommitmentSection(CMutableTransaction& tx, Span<const uint8_t> header, const std::vector<uint8_t>& data);
+
+CTransaction SignetTx(const CBlock& block);
 
 #endif // BITCOIN_SIGNET_H
