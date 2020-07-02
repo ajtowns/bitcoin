@@ -16,39 +16,30 @@
 
 #include <span.h>
 
-constexpr uint8_t SIGNET_HEADER[4] = {0xec, 0xc7, 0xda, 0xa2};
-
 /**
  * Extract signature and check whether a block has a valid solution
  */
 bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusParams);
 
 /**
- * Generate the signet hash for the given block
+ * Generate the signet tx corresponding to the given block
  *
- * The signet hash differs from the regular block hash in two places:
+ * The signet tx commits to everything in the block except:
  * 1. It hashes a modified merkle root with the signet signature removed.
  * 2. It skips the nonce.
  */
-uint256 GetSignetHash(const CBlock& block);
+class SignetTxs {
+private:
+    template<class T1, class T2>
+    SignetTxs(const T1& to_spend_, const T2& to_sign_) : to_spend{to_spend_}, to_sign{to_sign_} { }
 
-/**
- * Attempt to get the data for the section with the given header in the witness commitment of the block.
- *
- * Returns false if header was not found. The data (excluding the 4 byte header) is written into result if found.
- */
-bool GetWitnessCommitmentSection(const CBlock& block, Span<const uint8_t> header, std::vector<uint8_t>& result);
+    static SignetTxs Create(const CBlock& block, const CScript& challenge);
 
-/**
- * Attempt to add or update the data for the section with the given header in the witness commitment of the block.
- *
- * This operation may fail and return false, if no witness commitment exists upon call time. Returns true on success.
- */
-bool SetWitnessCommitmentSection(CBlock& block, Span<const uint8_t> header, const std::vector<uint8_t>& data);
+public:
+    SignetTxs(const CBlock& block, const CScript& challenge) : SignetTxs(Create(block, challenge)) { }
 
-/**
- * The tx based equivalent of the above.
- */
-bool SetWitnessCommitmentSection(CMutableTransaction& tx, Span<const uint8_t> header, const std::vector<uint8_t>& data);
+    CTransaction to_spend;
+    CTransaction to_sign;
+};
 
 #endif // BITCOIN_SIGNET_H
