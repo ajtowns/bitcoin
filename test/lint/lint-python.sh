@@ -33,7 +33,6 @@ enabled=(
     E401 # multiple imports on one line
     E402 # module level import not at top of file
     E502 # the backslash is redundant between brackets
-    E701 # multiple statements on one line (colon)
     E702 # multiple statements on one line (semicolon)
     E703 # statement ends with a semicolon
     E711 # comparison to None should be 'if cond is None:'
