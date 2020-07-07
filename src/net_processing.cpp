@@ -254,6 +254,12 @@ namespace {
 } // namespace
 
 namespace {
+
+struct txidwtxid {
+   bool is_wtxid;
+   uint256 hash;
+};
+
 /**
  * Maintain validation-specific state about nodes, protected by cs_main, instead
  * by CNode's own locks. This simplifies asynchronous operation, where
@@ -389,11 +395,12 @@ struct CNodeState {
      *   the reject filter, then we will eventually redownload from other
      *   peers.
      */
+
     struct TxDownloadState {
         /* Track when to attempt download of announced transactions (process
          * time in micros -> txid)
          */
-        std::multimap<std::chrono::microseconds, uint256> m_tx_process_time;
+        std::multimap<std::chrono::microseconds, txidwtxid> m_tx_process_time;
 
         //! Store all the transactions a peer has recently announced
         std::set<uint256> m_tx_announced;
@@ -788,21 +795,21 @@ std::chrono::microseconds CalculateTxGetDataTime(const uint256& txid, std::chron
     return process_time;
 }
 
-void RequestTx(CNodeState* state, const uint256& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+void RequestTx(CNodeState* state, const txidwtxid& txid, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     CNodeState::TxDownloadState& peer_download_state = state->m_tx_download;
     if (peer_download_state.m_tx_announced.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
             peer_download_state.m_tx_process_time.size() >= MAX_PEER_TX_ANNOUNCEMENTS ||
-            peer_download_state.m_tx_announced.count(txid)) {
+            peer_download_state.m_tx_announced.count(txid.hash)) {
         // Too many queued announcements from this peer, or we already have
         // this announcement
         return;
     }
-    peer_download_state.m_tx_announced.insert(txid);
+    peer_download_state.m_tx_announced.insert(txid.hash);
 
     // Calculate the time to try requesting this transaction. Use
     // fPreferredDownload as a proxy for outbound peers.
-    const auto process_time = CalculateTxGetDataTime(txid, current_time, !state->fPreferredDownload, !state->m_wtxid_relay && g_wtxid_relay_peers > 0);
+    const auto process_time = CalculateTxGetDataTime(txid.hash, current_time, !state->fPreferredDownload, !state->m_wtxid_relay && g_wtxid_relay_peers > 0);
 
     peer_download_state.m_tx_process_time.emplace(process_time, txid);
 }
@@ -2629,10 +2636,8 @@ void ProcessMessage(
             if (interruptMsgProc)
                 return;
 
-            // ignore INVs that don't match wtxidrelay setting
-            if (State(pfrom.GetId())->m_wtxid_relay) {
-                if (inv.type == MSG_TX) continue;
-            } else {
+            // ignore WTX INVs if wtxid relay not negotatied
+            if (!State(pfrom.GetId())->m_wtxid_relay) {
                 if (inv.type == MSG_WTX) continue;
             }
 
@@ -2660,7 +2665,7 @@ void ProcessMessage(
                     pfrom.fDisconnect = true;
                     return;
                 } else if (!fAlreadyHave && !fImporting && !fReindex && !::ChainstateActive().IsInitialBlockDownload()) {
-                    RequestTx(State(pfrom.GetId()), inv.hash, current_time);
+                    RequestTx(State(pfrom.GetId()), {(inv.type == MSG_WTX), inv.hash}, current_time);
                 }
             }
         }
@@ -2959,17 +2964,14 @@ void ProcessMessage(
                 uint32_t nFetchFlags = GetFetchFlags(pfrom);
                 const auto current_time = GetTime<std::chrono::microseconds>();
 
-                if (!State(pfrom.GetId())->m_wtxid_relay) {
-                    for (const CTxIn& txin : tx.vin) {
-                        // Here, we only have the txid (and not wtxid) of the
-                        // inputs, so we only request parents from
-                        // non-wtxid-relay peers.
-                        // Eventually we should replace this with an improved
-                        // protocol for getting all unconfirmed parents.
-                        CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
-                        pfrom.AddKnownTx(txin.prevout.hash);
-                        if (!AlreadyHave(_inv, mempool)) RequestTx(State(pfrom.GetId()), _inv.hash, current_time);
-                    }
+                for (const CTxIn& txin : tx.vin) {
+                    // Here, we only have the txid (and not wtxid) of the
+                    // inputs.
+                    // Eventually we should replace this with an improved
+                    // protocol for getting all unconfirmed parents.
+                    CInv _inv(MSG_TX | nFetchFlags, txin.prevout.hash);
+                    pfrom.AddKnownTx(txin.prevout.hash);
+                    if (!AlreadyHave(_inv, mempool)) RequestTx(State(pfrom.GetId()), {false, _inv.hash}, current_time);
                 }
                 AddOrphanTx(ptx, pfrom.GetId());
 
@@ -4475,11 +4477,11 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
         auto& tx_process_time = state.m_tx_download.m_tx_process_time;
         while (!tx_process_time.empty() && tx_process_time.begin()->first <= current_time && state.m_tx_download.m_tx_in_flight.size() < MAX_PEER_TX_IN_FLIGHT) {
-            const uint256 txid = tx_process_time.begin()->second;
+            const txidwtxid txid = tx_process_time.begin()->second;
             // Erase this entry from tx_process_time (it may be added back for
             // processing at a later time, see below)
             tx_process_time.erase(tx_process_time.begin());
-            CInv inv(state.m_wtxid_relay ? MSG_WTX : (MSG_TX | GetFetchFlags(*pto)), txid);
+            CInv inv(txid.is_wtxid ? MSG_WTX : (MSG_TX | GetFetchFlags(*pto)), txid.hash);
             if (!AlreadyHave(inv, m_mempool)) {
                 // If this transaction was last requested more than 1 minute ago,
                 // then request.
@@ -4506,7 +4508,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     // would open us up to an attacker using inbound
                     // wtxid-relay to prevent us from requesting transactions
                     // from outbound txid-relay peers).
-                    const auto next_process_time = CalculateTxGetDataTime(txid, current_time, !state.fPreferredDownload, false);
+                    const auto next_process_time = CalculateTxGetDataTime(txid.hash, current_time, !state.fPreferredDownload, false);
                     tx_process_time.emplace(next_process_time, txid);
                 }
             } else {
