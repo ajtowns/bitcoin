@@ -4376,8 +4376,6 @@ void PeerManagerImpl::MaybeSendAddr(CNode& node)
 
     assert(node.m_addr_known);
 
-    const CNetMsgMaker msgMaker(node.GetCommonVersion());
-
     auto current_time = GetTime<std::chrono::microseconds>();
 
     // Periodically advertise our local address to the peer.
@@ -4403,8 +4401,21 @@ void PeerManagerImpl::MaybeSendAddr(CNode& node)
     if (current_time <= node.m_next_addr_send) return;
 
     node.m_next_addr_send = PoissonNextSend(current_time, AVG_ADDRESS_BROADCAST_INTERVAL);
-    std::vector<CAddress> vAddr;
-    vAddr.reserve(node.vAddrToSend.size());
+
+    assert(node.vAddrToSend.size() <= MAX_ADDR_TO_SEND);
+
+    // Remove addr records that the peer already knows about
+    auto addr_already_known = [&node](const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(node.m_addr_mutex)
+                              {return node.m_addr_known->contains(addr.GetKey());};
+    node.vAddrToSend.erase(std::remove_if(node.vAddrToSend.begin(), node.vAddrToSend.end(), addr_already_known),
+                           node.vAddrToSend.end());
+
+    // No addr messages to send
+    if (node.vAddrToSend.empty()) return;
+
+    for (const CAddress& addr : node.vAddrToSend) {
+        node.m_addr_known->insert(addr.GetKey());
+    }
 
     const char* msg_type;
     int make_flags;
@@ -4415,24 +4426,9 @@ void PeerManagerImpl::MaybeSendAddr(CNode& node)
         msg_type = NetMsgType::ADDR;
         make_flags = 0;
     }
-
-    for (const CAddress& addr : node.vAddrToSend)
-    {
-        if (!node.m_addr_known->contains(addr.GetKey()))
-        {
-            node.m_addr_known->insert(addr.GetKey());
-            vAddr.push_back(addr);
-            // receiver rejects addr messages larger than MAX_ADDR_TO_SEND
-            if (vAddr.size() >= MAX_ADDR_TO_SEND)
-            {
-                m_connman.PushMessage(&node, msgMaker.Make(make_flags, msg_type, vAddr));
-                vAddr.clear();
-            }
-        }
-    }
+    m_connman.PushMessage(&node, CNetMsgMaker(node.GetCommonVersion()).Make(make_flags, msg_type, node.vAddrToSend));
     node.vAddrToSend.clear();
-    if (!vAddr.empty())
-        m_connman.PushMessage(&node, msgMaker.Make(make_flags, msg_type, vAddr));
+
     // we only send the big addr message once
     if (node.vAddrToSend.capacity() > 40)
         node.vAddrToSend.shrink_to_fit();
