@@ -645,6 +645,9 @@ def main():
     else:
         use_witness = False
 
+    signet_witpre = tmpl.get("signet_witness_prefix",[])
+    assert use_witness or signet_witpre == []
+
     cp = subprocess.run(["./bitcoin-cli","-signet",
                          "signrawtransactionwithwallet",
                          ToHex(signet_tx(block, use_witness)),
@@ -659,7 +662,12 @@ def main():
     stx = FromHex(CTransaction(), cpjson["hex"])
 
     if use_witness:
-        block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER_WITNESS + stx.wit.vtxinwit[0].serialize())
+        witdata = stx.wit.vtxinwit[0]
+        for (i,k) in enumerate(reversed(signet_witpre)):
+            assert len(witdata.scriptWitness.stack) > 0
+            assert witdata.scriptWitness.stack[-1] == unhexlify(k)
+            witdata.scriptWitness.stack.pop()
+        block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER_WITNESS + witdata.serialize())
     else:
         block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER_SCRIPTSIG + stx.vin[0].scriptSig)
     block.vtx[0].rehash()
