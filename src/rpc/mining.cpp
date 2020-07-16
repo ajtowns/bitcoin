@@ -884,6 +884,13 @@ static UniValue getblocktemplate(const JSONRPCRequest& request)
 
     if (consensusParams.signet_blocks) {
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
+        if (!consensusParams.signet_witness_prefix.empty()) {
+            UniValue prefix(UniValue::VARR);
+            for (const auto& wp : consensusParams.signet_witness_prefix) {
+                prefix.push_back(HexStr(wp));
+            }
+            result.pushKV("signet_witness_prefix", prefix);
+        }
     }
 
     if (!pblocktemplate->vchCoinbaseCommitment.empty()) {
