@@ -48,7 +48,6 @@ bool SetWitnessCommitmentSection(CMutableTransaction& tx, Span<const uint8_t> he
 /**
  * The tx based equivalent of the above.
  */
-
-CTransaction SignetTx(const CBlock& block);
+CTransaction SignetTx(const CBlock& block, const std::vector<std::vector<uint8_t>>& witness_prefix);
 
 #endif // BITCOIN_SIGNET_H

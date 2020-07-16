@@ -87,6 +87,7 @@ struct Params {
      */
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
+    std::vector<std::vector<uint8_t>> signet_witness_prefix;
 };
 } // namespace Consensus
 

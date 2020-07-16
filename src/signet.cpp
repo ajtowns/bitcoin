@@ -91,7 +91,7 @@ static uint256 ComputeModifiedMerkleRoot(const CMutableTransaction& cb, const CB
     return ComputeMerkleRoot(std::move(leaves));
 }
 
-CTransaction SignetTx(const CBlock& block)
+CTransaction SignetTx(const CBlock& block, const std::vector<std::vector<uint8_t>>& witness_prefix)
 {
     CMutableTransaction tx;
 
@@ -121,6 +121,9 @@ CTransaction SignetTx(const CBlock& block)
                 tx.vin[0].scriptWitness.stack.clear();
                 tx.vin[0].scriptWitness.stack.push_back(data);
             }
+            for (const auto& i : witness_prefix) {
+                tx.vin[0].scriptWitness.stack.push_back(i);
+            }
         }
         uint256 signet_merkle = ComputeModifiedMerkleRoot(mtx, block);
         tx.vout[0].scriptPubKey << std::vector<uint8_t>(signet_merkle.begin(), signet_merkle.end());
@@ -138,7 +141,7 @@ bool CheckBlockSolution(const CBlock& block, const Consensus::Params& consensusP
     }
 
     CScript challenge(consensusParams.signet_challenge.begin(), consensusParams.signet_challenge.end());
-    const CTransaction signet_tx = SignetTx(block);
+    const CTransaction signet_tx = SignetTx(block, consensusParams.signet_witness_prefix);
 
     const CScript& scriptSig = signet_tx.vin[0].scriptSig;
     const CScriptWitness& witness = signet_tx.vin[0].scriptWitness;

@@ -66,6 +66,7 @@ public:
         strNetworkID = CBaseChainParams::MAIN;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_witness_prefix.clear();
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000000002dc756eebf4f49723ed8d30cc28a5f108eb94b1ba88ac4f9c22");
         consensus.BIP34Height = 227931;
@@ -177,6 +178,7 @@ public:
         strNetworkID = CBaseChainParams::TESTNET;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_witness_prefix.clear();
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000dd30457c001f4095d208cc1296b0eed002427aa599874af7a432b105");
         consensus.BIP34Height = 21111;
@@ -262,6 +264,7 @@ class SigNetParams : public CChainParams {
 public:
     explicit SigNetParams(const ArgsManager& args) {
         std::vector<uint8_t> bin;
+        std::vector<std::vector<uint8_t>> witpre;
         vSeeds.clear();
 
         if (!args.IsArgSet("-signet_blockscript")) {
@@ -278,6 +281,12 @@ public:
             bin = ParseHex(blockscript[0]);
 
             LogPrintf("Signet with block script %s\n", blockscript[0]);
+
+            if (args.IsArgSet("-signet_witness_prefix")) {
+                for (const auto& i : gArgs.GetArgs("-signet_witness_prefix")) {
+                    witpre.push_back(ParseHex(i));
+                }
+            }
         }
 
         if (args.IsArgSet("-signet_seednode")) {
@@ -287,6 +296,7 @@ public:
         strNetworkID = CBaseChainParams::SIGNET;
         consensus.signet_blocks = true;
         consensus.signet_challenge.assign(bin.begin(), bin.end());
+        consensus.signet_witness_prefix.assign(witpre.begin(), witpre.end());
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP34Height = 1;
         consensus.BIP65Height = 1;
@@ -304,9 +314,12 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1539478800;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // message start is defined as the first 4 bytes of the sha256d of the block script
+        // message start is defined as the first 4 bytes of the sha256d of the block script and witness prefix if any
         CHashWriter h(SER_DISK, 0);
         h << consensus.signet_challenge;
+        if (!consensus.signet_witness_prefix.empty()) {
+            h << consensus.signet_witness_prefix;
+        }
         uint256 hash = h.GetHash();
         memcpy(pchMessageStart, hash.begin(), 4);
 
@@ -344,6 +357,7 @@ public:
         strNetworkID =  CBaseChainParams::REGTEST;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_witness_prefix.clear();
         consensus.nSubsidyHalvingInterval = 150;
         consensus.BIP16Exception = uint256();
         consensus.BIP34Height = 500; // BIP34 activated on regtest (Used in functional tests)

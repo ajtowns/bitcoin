@@ -26,6 +26,7 @@ void SetupChainParamsBaseOptions()
     gArgs.AddArg("-vbparams=deployment:start:end", "Use given start/end times for specified version bits deployment (regtest-only)", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CHAINPARAMS);
     gArgs.AddArg("-signet", "Use the signet chain. Note that the network is defined by the signet_blockscript parameter", ArgsManager::ALLOW_ANY, OptionsCategory::CHAINPARAMS);
     gArgs.AddArg("-signet_blockscript", "Blocks must satisfy the given script to be considered valid (only for signet networks)", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
+    gArgs.AddArg("-signet_witness_prefix", "Additional items to go at the top of the witness stack to satisfy the blockscript challenge (only for signet networks)", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
     gArgs.AddArg("-signet_seednode", "Specify a seed node for the signet network (may be used multiple times to specify multiple seed nodes)", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
 }
 
