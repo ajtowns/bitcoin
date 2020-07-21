@@ -332,6 +332,12 @@ public:
         fRequireStandard = true;
         m_is_test_chain = true;
         m_is_mockable_chain = false;
+
+        chainTxData = ChainTxData{
+            0,
+            0,
+            0
+        };
     }
 };
 
