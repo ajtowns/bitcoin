@@ -48,6 +48,55 @@ static bool ExtractCommitmentSection(CScript& script, const Span<const uint8_t> 
     return found;
 }
 
+#if 0
+// needed if bitcoind is going to support creating signet blocks
+
+bool AddOrUpdateSignetCommitment(CBlock& block, const std::vector<uint8_t>& data)
+{
+    const Span<const uint8_t> header(SIGNET_HEADER);
+
+    assert(block.vtx.size() >= 1);
+    CMutableTransaction cb(*block.vtx.at(0));
+
+    int cidx = GetWitnessCommitmentIndex(cb);
+    assert(cidx != NO_WITNESS_COMMITMENT);
+    assert(cidx >= 0 && cidx < (int64_t)cb.vout.size());
+    CScript& script = cb.vout.at(cidx).scriptPubKey;
+
+    CScript replacement;
+    bool found = false;
+
+    opcodetype opcode;
+    std::vector<uint8_t> pushdata;
+    CScript::const_iterator pc = script.begin();
+    while (script.GetOp(pc, opcode, pushdata)) {
+        if (pushdata.size() > 0) {
+            if (!found && pushdata.size() >= (size_t) header.size() && Span<const uint8_t>(pushdata.data(), header.size()) == header) {
+                found = true;
+                pushdata.clear();
+                pushdata.insert(pushdata.end(), header.begin(), header.end());
+                pushdata.insert(pushdata.end(), data.begin(), data.end());
+            }
+            replacement << pushdata;
+            pushdata.clear();
+        } else {
+            replacement << opcode;
+        }
+    }
+
+    if (!found) {
+        pushdata.clear();
+        pushdata.insert(pushdata.end(), header.begin(), header.end());
+        pushdata.insert(pushdata.end(), data.begin(), data.end());
+        replacement << pushdata;
+    }
+
+    script = replacement;
+    block.vtx[0] = MakeTransactionRef(cb);
+    return found;
+}
+#endif
+
 static uint256 ComputeModifiedMerkleRoot(const CMutableTransaction& cb, const CBlock& block)
 {
     std::vector<uint256> leaves;
