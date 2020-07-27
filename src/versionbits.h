@@ -16,8 +16,8 @@ static const int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
 static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const int32_t VERSIONBITS_NUM_BITS = 13;
-/** Bitmask for ignored versionbits. It should match VERSIONBITS_NUM_BITS (BIPxxx) */
-static const int32_t VERSIONBITS_IGNORE_MASK = 0xE0001FFFUL;
+/** Bitmask for ignored versionbits. It should correspond to VERSIONBITS_NUM_BITS (BIPxxx) */
+static const int32_t VERSIONBITS_IGNORE_MASK = 0x1FFFE000UL;
 
 /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
  *  State transitions happen during retarget period if conditions are met

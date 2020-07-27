@@ -5,6 +5,23 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
+/** Compile time checks for VERSIONBITS_* constants */
+namespace {
+template<uint8_t BIT>
+struct bitcounter {
+    static_assert(0 < BIT && BIT < 31, "BIT out of range");
+    static constexpr int32_t value = (1L << (BIT-1)) | bitcounter<BIT-1>::value;
+};
+template<>
+struct bitcounter<0> {
+    static constexpr int32_t value = 0;
+};
+constexpr int32_t VERSIONBITS_ALL_SET = bitcounter<VERSIONBITS_NUM_BITS>::value;
+static_assert((VERSIONBITS_ALL_SET & VERSIONBITS_TOP_MASK) == 0, "VERSIONBITS_NUM_BITS overlaps TOP_MASK");
+static_assert((VERSIONBITS_ALL_SET & VERSIONBITS_IGNORE_MASK) == 0, "VERSIONBITS_NUM_BITS overlaps IGNORE_MASK");
+static_assert((VERSIONBITS_TOP_BITS & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS, "VERSIONBITS_TOP_MASK does not cover VERSIONBITS_TOP_BITS");
+} // namespace
+
 ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, ThresholdConditionCache& cache) const
 {
     int nPeriod = Period(params);
