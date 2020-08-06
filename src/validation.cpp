@@ -1821,7 +1821,7 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         ThresholdState state = VersionBitsState(pindexPrev, params, static_cast<Consensus::DeploymentPos>(i), versionbitscache);
-        if (state == ThresholdState::FAILING || state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
+        if (state == ThresholdState::MUST_SIGNAL || state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
             nVersion |= VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(i));
         }
     }
@@ -1842,7 +1842,7 @@ public:
 
     int64_t StartHeight(const Consensus::Params& params) const override { return 0; }
     int64_t TimeoutHeight(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
-    ThresholdState TimeoutBehaviour(const Consensus::Params& params) const override { return ThresholdState::FAILING; }
+    bool LockInOnTimeout(const Consensus::Params& params) const override { return false; }
     int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
     int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
 
@@ -3533,14 +3533,17 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
 {
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
-    // Enforce LOCKED_IN status of deployments
+    // Enforce MUST_SIGNAL status of deployments
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos deployment_pos = Consensus::DeploymentPos(j);
         ThresholdState deployment_state = VersionBitsState(pindexPrev, consensusParams, deployment_pos, versionbitscache);
-        if (deployment_state == ThresholdState::LOCKED_IN) {
+        if (deployment_state == ThresholdState::MUST_SIGNAL) {
             if (!(block.nVersion & VersionBitsMask(consensusParams, deployment_pos))) {
-                const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
-                return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " has locked in and must be signalled");
+                VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
+                if (stats.count + stats.period - stats.elapsed < stats.threshold) {
+                    const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
+                    return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
+                }
             }
         }
     }

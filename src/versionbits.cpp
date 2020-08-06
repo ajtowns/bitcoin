@@ -63,30 +63,26 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 // We need to count
                 const CBlockIndex* pindexCount = pindexPrev;
                 int count = 0;
-                for (int i = 0; i < nPeriod; i++) {
+                for (int i = 0; i < nPeriod; ++i) {
                     if (Condition(pindexCount, params)) {
-                        count++;
+                        ++count;
                     }
                     pindexCount = pindexCount->pprev;
                 }
                 if (count >= nThreshold) {
                     stateNext = ThresholdState::LOCKED_IN;
+                } else if (LockInOnTimeout(params) && height + nPeriod >= height_timeout) {
+                    stateNext = ThresholdState::MUST_SIGNAL;
                 } else if (height >= height_timeout) {
-                    stateNext = TimeoutBehaviour(params);
+                    stateNext = ThresholdState::FAILED;
                 }
                 break;
             }
-            case ThresholdState::FAILING: {
-                // Only if every block signals does this become ACTIVE
-                stateNext = ThresholdState::ACTIVE;
-                const CBlockIndex* pindexCount = pindexPrev;
-                for (int i = 0; i < nPeriod; i++) {
-                    if (!Condition(pindexCount, params)) {
-                        stateNext = ThresholdState::FAILED;
-                        break;
-                    }
-                    pindexCount = pindexCount->pprev;
-                }
+            case ThresholdState::MUST_SIGNAL: {
+                // Always transitions to LOCKED_IN
+                // (blocks are invalid if more than nPeriod-nThreshold
+                //  fail to signal)
+                stateNext = ThresholdState::LOCKED_IN;
                 break;
             }
             case ThresholdState::LOCKED_IN: {
@@ -125,7 +121,7 @@ VBitsStats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlock
     const CBlockIndex* currentIndex = pindex;
     while (pindexEndOfPrevPeriod->nHeight != currentIndex->nHeight){
         if (Condition(currentIndex, params))
-            count++;
+            ++count;
         currentIndex = currentIndex->pprev;
     }
 
@@ -182,13 +178,7 @@ private:
 protected:
     int64_t StartHeight(const Consensus::Params& params) const override { return params.vDeployments[id].startheight; }
     int64_t TimeoutHeight(const Consensus::Params& params) const override { return params.vDeployments[id].timeoutheight; }
-    ThresholdState TimeoutBehaviour(const Consensus::Params& params) const override {
-        if (params.vDeployments[id].lockinontimeout) {
-            return ThresholdState::LOCKED_IN;
-        } else {
-            return ThresholdState::FAILING;
-        }
-    }
+    bool LockInOnTimeout(const Consensus::Params& params) const override { return params.vDeployments[id].lockinontimeout; }
     int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
     int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
 

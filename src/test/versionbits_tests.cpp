@@ -22,11 +22,11 @@ private:
     mutable ThresholdConditionCache cache;
 
 public:
-    ThresholdState m_timeoutbehaviour{ThresholdState::FAILING};
+    bool m_lockinontimeout{false};
 
     int64_t StartHeight(const Consensus::Params& params) const override { return 100; }
     int64_t TimeoutHeight(const Consensus::Params& params) const override { return 200; }
-    ThresholdState TimeoutBehaviour(const Consensus::Params& params) const override { return m_timeoutbehaviour; }
+    bool LockInOnTimeout(const Consensus::Params& params) const override { return m_lockinontimeout; }
     int Period(const Consensus::Params& params) const override { return 10; }
     int Threshold(const Consensus::Params& params) const override { return 9; }
     bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override { return (pindex->nVersion & 0x100); }
@@ -59,9 +59,10 @@ class VersionBitsTester
     int num;
 
 public:
-    VersionBitsTester() : num(0) {}
+    VersionBitsTester(int testcase = 0, int line = 0) : num(testcase*100+line*10000) {}
 
-    VersionBitsTester& Reset() {
+    VersionBitsTester& Reset(int line_) {
+        num = line_*10000 + num%10000 - num%100;
         for (unsigned int i = 0; i < vpblock.size(); i++) {
             delete vpblock[i];
         }
@@ -74,12 +75,12 @@ public:
     }
 
     ~VersionBitsTester() {
-         Reset();
+         Reset(0);
     }
 
-    VersionBitsTester& SetTimeoutBehaviour(const ThresholdState transition_to) {
+    VersionBitsTester& SetLockInOnTimeout(const bool lockinontimeout) {
         for (unsigned int  i = 0; i < CHECKERS; i++) {
-            checker[i].m_timeoutbehaviour = transition_to;
+            checker[i].m_lockinontimeout = lockinontimeout;
         }
         return *this;
     }
@@ -130,6 +131,17 @@ public:
         return *this;
     }
 
+    VersionBitsTester& TestMustSignal() {
+        const auto newest_block = vpblock.empty() ? nullptr : vpblock.back();
+        for (int i = 0; i < CHECKERS; i++) {
+            if (InsecureRandBits(i)) continue;
+            BOOST_CHECK_MESSAGE(checker[i].GetStateFor(newest_block) == ThresholdState::MUST_SIGNAL, strprintf("Test %i for MUST_SIGNAL", num));
+            BOOST_CHECK_MESSAGE(checker_always[i].GetStateFor(newest_block) == ThresholdState::ACTIVE, strprintf("Test %i for ACTIVE (always active)", num));
+        }
+        ++num;
+        return *this;
+    }
+
     VersionBitsTester& TestLockedIn() {
         for (int i = 0; i < CHECKERS; i++) {
             if (InsecureRandBits(i) == 0) {
@@ -138,17 +150,6 @@ public:
             }
         }
         num++;
-        return *this;
-    }
-
-    VersionBitsTester& TestFailing() {
-        const auto newest_block = vpblock.empty() ? nullptr : vpblock.back();
-        for (int i = 0; i < CHECKERS; i++) {
-            if (InsecureRandBits(i)) continue;
-            BOOST_CHECK_MESSAGE(checker[i].GetStateFor(newest_block) == ThresholdState::FAILING, strprintf("Test %i for FAILING", num));
-            BOOST_CHECK_MESSAGE(checker_always[i].GetStateFor(newest_block) == ThresholdState::ACTIVE, strprintf("Test %i for ACTIVE (always active)", num));
-        }
-        ++num;
         return *this;
     }
 
@@ -182,8 +183,8 @@ BOOST_FIXTURE_TEST_SUITE(versionbits_tests, TestingSetup)
 BOOST_AUTO_TEST_CASE(versionbits_test)
 {
     for (int i = 0; i < 64; i++) {
-        // DEFINED -> STARTED -> FAILING -> FAILED
-        VersionBitsTester().TestDefined().TestStateSinceHeight(0)
+        // DEFINED -> STARTED -> FAILED
+        VersionBitsTester(i, __LINE__).TestDefined().TestStateSinceHeight(0)
                            .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
                            .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
@@ -191,13 +192,11 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
                            .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
                            .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
-                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
-                           .Mine(209, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
-                           .Mine(210, TestTime(20000), 0).TestFailed().TestStateSinceHeight(210)
-                           .Mine(300, TestTime(20010), 0x100).TestFailed().TestStateSinceHeight(210)
+                           .Mine(200, TestTime(20000), 0).TestFailed().TestStateSinceHeight(200)
+                           .Mine(300, TestTime(20010), 0x100).TestFailed().TestStateSinceHeight(200)
 
-        // DEFINED -> STARTED -> LOCKEDIN at the last minute -> ACTIVE
-                           .Reset().TestDefined()
+        // DEFINED -> STARTED -> LOCKED_IN at the last minute -> ACTIVE
+                           .Reset(__LINE__).TestDefined()
                            .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(99, TestTime(10000) - 1, 0x101).TestDefined().TestStateSinceHeight(0) // One second more and it would be started
                            .Mine(100, TestTime(10000), 0x101).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
@@ -208,8 +207,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(200, TestTime(30003), 0).TestActive().TestStateSinceHeight(120)
                            .Mine(300, TestTime(40000), 0).TestActive().TestStateSinceHeight(120)
 
-        // DEFINED -> STARTED -> FAILING -> ACTIVE
-                           .Reset().TestDefined()
+        // DEFINED -> STARTED -> LOCKED_IN -> ACTIVE
+                           .Reset(__LINE__).TestDefined()
                            .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
                            .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
@@ -217,37 +216,41 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
                            .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
                            .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
                            .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
-                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
-                           .Mine(209, TestTime(20000), 0x100).TestFailing().TestStateSinceHeight(200)
-                           .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
-                           .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
-
-        // DEFINED -> STARTED -> LOCKEDIN via lockinontimeout -> ACTIVE
-                           .Reset().TestDefined()
-                           .SetTimeoutBehaviour(ThresholdState::LOCKED_IN)
-                           .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
-                           .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
-                           .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
-                           .Mine(101, TestTime(10010), 0).TestStarted().TestStateSinceHeight(100) // 1 old block
-                           .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
-                           .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
-                           .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
+                           .Mine(190, TestTime(20000), 0).TestStarted().TestStateSinceHeight(100)
+                           .Mine(199, TestTime(20000), 0x100).TestStarted().TestStateSinceHeight(100)
                            .Mine(200, TestTime(20000), 0).TestLockedIn().TestStateSinceHeight(200)
                            .Mine(209, TestTime(20000), 0x100).TestLockedIn().TestStateSinceHeight(200)
                            .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
                            .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
-                           .SetTimeoutBehaviour(ThresholdState::FAILING)
+
+        // DEFINED -> STARTED -> MUST_SIGNAL -> LOCKED_IN -> ACTIVE
+                           .Reset(__LINE__).TestDefined()
+                           .SetLockInOnTimeout(true)
+                           .Mine(1, TestTime(1), 0).TestDefined().TestStateSinceHeight(0)
+                           .Mine(99, TestTime(10000) - 1, 0x100).TestDefined().TestStateSinceHeight(0) // One block more and it would be defined
+                           .Mine(100, TestTime(10000), 0x100).TestStarted().TestStateSinceHeight(100) // So that's what happens the next period
+                           .Mine(101, TestTime(10010), 0).TestStarted().TestStateSinceHeight(100) // 1 old block
+                           .Mine(109, TestTime(10020), 0x100).TestStarted().TestStateSinceHeight(100) // 8 new blocks
+                           .Mine(110, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100) // 1 old block (so 8 out of the past 10 are new)
+                           .Mine(151, TestTime(10020), 0).TestStarted().TestStateSinceHeight(100)
+                           .Mine(190, TestTime(20000), 0).TestMustSignal().TestStateSinceHeight(190)
+                           .Mine(199, TestTime(20000), 0x100).TestMustSignal().TestStateSinceHeight(190)
+                           .Mine(200, TestTime(20000), 0).TestLockedIn().TestStateSinceHeight(200)
+                           .Mine(209, TestTime(20000), 0x100).TestLockedIn().TestStateSinceHeight(200)
+                           .Mine(210, TestTime(20000), 0x100).TestActive().TestStateSinceHeight(210)
+                           .Mine(300, TestTime(20010), 0x100).TestActive().TestStateSinceHeight(210)
+                           .SetLockInOnTimeout(false)
 
         // DEFINED multiple periods -> STARTED multiple periods -> FAILING -> FAILED
-                           .Reset().TestDefined().TestStateSinceHeight(0)
+                           .Reset(__LINE__).TestDefined().TestStateSinceHeight(0)
                            .Mine(9, TestTime(999), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(10, TestTime(1000), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(20, TestTime(2000), 0).TestDefined().TestStateSinceHeight(0)
                            .Mine(100, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
                            .Mine(103, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
                            .Mine(105, TestTime(10000), 0).TestStarted().TestStateSinceHeight(100)
-                           .Mine(200, TestTime(20000), 0).TestFailing().TestStateSinceHeight(200)
-                           .Mine(300, TestTime(20000), 0).TestFailed().TestStateSinceHeight(210);
+                           .Mine(200, TestTime(20000), 0).TestFailed().TestStateSinceHeight(200)
+                           .Mine(300, TestTime(20000), 0).TestFailed().TestStateSinceHeight(200);
     }
 
     // Sanity checks of version bit deployments

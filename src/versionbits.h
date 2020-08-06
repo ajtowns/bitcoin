@@ -25,7 +25,7 @@ static const int32_t VERSIONBITS_NUM_BITS = 29;
 enum class ThresholdState {
     DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
     STARTED,   // For blocks past the startheight.
-    FAILING,   // For one period of blocks after the timeoutheight
+    MUST_SIGNAL,  // For one period of blocks prior to timeoutheight if lockinontimeout is true and LOCKED_IN not already reached
     LOCKED_IN, // For one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion.
     ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
     FAILED,    // For all blocks once the first retarget period after the timeout height is hit, if LOCKED_IN wasn't already reached (final state)
@@ -58,7 +58,7 @@ protected:
     virtual bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const =0;
     virtual int64_t StartHeight(const Consensus::Params& params) const =0;
     virtual int64_t TimeoutHeight(const Consensus::Params& params) const =0;
-    virtual ThresholdState TimeoutBehaviour(const Consensus::Params& params) const =0;
+    virtual bool LockInOnTimeout(const Consensus::Params& params) const =0;
     virtual int Period(const Consensus::Params& params) const =0;
     virtual int Threshold(const Consensus::Params& params) const =0;
 

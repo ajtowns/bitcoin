@@ -1155,12 +1155,15 @@ static void VBitsSoftForkDescPushBack(UniValue& softforks, const std::string &na
     switch (thresholdState) {
     case ThresholdState::DEFINED: details.pushKV("status", "defined"); break;
     case ThresholdState::STARTED: details.pushKV("status", "started"); break;
-    case ThresholdState::FAILING: details.pushKV("status", "failing"); break;
+    case ThresholdState::MUST_SIGNAL: details.pushKV("status", "must_signal"); break;
     case ThresholdState::LOCKED_IN: details.pushKV("status", "locked_in"); break;
     case ThresholdState::ACTIVE: details.pushKV("status", "active"); break;
     case ThresholdState::FAILED: details.pushKV("status", "failed"); break;
     }
-    if (ThresholdState::STARTED == thresholdState || ThresholdState::FAILING == thresholdState || ThresholdState::LOCKED_IN == thresholdState) {
+
+    const bool signalling = ThresholdState::STARTED == thresholdState || ThresholdState::MUST_SIGNAL == thresholdState || ThresholdState::LOCKED_IN == thresholdState;
+
+    if (signalling) {
         details.pushKV("bit", consensusParams.vDeployments[id].bit);
     }
     details.pushKV("startheight", consensusParams.vDeployments[id].startheight);
@@ -1168,18 +1171,14 @@ static void VBitsSoftForkDescPushBack(UniValue& softforks, const std::string &na
     details.pushKV("lockinontimeout", consensusParams.vDeployments[id].lockinontimeout);
     int64_t since_height = VersionBitsTipStateSinceHeight(consensusParams, id);
     details.pushKV("since", since_height);
-    if (ThresholdState::STARTED == thresholdState || ThresholdState::FAILING == thresholdState || ThresholdState::LOCKED_IN == thresholdState) {
+    if (signalling) {
         UniValue statsUV(UniValue::VOBJ);
         VBitsStats statsStruct = VersionBitsTipStatistics(consensusParams, id);
         statsUV.pushKV("period", statsStruct.period);
-        if (ThresholdState::STARTED == thresholdState) {
-            statsUV.pushKV("threshold", statsStruct.threshold);
-        } else if (ThresholdState::FAILING == thresholdState) {
-            statsUV.pushKV("threshold", statsStruct.period);
-        }
+        if (ThresholdState::LOCKED_IN != thresholdState) statsUV.pushKV("threshold", statsStruct.threshold);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
-        statsUV.pushKV("possible", statsStruct.possible);
+        if (ThresholdState::LOCKED_IN != thresholdState) statsUV.pushKV("possible", statsStruct.possible);
         details.pushKV("statistics", statsUV);
     }
 
