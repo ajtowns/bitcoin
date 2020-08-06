@@ -28,6 +28,7 @@
 #include <script/signingprovider.h>
 #include <script/standard.h>
 #include <uint256.h>
+#include <util/bip32.h>
 #include <util/moneystr.h>
 #include <util/strencodings.h>
 #include <util/string.h>
@@ -156,6 +157,8 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
                 },
     }.Check(request);
 
+    const NodeContext& node = EnsureNodeContext(request.context);
+
     bool in_active_chain = true;
     uint256 hash = ParseHashV(request.params[0], "parameter 1");
     CBlockIndex* blockindex = nullptr;
@@ -187,9 +190,9 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
         f_txindex_ready = g_txindex->BlockUntilSyncedToCurrentChain();
     }
 
-    CTransactionRef tx;
     uint256 hash_block;
-    if (!GetTransaction(hash, tx, Params().GetConsensus(), hash_block, blockindex)) {
+    const CTransactionRef tx = GetTransaction(blockindex, node.mempool, hash, Params().GetConsensus(), hash_block);
+    if (!tx) {
         std::string errmsg;
         if (blockindex) {
             if (!(blockindex->nStatus & BLOCK_HAVE_DATA)) {
@@ -244,10 +247,11 @@ static UniValue gettxoutproof(const JSONRPCRequest& request)
     for (unsigned int idx = 0; idx < txids.size(); idx++) {
         const UniValue& txid = txids[idx];
         uint256 hash(ParseHashV(txid, "txid"));
-        if (setTxids.count(hash))
-            throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, duplicated txid: ")+txid.get_str());
-       setTxids.insert(hash);
-       oneTxid = hash;
+        if (setTxids.count(hash)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid parameter, duplicated txid: ") + txid.get_str());
+        }
+        setTxids.insert(hash);
+        oneTxid = hash;
     }
 
     CBlockIndex* pblockindex = nullptr;
@@ -280,11 +284,11 @@ static UniValue gettxoutproof(const JSONRPCRequest& request)
 
     LOCK(cs_main);
 
-    if (pblockindex == nullptr)
-    {
-        CTransactionRef tx;
-        if (!GetTransaction(oneTxid, tx, Params().GetConsensus(), hashBlock) || hashBlock.IsNull())
+    if (pblockindex == nullptr) {
+        const CTransactionRef tx = GetTransaction(/* block_index */ nullptr, /* mempool */ nullptr, oneTxid, Params().GetConsensus(), hashBlock);
+        if (!tx || hashBlock.IsNull()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not yet in block");
+        }
         pblockindex = LookupBlockIndex(hashBlock);
         if (!pblockindex) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Transaction index corrupt");
@@ -292,15 +296,19 @@ static UniValue gettxoutproof(const JSONRPCRequest& request)
     }
 
     CBlock block;
-    if(!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
+    if (!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus())) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Can't read block from disk");
+    }
 
     unsigned int ntxFound = 0;
-    for (const auto& tx : block.vtx)
-        if (setTxids.count(tx->GetHash()))
+    for (const auto& tx : block.vtx) {
+        if (setTxids.count(tx->GetHash())) {
             ntxFound++;
-    if (ntxFound != setTxids.size())
+        }
+    }
+    if (ntxFound != setTxids.size()) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Not all transactions found in specified or retrieved block");
+    }
 
     CDataStream ssMB(SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS);
     CMerkleBlock mb(block, setTxids);
@@ -511,12 +519,12 @@ static UniValue decoderawtransaction(const JSONRPCRequest& request)
 
 static std::string GetAllOutputTypes()
 {
-    std::string ret;
-    for (int i = TX_NONSTANDARD; i <= TX_WITNESS_UNKNOWN; ++i) {
-        if (i != TX_NONSTANDARD) ret += ", ";
-        ret += GetTxnOutputType(static_cast<txnouttype>(i));
+    std::vector<std::string> ret;
+    using U = std::underlying_type<TxoutType>::type;
+    for (U i = (U)TxoutType::NONSTANDARD; i <= (U)TxoutType::WITNESS_UNKNOWN; ++i) {
+        ret.emplace_back(GetTxnOutputType(static_cast<TxoutType>(i)));
     }
-    return ret;
+    return Join(ret, ", ");
 }
 
 static UniValue decodescript(const JSONRPCRequest& request)
@@ -580,10 +588,10 @@ static UniValue decodescript(const JSONRPCRequest& request)
         // is a witness program, don't return addresses for a segwit programs.
         if (type.get_str() == "pubkey" || type.get_str() == "pubkeyhash" || type.get_str() == "multisig" || type.get_str() == "nonstandard") {
             std::vector<std::vector<unsigned char>> solutions_data;
-            txnouttype which_type = Solver(script, solutions_data);
+            TxoutType which_type = Solver(script, solutions_data);
             // Uncompressed pubkeys cannot be used with segwit checksigs.
             // If the script contains an uncompressed pubkey, skip encoding of a segwit program.
-            if ((which_type == TX_PUBKEY) || (which_type == TX_MULTISIG)) {
+            if ((which_type == TxoutType::PUBKEY) || (which_type == TxoutType::MULTISIG)) {
                 for (const auto& solution : solutions_data) {
                     if ((solution.size() != 1) && !CPubKey(solution).IsCompressed()) {
                         return r;
@@ -592,9 +600,9 @@ static UniValue decodescript(const JSONRPCRequest& request)
             }
             UniValue sr(UniValue::VOBJ);
             CScript segwitScr;
-            if (which_type == TX_PUBKEY) {
-                segwitScr = GetScriptForDestination(WitnessV0KeyHash(Hash160(solutions_data[0].begin(), solutions_data[0].end())));
-            } else if (which_type == TX_PUBKEYHASH) {
+            if (which_type == TxoutType::PUBKEY) {
+                segwitScr = GetScriptForDestination(WitnessV0KeyHash(Hash160(solutions_data[0])));
+            } else if (which_type == TxoutType::PUBKEYHASH) {
                 segwitScr = GetScriptForDestination(WitnessV0KeyHash(uint160{solutions_data[0]}));
             } else {
                 // Scripts that are not fit for P2WPKH are encoded as P2WSH.
@@ -938,25 +946,6 @@ static UniValue testmempoolaccept(const JSONRPCRequest& request)
     return result;
 }
 
-static std::string WriteHDKeypath(std::vector<uint32_t>& keypath)
-{
-    std::string keypath_str = "m";
-    for (uint32_t num : keypath) {
-        keypath_str += "/";
-        bool hardened = false;
-        if (num & 0x80000000) {
-            hardened = true;
-            num &= ~0x80000000;
-        }
-
-        keypath_str += ToString(num);
-        if (hardened) {
-            keypath_str += "'";
-        }
-    }
-    return keypath_str;
-}
-
 UniValue decodepsbt(const JSONRPCRequest& request)
 {
             RPCHelpMan{"decodepsbt",
@@ -1104,30 +1093,34 @@ UniValue decodepsbt(const JSONRPCRequest& request)
         const PSBTInput& input = psbtx.inputs[i];
         UniValue in(UniValue::VOBJ);
         // UTXOs
+        bool have_a_utxo = false;
+        CTxOut txout;
         if (!input.witness_utxo.IsNull()) {
-            const CTxOut& txout = input.witness_utxo;
-
-            UniValue out(UniValue::VOBJ);
-
-            out.pushKV("amount", ValueFromAmount(txout.nValue));
-            if (MoneyRange(txout.nValue) && MoneyRange(total_in + txout.nValue)) {
-                total_in += txout.nValue;
-            } else {
-                // Hack to just not show fee later
-                have_all_utxos = false;
-            }
+            txout = input.witness_utxo;
 
             UniValue o(UniValue::VOBJ);
             ScriptToUniv(txout.scriptPubKey, o, true);
+
+            UniValue out(UniValue::VOBJ);
+            out.pushKV("amount", ValueFromAmount(txout.nValue));
             out.pushKV("scriptPubKey", o);
+
             in.pushKV("witness_utxo", out);
-        } else if (input.non_witness_utxo) {
+
+            have_a_utxo = true;
+        }
+        if (input.non_witness_utxo) {
+            txout = input.non_witness_utxo->vout[psbtx.tx->vin[i].prevout.n];
+
             UniValue non_wit(UniValue::VOBJ);
             TxToUniv(*input.non_witness_utxo, uint256(), non_wit, false);
             in.pushKV("non_witness_utxo", non_wit);
-            CAmount utxo_val = input.non_witness_utxo->vout[psbtx.tx->vin[i].prevout.n].nValue;
-            if (MoneyRange(utxo_val) && MoneyRange(total_in + utxo_val)) {
-                total_in += utxo_val;
+
+            have_a_utxo = true;
+        }
+        if (have_a_utxo) {
+            if (MoneyRange(txout.nValue) && MoneyRange(total_in + txout.nValue)) {
+                total_in += txout.nValue;
             } else {
                 // Hack to just not show fee later
                 have_all_utxos = false;
@@ -1628,7 +1621,7 @@ UniValue joinpsbts(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "At least two PSBTs are required to join PSBTs.");
     }
 
-    int32_t best_version = 1;
+    uint32_t best_version = 1;
     uint32_t best_locktime = 0xffffffff;
     for (unsigned int i = 0; i < txs.size(); ++i) {
         PartiallySignedTransaction psbtx;
@@ -1638,8 +1631,8 @@ UniValue joinpsbts(const JSONRPCRequest& request)
         }
         psbtxs.push_back(psbtx);
         // Choose the highest version number
-        if (psbtx.tx->nVersion > best_version) {
-            best_version = psbtx.tx->nVersion;
+        if (static_cast<uint32_t>(psbtx.tx->nVersion) > best_version) {
+            best_version = static_cast<uint32_t>(psbtx.tx->nVersion);
         }
         // Choose the lowest lock time
         if (psbtx.tx->nLockTime < best_locktime) {
@@ -1650,7 +1643,7 @@ UniValue joinpsbts(const JSONRPCRequest& request)
     // Create a blank psbt where everything will be added
     PartiallySignedTransaction merged_psbt;
     merged_psbt.tx = CMutableTransaction();
-    merged_psbt.tx->nVersion = best_version;
+    merged_psbt.tx->nVersion = static_cast<int32_t>(best_version);
     merged_psbt.tx->nLockTime = best_locktime;
 
     // Merge

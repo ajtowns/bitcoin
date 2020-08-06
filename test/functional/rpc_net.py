@@ -46,10 +46,12 @@ class NetTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-        self.extra_args = [["-minrelaytxfee=0.00001000"],["-minrelaytxfee=0.00000500"]]
+        self.extra_args = [["-minrelaytxfee=0.00001000"], ["-minrelaytxfee=0.00000500"]]
         self.supports_cli = False
 
     def run_test(self):
+        self.log.info('Get out of IBD for the minfeefilter test')
+        self.nodes[0].generate(1)
         self.log.info('Connect nodes both way')
         connect_nodes(self.nodes[0], 1)
         connect_nodes(self.nodes[1], 0)
@@ -100,12 +102,14 @@ class NetTest(BitcoinTestFramework):
         assert_equal(self.nodes[0].getnetworkinfo()['networkactive'], True)
         assert_equal(self.nodes[0].getnetworkinfo()['connections'], 2)
 
-        self.nodes[0].setnetworkactive(state=False)
+        with self.nodes[0].assert_debug_log(expected_msgs=['SetNetworkActive: false\n']):
+            self.nodes[0].setnetworkactive(state=False)
         assert_equal(self.nodes[0].getnetworkinfo()['networkactive'], False)
         # Wait a bit for all sockets to close
         wait_until(lambda: self.nodes[0].getnetworkinfo()['connections'] == 0, timeout=3)
 
-        self.nodes[0].setnetworkactive(state=True)
+        with self.nodes[0].assert_debug_log(expected_msgs=['SetNetworkActive: true\n']):
+            self.nodes[0].setnetworkactive(state=True)
         self.log.info('Connect nodes both way')
         connect_nodes(self.nodes[0], 1)
         connect_nodes(self.nodes[1], 0)

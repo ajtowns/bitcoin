@@ -23,15 +23,18 @@ static const unsigned int DEFAULT_MAX_ORPHAN_TRANSACTIONS = 100;
 static const unsigned int DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN = 100;
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
 static const bool DEFAULT_PEERBLOCKFILTERS = false;
+/** Threshold for marking a node to be discouraged, e.g. disconnected and added to the discouragement filter. */
+static const int DISCOURAGEMENT_THRESHOLD{100};
 
 class PeerLogicValidation final : public CValidationInterface, public NetEventsInterface {
 private:
     CConnman* const connman;
+    /** Pointer to this node's banman. May be nullptr - check existence before dereferencing. */
     BanMan* const m_banman;
     ChainstateManager& m_chainman;
     CTxMemPool& m_mempool;
 
-    bool CheckIfBanned(CNode& pnode) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    bool MaybeDiscourageAndDisconnect(CNode& pnode);
 
 public:
     PeerLogicValidation(CConnman* connman, BanMan* banman, CScheduler& scheduler, ChainstateManager& chainman, CTxMemPool& pool);
@@ -97,6 +100,6 @@ struct CNodeStateStats {
 bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
 
 /** Relay transaction to every node */
-void RelayTransaction(const uint256&, const CConnman& connman);
+void RelayTransaction(const uint256& txid, const uint256& wtxid, const CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 #endif // BITCOIN_NET_PROCESSING_H

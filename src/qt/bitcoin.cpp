@@ -30,11 +30,10 @@
 #include <interfaces/handler.h>
 #include <interfaces/node.h>
 #include <noui.h>
-#include <ui_interface.h>
 #include <uint256.h>
 #include <util/system.h>
-#include <util/translation.h>
 #include <util/threadnames.h>
+#include <util/translation.h>
 #include <validation.h>
 
 #include <memory>
@@ -412,14 +411,14 @@ WId BitcoinApplication::getMainWinId() const
     return window->winId();
 }
 
-static void SetupUIArgs()
+static void SetupUIArgs(ArgsManager& argsman)
 {
-    gArgs.AddArg("-choosedatadir", strprintf("Choose data directory on startup (default: %u)", DEFAULT_CHOOSE_DATADIR), ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
-    gArgs.AddArg("-lang=<lang>", "Set language, for example \"de_DE\" (default: system locale)", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
-    gArgs.AddArg("-min", "Start minimized", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
-    gArgs.AddArg("-resetguisettings", "Reset all settings changed in the GUI", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
-    gArgs.AddArg("-splash", strprintf("Show splash screen on startup (default: %u)", DEFAULT_SPLASHSCREEN), ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
-    gArgs.AddArg("-uiplatform", strprintf("Select platform to customize UI for (one of windows, macosx, other; default: %s)", BitcoinGUI::DEFAULT_UIPLATFORM), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::GUI);
+    argsman.AddArg("-choosedatadir", strprintf("Choose data directory on startup (default: %u)", DEFAULT_CHOOSE_DATADIR), ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
+    argsman.AddArg("-lang=<lang>", "Set language, for example \"de_DE\" (default: system locale)", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
+    argsman.AddArg("-min", "Start minimized", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
+    argsman.AddArg("-resetguisettings", "Reset all settings changed in the GUI", ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
+    argsman.AddArg("-splash", strprintf("Show splash screen on startup (default: %u)", DEFAULT_SPLASHSCREEN), ArgsManager::ALLOW_ANY, OptionsCategory::GUI);
+    argsman.AddArg("-uiplatform", strprintf("Select platform to customize UI for (one of windows, macosx, other; default: %s)", BitcoinGUI::DEFAULT_UIPLATFORM), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::GUI);
 }
 
 int GuiMain(int argc, char* argv[])
@@ -455,7 +454,7 @@ int GuiMain(int argc, char* argv[])
     /// 2. Parse command-line options. We do this after qt in order to show an error if there are problems parsing these
     // Command-line options take precedence:
     node->setupServerArgs();
-    SetupUIArgs();
+    SetupUIArgs(gArgs);
     std::string error;
     if (!node->parseParameters(argc, argv, error)) {
         node->initError(strprintf(Untranslated("Error parsing command line arguments: %s\n"), error));
@@ -529,6 +528,11 @@ int GuiMain(int argc, char* argv[])
     // Parse URIs on command line -- this can affect Params()
     PaymentServer::ipcParseCommandLine(*node, argc, argv);
 #endif
+    if (!node->initSettings(error)) {
+        node->initError(Untranslated(error));
+        QMessageBox::critical(nullptr, PACKAGE_NAME, QObject::tr("Error initializing settings: %1").arg(QString::fromStdString(error)));
+        return EXIT_FAILURE;
+    }
 
     QScopedPointer<const NetworkStyle> networkStyle(NetworkStyle::instantiate(Params().NetworkIDString()));
     assert(!networkStyle.isNull());
@@ -557,6 +561,8 @@ int GuiMain(int argc, char* argv[])
     /// 9. Main GUI initialization
     // Install global event filter that makes sure that long tooltips can be word-wrapped
     app.installEventFilter(new GUIUtil::ToolTipToRichTextFilter(TOOLTIP_WRAP_THRESHOLD, &app));
+    // Install global event filter that makes sure that out-of-focus labels do not contain text cursor.
+    app.installEventFilter(new GUIUtil::LabelOutOfFocusEventFilter(&app));
 #if defined(Q_OS_WIN)
     // Install global event filter for processing Windows session related Windows messages (WM_QUERYENDSESSION and WM_ENDSESSION)
     qApp->installNativeEventFilter(new WinShutdownMonitor());

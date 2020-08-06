@@ -140,11 +140,11 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_address)
     out.pushKV("hex", HexStr(script));
 
     std::vector<std::vector<unsigned char>> solns;
-    txnouttype type = Solver(script, solns);
+    TxoutType type = Solver(script, solns);
     out.pushKV("type", GetTxnOutputType(type));
 
     CTxDestination address;
-    if (include_address && ExtractDestination(script, address) && type != TX_PUBKEY) {
+    if (include_address && ExtractDestination(script, address) && type != TxoutType::PUBKEY) {
         out.pushKV("address", EncodeDestination(address));
     }
 }
@@ -152,7 +152,7 @@ void ScriptToUniv(const CScript& script, UniValue& out, bool include_address)
 void ScriptPubKeyToUniv(const CScript& scriptPubKey,
                         UniValue& out, bool fIncludeHex)
 {
-    txnouttype type;
+    TxoutType type;
     std::vector<CTxDestination> addresses;
     int nRequired;
 
@@ -160,7 +160,7 @@ void ScriptPubKeyToUniv(const CScript& scriptPubKey,
     if (fIncludeHex)
         out.pushKV("hex", HexStr(scriptPubKey));
 
-    if (!ExtractDestinations(scriptPubKey, type, addresses, nRequired) || type == TX_PUBKEY) {
+    if (!ExtractDestinations(scriptPubKey, type, addresses, nRequired) || type == TxoutType::PUBKEY) {
         out.pushKV("type", GetTxnOutputType(type));
         return;
     }
@@ -179,7 +179,9 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
 {
     entry.pushKV("txid", tx.GetHash().GetHex());
     entry.pushKV("hash", tx.GetWitnessHash().GetHex());
-    entry.pushKV("version", tx.nVersion);
+    // Transaction version is actually unsigned in consensus checks, just signed in memory,
+    // so cast to unsigned before giving it to the user.
+    entry.pushKV("version", static_cast<int64_t>(static_cast<uint32_t>(tx.nVersion)));
     entry.pushKV("size", (int)::GetSerializeSize(tx, PROTOCOL_VERSION));
     entry.pushKV("vsize", (GetTransactionWeight(tx) + WITNESS_SCALE_FACTOR - 1) / WITNESS_SCALE_FACTOR);
     entry.pushKV("weight", GetTransactionWeight(tx));

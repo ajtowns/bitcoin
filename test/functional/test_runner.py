@@ -159,6 +159,7 @@ BASE_SCRIPTS = [
     'rpc_deprecated.py',
     'wallet_disable.py',
     'p2p_addr_relay.py',
+    'p2p_getaddr_caching.py',
     'p2p_getdata.py',
     'rpc_net.py',
     'wallet_keypool.py',
@@ -236,16 +237,20 @@ BASE_SCRIPTS = [
     'mempool_compatibility.py',
     'rpc_deriveaddresses.py',
     'rpc_deriveaddresses.py --usecli',
+    'p2p_ping.py',
     'rpc_scantxoutset.py',
     'feature_logging.py',
     'p2p_node_network_limited.py',
     'p2p_permissions.py',
     'feature_blocksdir.py',
     'feature_config_args.py',
+    'feature_settings.py',
     'rpc_getdescriptorinfo.py',
+    'rpc_getpeerinfo_banscore_deprecation.py',
     'rpc_help.py',
     'feature_help.py',
     'feature_shutdown.py',
+    'p2p_ibd_txrelay.py',
     # Don't append tests at the end to avoid merge conflicts
     # Put them in a random line within the section that fits their approximate run-time
 ]
@@ -396,11 +401,12 @@ def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=
     args = args or []
 
     # Warn if bitcoind is already running
-    # pidof might fail or return an empty string if bitcoind is not running
     try:
-        if subprocess.check_output(["pidof", "bitcoind"]) not in [b'']:
+        # pgrep exits with code zero when one or more matching processes found
+        if subprocess.run(["pgrep", "-x", "bitcoind"], stdout=subprocess.DEVNULL).returncode == 0:
             print("%sWARNING!%s There is already a bitcoind process running on this system. Tests may fail unexpectedly due to resource contention!" % (BOLD[1], BOLD[0]))
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
+        # pgrep not supported
         pass
 
     # Warn if there is a cache directory

@@ -7,18 +7,35 @@
 Verify that a bitcoind node can load multiple wallet files
 """
 from decimal import Decimal
+from threading import Thread
 import os
 import shutil
 import time
 
+from test_framework.authproxy import JSONRPCException
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.test_node import ErrorMatch
 from test_framework.util import (
     assert_equal,
     assert_raises_rpc_error,
+    get_rpc_proxy,
 )
 
 FEATURE_LATEST = 169900
+
+got_loading_error = False
+def test_load_unload(node, name):
+    global got_loading_error
+    for i in range(10):
+        if got_loading_error:
+            return
+        try:
+            node.loadwallet(name)
+            node.unloadwallet(name)
+        except JSONRPCException as e:
+            if e.error['code'] == -4 and 'Wallet already being loading' in e.error['message']:
+                got_loading_error = True
+                return
 
 
 class MultiWalletTest(BitcoinTestFramework):
@@ -103,7 +120,7 @@ class MultiWalletTest(BitcoinTestFramework):
 
         # should not initialize if one wallet is a copy of another
         shutil.copyfile(wallet_dir('w8'), wallet_dir('w8_copy'))
-        exp_stderr = r"BerkeleyBatch: Can't open database w8_copy \(duplicates fileid \w+ from w8\)"
+        exp_stderr = r"BerkeleyDatabase: Can't open database w8_copy \(duplicates fileid \w+ from w8\)"
         self.nodes[0].assert_start_raises_init_error(['-wallet=w8', '-wallet=w8_copy'], exp_stderr, match=ErrorMatch.PARTIAL_REGEX)
 
         # should not initialize if wallet file is a symlink
@@ -212,6 +229,18 @@ class MultiWalletTest(BitcoinTestFramework):
         w2 = node.get_wallet_rpc(wallet_names[1])
         w2.getwalletinfo()
 
+        self.log.info("Concurrent wallet loading")
+        threads = []
+        for _ in range(3):
+            n = node.cli if self.options.usecli else get_rpc_proxy(node.url, 1, timeout=600, coveragedir=node.coverage_dir)
+            t = Thread(target=test_load_unload, args=(n, wallet_names[2], ))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+        global got_loading_error
+        assert_equal(got_loading_error, True)
+
         self.log.info("Load remaining wallets")
         for wallet_name in wallet_names[2:]:
             loadwallet_name = self.nodes[0].loadwallet(wallet_name)
@@ -229,10 +258,10 @@ class MultiWalletTest(BitcoinTestFramework):
         assert_raises_rpc_error(-4, "Wallet file verification failed. Error loading wallet wallet.dat. Duplicate -wallet filename specified.", self.nodes[0].loadwallet, 'wallet.dat')
 
         # Fail to load if one wallet is a copy of another
-        assert_raises_rpc_error(-4, "BerkeleyBatch: Can't open database w8_copy (duplicates fileid", self.nodes[0].loadwallet, 'w8_copy')
+        assert_raises_rpc_error(-4, "BerkeleyDatabase: Can't open database w8_copy (duplicates fileid", self.nodes[0].loadwallet, 'w8_copy')
 
         # Fail to load if one wallet is a copy of another, test this twice to make sure that we don't re-introduce #14304
-        assert_raises_rpc_error(-4, "BerkeleyBatch: Can't open database w8_copy (duplicates fileid", self.nodes[0].loadwallet, 'w8_copy')
+        assert_raises_rpc_error(-4, "BerkeleyDatabase: Can't open database w8_copy (duplicates fileid", self.nodes[0].loadwallet, 'w8_copy')
 
 
         # Fail to load if wallet file is a symlink

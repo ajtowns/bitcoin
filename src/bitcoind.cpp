@@ -13,9 +13,9 @@
 #include <init.h>
 #include <interfaces/chain.h>
 #include <node/context.h>
+#include <node/ui_interface.h>
 #include <noui.h>
 #include <shutdown.h>
-#include <ui_interface.h>
 #include <util/ref.h>
 #include <util/strencodings.h>
 #include <util/system.h>
@@ -99,6 +99,11 @@ static bool AppInit(int argc, char* argv[])
             if (!IsSwitchChar(argv[i][0])) {
                 return InitError(Untranslated(strprintf("Command line contains unexpected token '%s', see bitcoind -h for a list of options.\n", argv[i])));
             }
+        }
+
+        if (!gArgs.InitSettings(error)) {
+            InitError(Untranslated(error));
+            return false;
         }
 
         // -server defaults to true for bitcoind but not for the GUI so do this here

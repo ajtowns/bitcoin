@@ -52,7 +52,6 @@ private:
 
 public:
     std::unique_ptr<DbEnv> dbenv;
-    std::map<std::string, int> mapFileUseCount;
     std::map<std::string, std::reference_wrapper<BerkeleyDatabase>> m_databases;
     std::unordered_map<std::string, WalletDatabaseFileId> m_fileids;
     std::condition_variable_any m_db_in_use;
@@ -67,9 +66,7 @@ public:
     bool IsDatabaseLoaded(const std::string& db_filename) const { return m_databases.find(db_filename) != m_databases.end(); }
     fs::path Directory() const { return strPath; }
 
-    bool Verify(const std::string& strFile);
-
-    bool Open(bool retry);
+    bool Open(bilingual_str& error);
     void Close();
     void Flush(bool fShutdown);
     void CheckpointLSN(const std::string& strFile);
@@ -90,56 +87,63 @@ public:
 /** Get BerkeleyEnvironment and database filename given a wallet path. */
 std::shared_ptr<BerkeleyEnvironment> GetWalletEnv(const fs::path& wallet_path, std::string& database_filename);
 
-/** Return wheter a BDB wallet database is currently loaded. */
+/** Return whether a BDB wallet database is currently loaded. */
 bool IsBDBWalletLoaded(const fs::path& wallet_path);
+
+class BerkeleyBatch;
 
 /** An instance of this class represents one database.
  * For BerkeleyDB this is just a (env, strFile) tuple.
  **/
-class BerkeleyDatabase
+class BerkeleyDatabase : public WalletDatabase
 {
-    friend class BerkeleyBatch;
 public:
-    /** Create dummy DB handle */
-    BerkeleyDatabase() : nUpdateCounter(0), nLastSeen(0), nLastFlushed(0), nLastWalletUpdate(0), env(nullptr)
-    {
-    }
+    BerkeleyDatabase() = delete;
 
     /** Create DB handle to real database */
     BerkeleyDatabase(std::shared_ptr<BerkeleyEnvironment> env, std::string filename) :
-        nUpdateCounter(0), nLastSeen(0), nLastFlushed(0), nLastWalletUpdate(0), env(std::move(env)), strFile(std::move(filename))
+        WalletDatabase(), env(std::move(env)), strFile(std::move(filename))
     {
         auto inserted = this->env->m_databases.emplace(strFile, std::ref(*this));
         assert(inserted.second);
     }
 
-    ~BerkeleyDatabase() {
-        if (env) {
-            size_t erased = env->m_databases.erase(strFile);
-            assert(erased == 1);
-        }
-    }
+    ~BerkeleyDatabase() override;
+
+    /** Open the database if it is not already opened.
+     *  Dummy function, doesn't do anything right now, but is needed for class abstraction */
+    void Open(const char* mode) override;
 
     /** Rewrite the entire database on disk, with the exception of key pszSkip if non-zero
      */
-    bool Rewrite(const char* pszSkip=nullptr);
+    bool Rewrite(const char* pszSkip=nullptr) override;
+
+    /** Indicate the a new database user has began using the database. */
+    void AddRef() override;
+    /** Indicate that database user has stopped using the database and that it could be flushed or closed. */
+    void RemoveRef() override;
 
     /** Back up the entire database to a file.
      */
-    bool Backup(const std::string& strDest) const;
+    bool Backup(const std::string& strDest) const override;
 
-    /** Make sure all changes are flushed to disk.
+    /** Make sure all changes are flushed to database file.
      */
-    void Flush(bool shutdown);
+    void Flush() override;
+    /** Flush to the database file and close the database.
+     *  Also close the environment if no other databases are open in it.
+     */
+    void Close() override;
+    /* flush the wallet passively (TRY_LOCK)
+       ideal to be called periodically */
+    bool PeriodicFlush() override;
 
-    void IncrementUpdateCounter();
+    void IncrementUpdateCounter() override;
 
-    void ReloadDbEnv();
+    void ReloadDbEnv() override;
 
-    std::atomic<unsigned int> nUpdateCounter;
-    unsigned int nLastSeen;
-    unsigned int nLastFlushed;
-    int64_t nLastWalletUpdate;
+    /** Verifies the environment and database file */
+    bool Verify(bilingual_str& error) override;
 
     /**
      * Pointer to shared database environment.
@@ -155,18 +159,14 @@ public:
     /** Database pointer. This is initialized lazily and reset during flushes, so it can be null. */
     std::unique_ptr<Db> m_db;
 
-private:
     std::string strFile;
 
-    /** Return whether this database handle is a dummy for testing.
-     * Only to be used at a low level, application should ideally not care
-     * about this.
-     */
-    bool IsDummy() const { return env == nullptr; }
+    /** Make a BerkeleyBatch connected to this database */
+    std::unique_ptr<DatabaseBatch> MakeBatch(const char* mode = "r+", bool flush_on_close = true) override;
 };
 
 /** RAII class that provides access to a Berkeley database */
-class BerkeleyBatch
+class BerkeleyBatch : public DatabaseBatch
 {
     /** RAII class that automatically cleanses its data on destruction */
     class SafeDbt final
@@ -189,108 +189,37 @@ class BerkeleyBatch
     };
 
 private:
-    bool ReadKey(CDataStream& key, CDataStream& value);
-    bool WriteKey(CDataStream& key, CDataStream& value, bool overwrite=true);
-    bool EraseKey(CDataStream& key);
-    bool HasKey(CDataStream& key);
+    bool ReadKey(CDataStream&& key, CDataStream& value) override;
+    bool WriteKey(CDataStream&& key, CDataStream&& value, bool overwrite = true) override;
+    bool EraseKey(CDataStream&& key) override;
+    bool HasKey(CDataStream&& key) override;
 
 protected:
     Db* pdb;
     std::string strFile;
     DbTxn* activeTxn;
+    Dbc* m_cursor;
     bool fReadOnly;
     bool fFlushOnClose;
     BerkeleyEnvironment *env;
+    BerkeleyDatabase& m_database;
 
 public:
     explicit BerkeleyBatch(BerkeleyDatabase& database, const char* pszMode = "r+", bool fFlushOnCloseIn=true);
-    ~BerkeleyBatch() { Close(); }
+    ~BerkeleyBatch() override;
 
     BerkeleyBatch(const BerkeleyBatch&) = delete;
     BerkeleyBatch& operator=(const BerkeleyBatch&) = delete;
 
-    void Flush();
-    void Close();
+    void Flush() override;
+    void Close() override;
 
-    /* flush the wallet passively (TRY_LOCK)
-       ideal to be called periodically */
-    static bool PeriodicFlush(BerkeleyDatabase& database);
-    /* verifies the database environment */
-    static bool VerifyEnvironment(const fs::path& file_path, bilingual_str& errorStr);
-    /* verifies the database file */
-    static bool VerifyDatabaseFile(const fs::path& file_path, bilingual_str& errorStr);
-
-    template <typename K, typename T>
-    bool Read(const K& key, T& value)
-    {
-        // Key
-        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
-        ssKey.reserve(1000);
-        ssKey << key;
-
-        CDataStream ssValue(SER_DISK, CLIENT_VERSION);
-        bool success = false;
-        bool ret = ReadKey(ssKey, ssValue);
-        if (ret) {
-            // Unserialize value
-            try {
-                ssValue >> value;
-                success = true;
-            } catch (const std::exception&) {
-                // In this case success remains 'false'
-            }
-        }
-        return ret && success;
-    }
-
-    template <typename K, typename T>
-    bool Write(const K& key, const T& value, bool fOverwrite = true)
-    {
-        // Key
-        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
-        ssKey.reserve(1000);
-        ssKey << key;
-
-        // Value
-        CDataStream ssValue(SER_DISK, CLIENT_VERSION);
-        ssValue.reserve(10000);
-        ssValue << value;
-
-        // Write
-        return WriteKey(ssKey, ssValue, fOverwrite);
-    }
-
-    template <typename K>
-    bool Erase(const K& key)
-    {
-        // Key
-        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
-        ssKey.reserve(1000);
-        ssKey << key;
-
-        // Erase
-        return EraseKey(ssKey);
-    }
-
-    template <typename K>
-    bool Exists(const K& key)
-    {
-        // Key
-        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
-        ssKey.reserve(1000);
-        ssKey << key;
-
-        // Exists
-        return HasKey(ssKey);
-    }
-
-    Dbc* GetCursor();
-    int ReadAtCursor(Dbc* pcursor, CDataStream& ssKey, CDataStream& ssValue);
-    bool TxnBegin();
-    bool TxnCommit();
-    bool TxnAbort();
-
-    bool static Rewrite(BerkeleyDatabase& database, const char* pszSkip = nullptr);
+    bool StartCursor() override;
+    bool ReadAtCursor(CDataStream& ssKey, CDataStream& ssValue, bool& complete) override;
+    void CloseCursor() override;
+    bool TxnBegin() override;
+    bool TxnCommit() override;
+    bool TxnAbort() override;
 };
 
 std::string BerkeleyDatabaseVersion();

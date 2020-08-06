@@ -66,6 +66,11 @@ public:
     //! Choose network parameters.
     virtual void selectParams(const std::string& network) = 0;
 
+    //! Read and update <datadir>/settings.json file with saved settings. This
+    //! needs to be called after selectParams() because the settings file
+    //! location is network-specific.
+    virtual bool initSettings(std::string& error) = 0;
+
     //! Get the (assumed) blockchain size.
     virtual uint64_t getAssumedBlockchainSize() = 0;
 
@@ -122,7 +127,7 @@ public:
     virtual bool getBanned(banmap_t& banmap) = 0;
 
     //! Ban node.
-    virtual bool ban(const CNetAddr& net_addr, BanReason reason, int64_t ban_time_offset) = 0;
+    virtual bool ban(const CNetAddr& net_addr, int64_t ban_time_offset) = 0;
 
     //! Unban node.
     virtual bool unban(const CSubNet& ip) = 0;

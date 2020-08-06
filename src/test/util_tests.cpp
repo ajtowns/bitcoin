@@ -9,6 +9,7 @@
 #include <key.h>  // For CKey
 #include <optional.h>
 #include <sync.h>
+#include <test/util/logging.h>
 #include <test/util/setup_common.h>
 #include <test/util/str.h>
 #include <uint256.h>
@@ -40,6 +41,16 @@ namespace BCLog {
 }
 
 BOOST_FIXTURE_TEST_SUITE(util_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(util_check)
+{
+    // Check that Assert can forward
+    const std::unique_ptr<int> p_two = Assert(MakeUnique<int>(2));
+    // Check that Assert works on lvalues and rvalues
+    const int two = *Assert(p_two);
+    Assert(two == 2);
+    Assert(true);
+}
 
 BOOST_AUTO_TEST_CASE(util_criticalsection)
 {
@@ -998,7 +1009,7 @@ BOOST_FIXTURE_TEST_CASE(util_ArgsMerge, ArgsMergeTestingSetup)
 
         desc += "\n";
 
-        out_sha.Write((const unsigned char*)desc.data(), desc.size());
+        out_sha.Write(MakeUCharSpan(desc));
         if (out_file) {
             BOOST_REQUIRE(fwrite(desc.data(), 1, desc.size(), out_file) == desc.size());
         }
@@ -1101,7 +1112,7 @@ BOOST_FIXTURE_TEST_CASE(util_ChainMerge, ChainMergeTestingSetup)
         }
         desc += "\n";
 
-        out_sha.Write((const unsigned char*)desc.data(), desc.size());
+        out_sha.Write(MakeUCharSpan(desc));
         if (out_file) {
             BOOST_REQUIRE(fwrite(desc.data(), 1, desc.size(), out_file) == desc.size());
         }
@@ -1126,6 +1137,28 @@ BOOST_FIXTURE_TEST_CASE(util_ChainMerge, ChainMergeTestingSetup)
     //
     //   <input> || <output>
     BOOST_CHECK_EQUAL(out_sha_hex, "f0b3a3c29869edc765d579c928f7f1690a71fbb673b49ccf39cbc4de18156a0d");
+}
+
+BOOST_AUTO_TEST_CASE(util_ReadWriteSettings)
+{
+    // Test writing setting.
+    TestArgsManager args1;
+    args1.LockSettings([&](util::Settings& settings) { settings.rw_settings["name"] = "value"; });
+    args1.WriteSettingsFile();
+
+    // Test reading setting.
+    TestArgsManager args2;
+    args2.ReadSettingsFile();
+    args2.LockSettings([&](util::Settings& settings) { BOOST_CHECK_EQUAL(settings.rw_settings["name"].get_str(), "value"); });
+
+    // Test error logging, and remove previously written setting.
+    {
+        ASSERT_DEBUG_LOG("Failed renaming settings file");
+        fs::remove(GetDataDir() / "settings.json");
+        fs::create_directory(GetDataDir() / "settings.json");
+        args2.WriteSettingsFile();
+        fs::remove(GetDataDir() / "settings.json");
+    }
 }
 
 BOOST_AUTO_TEST_CASE(util_FormatMoney)
@@ -2153,8 +2186,8 @@ BOOST_AUTO_TEST_CASE(message_hash)
         std::string(1, (char)unsigned_tx.length()) +
         unsigned_tx;
 
-    const uint256 signature_hash = Hash(unsigned_tx.begin(), unsigned_tx.end());
-    const uint256 message_hash1 = Hash(prefixed_message.begin(), prefixed_message.end());
+    const uint256 signature_hash = Hash(unsigned_tx);
+    const uint256 message_hash1 = Hash(prefixed_message);
     const uint256 message_hash2 = MessageHash(unsigned_tx);
 
     BOOST_CHECK_EQUAL(message_hash1, message_hash2);

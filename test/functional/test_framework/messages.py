@@ -31,7 +31,7 @@ from test_framework.siphash import siphash256
 from test_framework.util import hex_str_to_bytes, assert_equal
 
 MIN_VERSION_SUPPORTED = 60001
-MY_VERSION = 70014  # past bip-31 for ping/pong
+MY_VERSION = 70016  # past wtxid relay
 MY_SUBVERSION = b"/python-mininode-tester:0.0.3/"
 MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version messages (BIP37)
 
@@ -59,6 +59,7 @@ MSG_TX = 1
 MSG_BLOCK = 2
 MSG_FILTERED_BLOCK = 3
 MSG_CMPCT_BLOCK = 4
+MSG_WTX = 5
 MSG_WITNESS_FLAG = 1 << 30
 MSG_TYPE_MASK = 0xffffffff >> 2
 
@@ -207,17 +208,19 @@ class CAddress:
         self.ip = "0.0.0.0"
         self.port = 0
 
-    def deserialize(self, f, with_time=True):
+    def deserialize(self, f, *, with_time=True):
         if with_time:
+            # VERSION messages serialize CAddress objects without time
             self.time = struct.unpack("<i", f.read(4))[0]
         self.nServices = struct.unpack("<Q", f.read(8))[0]
         self.pchReserved = f.read(12)
         self.ip = socket.inet_ntoa(f.read(4))
         self.port = struct.unpack(">H", f.read(2))[0]
 
-    def serialize(self, with_time=True):
+    def serialize(self, *, with_time=True):
         r = b""
         if with_time:
+            # VERSION messages serialize CAddress objects without time
             r += struct.pack("<i", self.time)
         r += struct.pack("<Q", self.nServices)
         r += self.pchReserved
@@ -240,7 +243,8 @@ class CInv:
         MSG_TX | MSG_WITNESS_FLAG: "WitnessTx",
         MSG_BLOCK | MSG_WITNESS_FLAG: "WitnessBlock",
         MSG_FILTERED_BLOCK: "filtered Block",
-        4: "CompactBlock"
+        4: "CompactBlock",
+        5: "WTX",
     }
 
     def __init__(self, t=0, h=0):
@@ -260,6 +264,9 @@ class CInv:
     def __repr__(self):
         return "CInv(type=%s hash=%064x)" \
             % (self.typemap[self.type], self.hash)
+
+    def __eq__(self, other):
+        return isinstance(other, CInv) and self.hash == other.hash and self.type == other.type
 
 
 class CBlockLocator:
@@ -973,10 +980,10 @@ class msg_version:
         self.nServices = struct.unpack("<Q", f.read(8))[0]
         self.nTime = struct.unpack("<q", f.read(8))[0]
         self.addrTo = CAddress()
-        self.addrTo.deserialize(f, False)
+        self.addrTo.deserialize(f, with_time=False)
 
         self.addrFrom = CAddress()
-        self.addrFrom.deserialize(f, False)
+        self.addrFrom.deserialize(f, with_time=False)
         self.nNonce = struct.unpack("<Q", f.read(8))[0]
         self.strSubVer = deser_string(f)
 
@@ -996,8 +1003,8 @@ class msg_version:
         r += struct.pack("<i", self.nVersion)
         r += struct.pack("<Q", self.nServices)
         r += struct.pack("<q", self.nTime)
-        r += self.addrTo.serialize(False)
-        r += self.addrFrom.serialize(False)
+        r += self.addrTo.serialize(with_time=False)
+        r += self.addrFrom.serialize(with_time=False)
         r += struct.pack("<Q", self.nNonce)
         r += ser_string(self.strSubVer)
         r += struct.pack("<i", self.nStartingHeight)
@@ -1121,6 +1128,22 @@ class msg_tx:
 
     def __repr__(self):
         return "msg_tx(tx=%s)" % (repr(self.tx))
+
+class msg_wtxidrelay:
+    __slots__ = ()
+    msgtype = b"wtxidrelay"
+
+    def __init__(self):
+        pass
+
+    def deserialize(self, f):
+        pass
+
+    def serialize(self):
+        return b""
+
+    def __repr__(self):
+        return "msg_wtxidrelay()"
 
 
 class msg_no_witness_tx(msg_tx):
