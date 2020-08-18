@@ -22,6 +22,15 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
         pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - ((pindexPrev->nHeight + 1) % nPeriod));
     }
 
+    // Check if this deployment is immediate.
+    if (nTimeTimeout == Consensus::BIP9Deployment::IMMEDIATE) {
+        if (pindexPrev != nullptr && pindexPrev->GetMedianTimePast() >= nTimeStart) {
+            return ThresholdState::ACTIVE;
+        } else {
+            return ThresholdState::DEFINED;
+        }
+    }
+
     // Walk backwards in steps of nPeriod to find a pindexPrev whose information is known
     std::vector<const CBlockIndex*> vToCompute;
     while (cache.count(pindexPrev) == 0) {

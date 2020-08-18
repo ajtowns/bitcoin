@@ -1150,7 +1150,9 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const CBlockIndex* tip
     // Deployments (e.g. testdummy) with timeout value before Jan 1, 2009 are hidden.
     // A timeout value of 0 guarantees a softfork will never be activated.
     // This is used when merging logic to implement a proposed softfork without a specified deployment schedule.
-    if (consensusParams.vDeployments[id].nTimeout <= 1230768000) return;
+    if (consensusParams.vDeployments[id].nTimeout <= 1230768000) {
+        if (consensusParams.vDeployments[id].nTimeout != Consensus::BIP9Deployment::IMMEDIATE) return;
+    }
 
     UniValue bip9(UniValue::VOBJ);
     const ThresholdState thresholdState = VersionBitsState(tip, consensusParams, id, versionbitscache);
@@ -1166,7 +1168,11 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const CBlockIndex* tip
         bip9.pushKV("bit", consensusParams.vDeployments[id].bit);
     }
     bip9.pushKV("start_time", consensusParams.vDeployments[id].nStartTime);
-    bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
+    if (consensusParams.vDeployments[id].nTimeout != Consensus::BIP9Deployment::IMMEDIATE) {
+        bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
+    } else {
+        bip9.pushKV("immediate", true);
+    }
     int64_t since_height = VersionBitsStateSinceHeight(tip, consensusParams, id, versionbitscache);
     bip9.pushKV("since", since_height);
     if (ThresholdState::STARTED == thresholdState)
