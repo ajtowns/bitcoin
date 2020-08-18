@@ -269,6 +269,30 @@ public:
  * Signet
  */
 class SigNetParams : public CChainParams {
+private:
+    template<int dep, int feature, uint32_t start_time>
+    inline void ExperimentalDeployment(const ArgsManager& args)
+    {
+        static_assert(0 <= dep && dep < Consensus::MAX_VERSION_BITS_DEPLOYMENTS, "deployment out of range");
+        static_assert(32 <= feature && feature < 64, "feature bit out of range");
+        assert(consensus.signet_blocks);
+
+        const char* name = VersionBitsDeploymentInfo[dep].name;
+        for (const std::string& exdep : args.GetArgs("-signet_enable_fork")) {
+            if (exdep == name) {
+                LogPrintf("Enabling signet experimental fork %s\n", exdep);
+                consensus.vDeployments[dep].bit = feature;
+                consensus.vDeployments[dep].nStartTime = start_time;
+                consensus.vDeployments[dep].nTimeout = Consensus::BIP9Deployment::IMMEDIATE;
+                return;
+            }
+        }
+
+        consensus.vDeployments[dep].bit = feature;
+        consensus.vDeployments[dep].nStartTime = 1199145601; // January 1, 2008
+        consensus.vDeployments[dep].nTimeout = 1230767999; // December 31, 2008
+    }
+
 public:
     explicit SigNetParams(const ArgsManager& args) {
         std::vector<uint8_t> bin;
