@@ -190,6 +190,7 @@ static const CRPCConvertParam rpc_params_convert_blockhash[] =
 {
     { "getblockheader", 0, "blockhash" },
     { "getblock", 0, "blockhash" },
+    { "getforkinfo", 0, "blockhash" },
     { "preciousblock", 0, "blockhash" },
     { "invalidateblock", 0, "blockhash" },
     { "getchaintxstats", 1, "blockhash" },
