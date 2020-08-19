@@ -5,6 +5,7 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+import base64
 import copy
 import hashlib
 import json
@@ -25,6 +26,8 @@ MAX_MONEY = "20999999.99999999"
 
 WITNESS_COMMITMENT_HEADER = b"\xaa\x21\xa9\xed"
 SIGNET_HEADER = b"\xec\xc7\xda\xa2"
+
+PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'
 
 def FromHex(obj, hex_string):
     obj.deserialize(BytesIO(unhexlify(hex_string.encode('ascii'))))
@@ -626,15 +629,87 @@ def signet_txs(block, challenge):
     spend.vin = [CTxIn(COutPoint(to_spend.sha256, 0), b"", 0)]
     spend.vout = [CTxOut(0, b"\x6a")]
 
-    return to_spend, spend
+    return spend, to_spend
 
-def main():
-    if len(sys.argv) != 2:
-        print("Must specify scriptPubKey (hex) for block reward")
-        return
-    cb_payout_address = unhexlify(sys.argv[1])
+class PSBTMap:
+    def __init__(self, map=None):
+        self.map = map if map is not None else {}
 
+    def deserialize(self, f):
+        m = {}
+        while True:
+            k = deser_string(f)
+            if len(k) == 0: break
+            v = deser_string(f)
+            if len(k) == 1:
+                k = k[0]
+            assert k not in m
+            m[k] = v
+        self.map = m
+
+    def serialize(self):
+        m = b''
+        for k,v in self.map.items():
+            if isinstance(k, int) and 0 <= k and k <= 255:
+                k = bytes([k])
+            m += ser_compact_size(len(k)) + k
+            m += ser_compact_size(len(v)) + v
+        m += b'\x00'
+        return m
+
+def DeserBinaryStream(cls, f):
+    obj = cls()
+    obj.deserialize(f)
+    return obj
+
+def DeserBinary(cls, b):
+    return DeserBinaryStream(cls, BytesIO(b))
+
+def do_createpsbt(block, signme, spendme):
+    psbt = b'psbt\xff'
+    # global
+    psbt += PSBTMap( {0: signme.serialize(),
+                      PSBT_SIGNET_BLOCK: block.serialize()
+                     } ).serialize()
+    # inputs
+    psbt += PSBTMap( {0: spendme.serialize(),
+                      3: bytes([1,0,0,0])}).serialize()
+    # outputs
+    psbt += PSBTMap().serialize()
+    return base64.b64encode(psbt).decode('utf8')
+
+
+def do_decode_psbt(b64psbt):
+    psbtf = BytesIO(base64.b64decode(b64psbt))
+    assert psbtf.read(5) == b'psbt\xff'
+
+    # global
+    g = DeserBinaryStream(PSBTMap, psbtf)
+    assert 0 in g.map
+    tx = DeserBinary(CTransaction, g.map[0])
+    assert len(tx.vin) == 1
+    assert len(tx.vout) == 1
+    assert PSBT_SIGNET_BLOCK in g.map
+
+    # inputs
+    inp = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vin]
+
+    # outputs
+    out = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vout]
+
+    assert len(psbtf.read()) == 0
+    scriptSig = inp[0].map.get(7, b'')
+    scriptWitness = inp[0].map.get(8, b'')
+
+    return DeserBinary(CBlock, g.map[PSBT_SIGNET_BLOCK]), ser_string(scriptSig) + scriptWitness
+
+def signet_txs_from_template(cb_payout_address):
     tmpl = json.load(sys.stdin)
+    signet_spk = tmpl["signet_challenge"]
+    signet_spk_bin = unhexlify(signet_spk)
+
+    if cb_payout_address is None:
+        cb_payout_address = signet_spk_bin
 
     cbtx = create_coinbase(height=tmpl["height"], value=tmpl["coinbasevalue"], spk=cb_payout_address)
     cbtx.vin[0].nSequence = 2**32-2
@@ -655,15 +730,33 @@ def main():
     block.vtx[0].wit.vtxinwit = [cbwit]
     block.vtx[0].vout.append(CTxOut(0, get_witness_script(witroot, witnonce)))
 
-    signet_spk = tmpl["signet_challenge"]
+    signme, spendme = signet_txs(block, signet_spk_bin)
 
-    spendme, signme = signet_txs(block, unhexlify(signet_spk))
+    return block, signme, spendme
+
+def solve_block(block, signet_solution):
+    block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER + signet_solution)
+    block.vtx[0].rehash()
+    block.hashMerkleRoot = block.calc_merkle_root()
+    block.solve()
+    return block
+
+def do_signraw(args):
+    if len(args) > 1:
+        print("Only specify scriptPubKey (hex) for block reward")
+        return
+    elif len(args) == 1:
+        cb_payout_address = unhexlify(args[0])
+    else:
+        cb_payout_address = None
+
+    block, signme, spendme = signet_txs_from_template(cb_payout_address)
 
     cp = subprocess.run(["./bitcoin-cli","-signet",
                          "signrawtransactionwithwallet",
                          ToHex(signme),
                          "[{\"txid\": \"%064x\", \"vout\": %d, \"scriptPubKey\": \"%s\", \"amount\": %s}]" % (spendme.sha256, 0, hexlify(spendme.vout[0].scriptPubKey).decode('ascii'), spendme.vout[0].nValue)],
-                        capture_output=True, input=b"")
+                        stdout=subprocess.PIPE, input=b"")
 
     if cp.returncode != 0:
         sys.stderr.write("signing failed\n%s" % (cp.stderr.decode('ascii')))
@@ -675,15 +768,48 @@ def main():
     signet_solution = ser_string(stx.vin[0].scriptSig)
     if len(stx.wit.vtxinwit) > 0 and stx.wit.vtxinwit[0].scriptWitness.stack:
         signet_solution += stx.wit.vtxinwit[0].serialize()
-    block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER + signet_solution)
-    block.vtx[0].rehash()
 
-    ## sys.stderr.write("signet-tx: %s\n" % (ToHex(stx)))
-
-    block.hashMerkleRoot = block.calc_merkle_root()
-
-    block.solve()
+    block = solve_block(block, signet_solution)
     print(ToHex(block))
+
+def do_genpsbt(args):
+    if len(args) > 1:
+        print("Only specify scriptPubKey (hex) for block reward")
+        return
+    elif len(args) == 1:
+        cb_payout_address = unhexlify(args[0])
+    else:
+        cb_payout_address = None
+
+    block, signme, spendme = signet_txs_from_template(cb_payout_address)
+    print(do_createpsbt(block, signme, spendme))
+
+def do_solvepsbt(args):
+    if len(args) > 0:
+        print("No args accepted for solvepsbt")
+        return
+    block, signet_solution = do_decode_psbt(sys.stdin.read())
+    block = solve_block(block, signet_solution)
+
+    #print("Sol: %r\nBlock: %r\n" % (signet_solution.hex(), block))
+    print(ToHex(block))
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] in ["signraw", "genpsbt", "solvepsbt"]:
+        cmd = sys.argv[1]
+        args = sys.argv[2:]
+    else:
+        cmd, args = "signraw", sys.argv[1:]
+
+    if cmd == "signraw":
+        return do_signraw(args)
+    elif cmd == "genpsbt":
+        return do_genpsbt(args)
+    elif cmd == "solvepsbt":
+        return do_solvepsbt(args)
+    else:
+        sys.stderr.write("Bad cmd %r %r %r\n" % (len(sys.argv), cmd, args))
+        assert False
 
 if __name__ == "__main__":
     main()
