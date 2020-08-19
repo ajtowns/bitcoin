@@ -1124,7 +1124,7 @@ static UniValue verifychain(const JSONRPCRequest& request)
     return CVerifyDB().VerifyDB(Params(), &::ChainstateActive().CoinsTip(), check_level, check_depth);
 }
 
-static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name, int height) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+static void BuriedForkDescPushBack(UniValue& softforks, const CBlockIndex* tip, const std::string &name, int height) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     // For buried deployments.
     // A buried deployment is one where the height of the activation has been hardcoded into
@@ -1137,12 +1137,12 @@ static void BuriedForkDescPushBack(UniValue& softforks, const std::string &name,
     rv.pushKV("type", "buried");
     // getblockchaininfo reports the softfork as active from when the chain height is
     // one below the activation height
-    rv.pushKV("active", ::ChainActive().Tip()->nHeight + 1 >= height);
+    rv.pushKV("active", tip->nHeight + 1 >= height);
     rv.pushKV("height", height);
     softforks.pushKV(name, rv);
 }
 
-static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+static void BIP9SoftForkDescPushBack(UniValue& softforks, const CBlockIndex* tip, const std::string &name, const Consensus::Params& consensusParams, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     // For BIP9 deployments.
     // Deployments (e.g. testdummy) with timeout value before Jan 1, 2009 are hidden.
@@ -1151,7 +1151,7 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     if (consensusParams.vDeployments[id].nTimeout <= 1230768000) return;
 
     UniValue bip9(UniValue::VOBJ);
-    const ThresholdState thresholdState = VersionBitsTipState(consensusParams, id);
+    const ThresholdState thresholdState = VersionBitsState(tip, consensusParams, id, versionbitscache);
     switch (thresholdState) {
     case ThresholdState::DEFINED: bip9.pushKV("status", "defined"); break;
     case ThresholdState::STARTED: bip9.pushKV("status", "started"); break;
@@ -1165,12 +1165,12 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     }
     bip9.pushKV("start_time", consensusParams.vDeployments[id].nStartTime);
     bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
-    int64_t since_height = VersionBitsTipStateSinceHeight(consensusParams, id);
+    int64_t since_height = VersionBitsStateSinceHeight(tip, consensusParams, id, versionbitscache);
     bip9.pushKV("since", since_height);
     if (ThresholdState::STARTED == thresholdState)
     {
         UniValue statsUV(UniValue::VOBJ);
-        BIP9Stats statsStruct = VersionBitsTipStatistics(consensusParams, id);
+        BIP9Stats statsStruct = VersionBitsStatistics(tip, consensusParams, id);
         statsUV.pushKV("period", statsStruct.period);
         statsUV.pushKV("threshold", statsStruct.threshold);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
@@ -1212,31 +1212,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
                         {RPCResult::Type::NUM, "pruneheight", "lowest-height complete block stored (only present if pruning is enabled)"},
                         {RPCResult::Type::BOOL, "automatic_pruning", "whether automatic pruning is enabled (only present if pruning is enabled)"},
                         {RPCResult::Type::NUM, "prune_target_size", "the target size used by pruning (only present if automatic pruning is enabled)"},
-                        {RPCResult::Type::OBJ_DYN, "softforks", "status of softforks",
-                        {
-                            {RPCResult::Type::OBJ, "xxxx", "name of the softfork",
-                            {
-                                {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
-                                {RPCResult::Type::OBJ, "bip9", "status of bip9 softforks (only for \"bip9\" type)",
-                                {
-                                    {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failed\""},
-                                    {RPCResult::Type::NUM, "bit", "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" status)"},
-                                    {RPCResult::Type::NUM_TIME, "start_time", "the minimum median time past of a block at which the bit gains its meaning"},
-                                    {RPCResult::Type::NUM_TIME, "timeout", "the median time past of a block at which the deployment is considered failed if not yet locked in"},
-                                    {RPCResult::Type::NUM, "since", "height of the first block to which the status applies"},
-                                    {RPCResult::Type::OBJ, "statistics", "numeric statistics about BIP9 signalling for a softfork (only for \"started\" status)",
-                                    {
-                                        {RPCResult::Type::NUM, "period", "the length in blocks of the BIP9 signalling period"},
-                                        {RPCResult::Type::NUM, "threshold", "the number of blocks with the version bit set required to activate the feature"},
-                                        {RPCResult::Type::NUM, "elapsed", "the number of blocks elapsed since the beginning of the current period"},
-                                        {RPCResult::Type::NUM, "count", "the number of blocks with the version bit set in the current period"},
-                                        {RPCResult::Type::BOOL, "possible", "returns false if there are not enough blocks left in this period to pass activation threshold"},
-                                    }},
-                                }},
-                                {RPCResult::Type::NUM, "height", "height of the first block which the rules are or will be enforced (only for \"buried\" type, or \"bip9\" type with \"active\" status)"},
-                                {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block"},
-                            }},
-                        }},
+
                         {RPCResult::Type::STR, "warnings", "any network and blockchain warnings"},
                     }},
                 RPCExamples{
@@ -1277,18 +1253,72 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
         }
     }
 
-    const Consensus::Params& consensusParams = Params().GetConsensus();
-    UniValue softforks(UniValue::VOBJ);
-    BuriedForkDescPushBack(softforks, "bip34", consensusParams.BIP34Height);
-    BuriedForkDescPushBack(softforks, "bip66", consensusParams.BIP66Height);
-    BuriedForkDescPushBack(softforks, "bip65", consensusParams.BIP65Height);
-    BuriedForkDescPushBack(softforks, "csv", consensusParams.CSVHeight);
-    BuriedForkDescPushBack(softforks, "segwit", consensusParams.SegwitHeight);
-    BIP9SoftForkDescPushBack(softforks, "testdummy", consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
-    obj.pushKV("softforks",             softforks);
-
     obj.pushKV("warnings", GetWarnings(false).original);
     return obj;
+}
+
+static UniValue getforkinfo(const JSONRPCRequest& request)
+{
+    RPCHelpMan{"getforkinfo",
+        "Returns an object containing various state info regarding consensus rules.\n",
+        {
+            {"blockhash", RPCArg::Type::STR_HEX, "chain tip", "hash of the block to check consensus rules"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::OBJ, "xxxx", "name of the softfork",
+                {
+                    {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
+                    {RPCResult::Type::OBJ, "bip9", "status of bip9 softforks (only for \"bip9\" type)",
+                    {
+                        {RPCResult::Type::STR, "status", "one of \"defined\", \"started\", \"locked_in\", \"active\", \"failed\""},
+                        {RPCResult::Type::NUM, "bit", "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" status)"},
+                        {RPCResult::Type::NUM_TIME, "start_time", "the minimum median time past of a block at which the bit gains its meaning"},
+                        {RPCResult::Type::NUM_TIME, "timeout", "the median time past of a block at which the deployment is considered failed if not yet locked in"},
+                        {RPCResult::Type::NUM, "since", "height of the first block to which the status applies"},
+                        {RPCResult::Type::OBJ, "statistics", "numeric statistics about BIP9 signalling for a softfork (only for \"started\" status)",
+                        {
+                            {RPCResult::Type::NUM, "period", "the length in blocks of the BIP9 signalling period"},
+                            {RPCResult::Type::NUM, "threshold", "the number of blocks with the version bit set required to activate the feature"},
+                            {RPCResult::Type::NUM, "elapsed", "the number of blocks elapsed since the beginning of the current period"},
+                            {RPCResult::Type::NUM, "count", "the number of blocks with the version bit set in the current period"},
+                            {RPCResult::Type::BOOL, "possible", "returns false if there are not enough blocks left in this period to pass activation threshold"},
+                        }},
+                    }},
+                    {RPCResult::Type::NUM, "height", "height of the first block which the rules are or will be enforced (only for \"buried\" type, or \"bip9\" type with \"active\" status)"},
+                    {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block"},
+                }},
+            }},
+        RPCExamples{
+            HelpExampleCli("getforkinfo", "\"blockhash\"")
+            + HelpExampleRpc("getforkinfo", "\"blockhash\"")
+        },
+    }.Check(request);
+
+    const Consensus::Params& consensusParams = Params().GetConsensus();
+
+    LOCK(cs_main);
+    CBlockIndex* blockindex;
+    if (!request.params[0].isNull()) {
+        uint256 hash(ParseHashV(request.params[0], "blockhash"));
+        blockindex = LookupBlockIndex(hash);
+        if (!blockindex) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+        }
+    } else {
+        blockindex = ::ChainActive().Tip();
+    }
+
+    UniValue softforks(UniValue::VOBJ);
+    BuriedForkDescPushBack(softforks, blockindex, "bip34", consensusParams.BIP34Height);
+    BuriedForkDescPushBack(softforks, blockindex, "bip66", consensusParams.BIP66Height);
+    BuriedForkDescPushBack(softforks, blockindex, "bip65", consensusParams.BIP65Height);
+    BuriedForkDescPushBack(softforks, blockindex, "csv", consensusParams.CSVHeight);
+    BuriedForkDescPushBack(softforks, blockindex, "segwit", consensusParams.SegwitHeight);
+    BIP9SoftForkDescPushBack(softforks, blockindex, "testdummy", consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
+
+    return softforks;
 }
 
 /** Comparison function for sorting the getchaintips heads.  */
@@ -2382,6 +2412,7 @@ static const CRPCCommand commands[] =
     { "blockchain",         "getblockheader",         &getblockheader,         {"blockhash","verbose"} },
     { "blockchain",         "getchaintips",           &getchaintips,           {} },
     { "blockchain",         "getdifficulty",          &getdifficulty,          {} },
+    { "blockchain",         "getforkinfo",            &getforkinfo,            {"blockhash"} },
     { "blockchain",         "getmempoolancestors",    &getmempoolancestors,    {"txid","verbose"} },
     { "blockchain",         "getmempooldescendants",  &getmempooldescendants,  {"txid","verbose"} },
     { "blockchain",         "getmempoolentry",        &getmempoolentry,        {"txid"} },
