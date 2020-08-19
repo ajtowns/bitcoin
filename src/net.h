@@ -183,6 +183,7 @@ public:
     struct Options
     {
         ServiceFlags nLocalServices = NODE_NONE;
+        ServiceFlags extra_tx_services = NODE_NONE;
         int nMaxConnections = 0;
         int m_max_outbound_full_relay = 0;
         int m_max_outbound_block_relay = 0;
@@ -207,8 +208,10 @@ public:
         std::vector<bool> m_asmap;
     };
 
-    void Init(const Options& connOptions) {
+    void Init(const Options& connOptions)
+    {
         nLocalServices = connOptions.nLocalServices;
+        extra_tx_services = connOptions.extra_tx_services;
         nMaxConnections = connOptions.nMaxConnections;
         m_max_outbound_full_relay = std::min(connOptions.m_max_outbound_full_relay, connOptions.nMaxConnections);
         m_max_outbound_block_relay = connOptions.m_max_outbound_block_relay;
@@ -512,6 +515,7 @@ private:
      * \sa CNode::nLocalServices
      */
     ServiceFlags nLocalServices;
+    ServiceFlags extra_tx_services;
 
     std::unique_ptr<CSemaphore> semOutbound;
     std::unique_ptr<CSemaphore> semAddnode;

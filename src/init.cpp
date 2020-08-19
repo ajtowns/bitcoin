@@ -875,6 +875,7 @@ int nMaxConnections;
 int nUserMaxConnections;
 int nFD;
 ServiceFlags nLocalServices = ServiceFlags(NODE_NETWORK | NODE_NETWORK_LIMITED);
+ServiceFlags extra_tx_services = NODE_NONE;
 int64_t peer_connect_timeout;
 std::set<BlockFilterType> g_enabled_filter_types;
 
@@ -991,6 +992,17 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         }
 
         nLocalServices = ServiceFlags(nLocalServices | NODE_COMPACT_FILTERS);
+    }
+
+    // If running signet with any experimental soft-forks, signal them
+    if (chainparams.GetConsensus().signet_blocks) {
+        for (int i = 0; i < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
+            const Consensus::BIP9Deployment& dep = chainparams.GetConsensus().vDeployments[i];
+            if (dep.nTimeout != Consensus::BIP9Deployment::IMMEDIATE) continue;
+            assert(dep.bit >= 32 && dep.bit < 64);
+            nLocalServices = ServiceFlags(nLocalServices | (1ull << dep.bit));
+            extra_tx_services = ServiceFlags(extra_tx_services | (1ull << dep.bit));
+        }
     }
 
     // if using block pruning, then disallow txindex
@@ -1903,6 +1915,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
 
     CConnman::Options connOptions;
     connOptions.nLocalServices = nLocalServices;
+    connOptions.extra_tx_services = extra_tx_services;
     connOptions.nMaxConnections = nMaxConnections;
     connOptions.m_max_outbound_full_relay = std::min(MAX_OUTBOUND_FULL_RELAY_CONNECTIONS, connOptions.nMaxConnections);
     connOptions.m_max_outbound_block_relay = std::min(MAX_BLOCK_RELAY_ONLY_CONNECTIONS, connOptions.nMaxConnections-connOptions.m_max_outbound_full_relay);

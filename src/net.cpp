@@ -1864,12 +1864,16 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         // Only connect out to one peer per network group (/16 for IPv4).
         int nOutboundFullRelay = 0;
         int nOutboundBlockRelay = 0;
+        ServiceFlags outbound_flags = NODE_NONE;
         std::set<std::vector<unsigned char> > setConnected;
 
         {
             LOCK(cs_vNodes);
             for (const CNode* pnode : vNodes) {
-                if (pnode->IsFullOutboundConn()) nOutboundFullRelay++;
+                if (pnode->IsFullOutboundConn()) {
+                    ++nOutboundFullRelay;
+                    outbound_flags = ServiceFlags(pnode->nServices | outbound_flags);
+                }
                 if (pnode->IsBlockOnlyConn()) nOutboundBlockRelay++;
 
                 // Netgroups for inbound and manual peers are not excluded because our goal here
@@ -1967,6 +1971,14 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             // do not allow non-default ports, unless after 50 invalid addresses selected already
             if (addr.GetPort() != Params().GetDefaultPort() && nTries < 50)
                 continue;
+
+            // connect to nodes with extra_tx_servics
+            if (extra_tx_services != NODE_NONE) {
+                const bool over_half = nOutboundFullRelay >= (m_max_outbound_full_relay >> 1);
+                const ServiceFlags missing_bits = ServiceFlags(extra_tx_services & ~outbound_flags);
+                const bool valuable_bits = (missing_bits != NODE_NONE) ? (addr.nServices & missing_bits) != 0 : (addr.nServices & extra_tx_services) != 0;
+                if (!valuable_bits && over_half) continue;
+            }
 
             addrConnect = addr;
             break;
