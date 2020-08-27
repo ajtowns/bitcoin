@@ -1208,6 +1208,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
                         {RPCResult::Type::NUM, "mediantime", "median time for the current best block"},
                         {RPCResult::Type::NUM, "verificationprogress", "estimate of verification progress [0..1]"},
                         {RPCResult::Type::BOOL, "initialblockdownload", "(debug information) estimate of whether this node is in Initial Block Download mode"},
+                        {RPCResult::Type::STR_HEX, "signet_challenge", "(signet only) signet challenge string"},
                         {RPCResult::Type::STR_HEX, "chainwork", "total amount of work in active chain, in hexadecimal"},
                         {RPCResult::Type::NUM, "size_on_disk", "the estimated size of the block and undo files on disk"},
                         {RPCResult::Type::BOOL, "pruned", "if the blocks are subject to pruning"},
@@ -1250,6 +1251,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     LOCK(cs_main);
 
     const CBlockIndex* tip = ::ChainActive().Tip();
+    const Consensus::Params& consensusParams = Params().GetConsensus();
     UniValue obj(UniValue::VOBJ);
     obj.pushKV("chain",                 Params().NetworkIDString());
     obj.pushKV("blocks",                (int)::ChainActive().Height());
@@ -1260,6 +1262,9 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     obj.pushKV("verificationprogress",  GuessVerificationProgress(Params().TxData(), tip));
     obj.pushKV("initialblockdownload",  ::ChainstateActive().IsInitialBlockDownload());
     obj.pushKV("chainwork",             tip->nChainWork.GetHex());
+    if (consensusParams.signet_blocks) {
+        obj.pushKV("signet_challenge",  HexStr(consensusParams.signet_challenge));
+    }
     obj.pushKV("size_on_disk",          CalculateCurrentUsage());
     obj.pushKV("pruned",                fPruneMode);
     if (fPruneMode) {
@@ -1279,7 +1284,6 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
         }
     }
 
-    const Consensus::Params& consensusParams = Params().GetConsensus();
     UniValue softforks(UniValue::VOBJ);
     BuriedForkDescPushBack(softforks, "bip34", consensusParams.BIP34Height);
     BuriedForkDescPushBack(softforks, "bip66", consensusParams.BIP66Height);
