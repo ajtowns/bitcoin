@@ -6,18 +6,14 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 import base64
-import copy
-import hashlib
 import json
 import struct
 import sys
 import time
 import subprocess
 
-from codecs import encode
-from binascii import hexlify, unhexlify
+from binascii import unhexlify
 from io import BytesIO
-from decimal import Decimal
 
 sys.path.insert(0, "../test/functional/")
 
@@ -92,7 +88,8 @@ class PSBTMap:
         m = {}
         while True:
             k = deser_string(f)
-            if len(k) == 0: break
+            if len(k) == 0:
+                break
             v = deser_string(f)
             if len(k) == 1:
                 k = k[0]
@@ -148,7 +145,7 @@ def do_decode_psbt(b64psbt):
     inp = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vin]
 
     # outputs
-    out = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vout]
+    _ = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vout]
 
     assert len(psbtf.read()) == 0
     scriptSig = inp[0].map.get(7, b'')
