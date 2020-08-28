@@ -19,9 +19,90 @@ sys.path.insert(0, "../test/functional/")
 
 from test_framework.blocktools import WITNESS_COMMITMENT_HEADER, script_BIP34_coinbase_height # noqa: E402
 from test_framework.messages import CBlock, COutPoint, CTransaction, CTxIn, CTxInWitness, CTxOut, FromHex, ToHex, deser_string, hash256, ser_compact_size, ser_string, ser_uint256, uint256_from_str # noqa: E402
+from test_framework.script import CScriptOp
 
 SIGNET_HEADER = b"\xec\xc7\xda\xa2"
-PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'
+PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'    # proprietary use PSBT golbal field holding the block being signed
+
+# like FromHex, but without the hex part
+def FromBinary(cls, stream):
+    '''deserialize a binary stream (or bytes object) into an object'''
+    # handle bytes object by turning it into a stream
+    was_bytes = isinstance(stream, bytes)
+    if was_bytes:
+        stream = BytesIO(stream)
+    obj = cls()
+    obj.deserialize(stream)
+    if was_bytes:
+        assert len(stream.read()) == 0
+    return obj
+
+class PSBTMap:
+    """Class for serializing and deserializing PSBT maps"""
+
+    def __init__(self, map=None):
+        self.map = map if map is not None else {}
+
+    def deserialize(self, f):
+        m = {}
+        while True:
+            k = deser_string(f)
+            if len(k) == 0:
+                break
+            v = deser_string(f)
+            if len(k) == 1:
+                k = k[0]
+            assert k not in m
+            m[k] = v
+        self.map = m
+
+    def serialize(self):
+        m = b''
+        for k,v in self.map.items():
+            if isinstance(k, int) and 0 <= k and k <= 255:
+                k = bytes([k])
+            m += ser_compact_size(len(k)) + k
+            m += ser_compact_size(len(v)) + v
+        m += b'\x00'
+        return m
+
+class PSBT:
+    """Class for serializing and deserializing PSBTs"""
+
+    def __init__(self):
+        self.g = PSBTMap()
+        self.i = []
+        self.o = []
+        self.tx = None
+
+    def deserialize(self, f):
+        assert f.read(5) == b'psbt\xff'
+        self.g = FromBinary(PSBTMap, f)
+        assert 0 in self.g.map
+        self.tx = FromBinary(CTransaction, self.g.map[0])
+        self.i = [FromBinary(PSBTMap, f) for _ in self.tx.vin]
+        self.o = [FromBinary(PSBTMap, f) for _ in self.tx.vout]
+        return self
+
+    def serialize(self):
+        assert isinstance(self.g, PSBTMap)
+        assert isinstance(self.i, list) and all(isinstance(x, PSBTMap) for x in self.i)
+        assert isinstance(self.o, list) and all(isinstance(x, PSBTMap) for x in self.o)
+        assert 0 in self.g.map
+        tx = FromBinary(CTransaction, self.g.map[0])
+        assert len(tx.vin) == len(self.i)
+        assert len(tx.vout) == len(self.o)
+
+        psbt = [x.serialize() for x in [self.g] + self.i + self.o]
+        return b'psbt\xff' + b''.join(psbt)
+
+    def to_base64(self):
+        return base64.b64encode(self.serialize()).decode('utf8')
+
+    @classmethod
+    def from_base64(cls, b64psbt):
+        return FromBinary(cls, base64.b64decode(b64psbt))
+
 
 def create_coinbase(height, value, spk):
     cb = CTransaction()
@@ -80,78 +161,28 @@ def signet_txs(block, challenge):
 
     return spend, to_spend
 
-class PSBTMap:
-    def __init__(self, map=None):
-        self.map = map if map is not None else {}
-
-    def deserialize(self, f):
-        m = {}
-        while True:
-            k = deser_string(f)
-            if len(k) == 0:
-                break
-            v = deser_string(f)
-            if len(k) == 1:
-                k = k[0]
-            assert k not in m
-            m[k] = v
-        self.map = m
-
-    def serialize(self):
-        m = b''
-        for k,v in self.map.items():
-            if isinstance(k, int) and 0 <= k and k <= 255:
-                k = bytes([k])
-            m += ser_compact_size(len(k)) + k
-            m += ser_compact_size(len(v)) + v
-        m += b'\x00'
-        return m
-
-def DeserBinaryStream(cls, f):
-    obj = cls()
-    obj.deserialize(f)
-    return obj
-
-def DeserBinary(cls, b):
-    return DeserBinaryStream(cls, BytesIO(b))
-
 def do_createpsbt(block, signme, spendme):
-    psbt = b'psbt\xff'
-    # global
-    psbt += PSBTMap( {0: signme.serialize(),
-                      PSBT_SIGNET_BLOCK: block.serialize()
-                     } ).serialize()
-    # inputs
-    psbt += PSBTMap( {0: spendme.serialize(),
-                      3: bytes([1,0,0,0])}).serialize()
-    # outputs
-    psbt += PSBTMap().serialize()
-    return base64.b64encode(psbt).decode('utf8')
-
+    psbt = PSBT()
+    psbt.g = PSBTMap( {0: signme.serialize(),
+                       PSBT_SIGNET_BLOCK: block.serialize()
+                     } )
+    psbt.i = [ PSBTMap( {0: spendme.serialize(),
+                         3: bytes([1,0,0,0])})
+             ]
+    psbt.o = [ PSBTMap() ]
+    return psbt.to_base64()
 
 def do_decode_psbt(b64psbt):
-    psbtf = BytesIO(base64.b64decode(b64psbt))
-    assert psbtf.read(5) == b'psbt\xff'
+    psbt = PSBT.from_base64(b64psbt)
 
-    # global
-    g = DeserBinaryStream(PSBTMap, psbtf)
-    assert 0 in g.map
-    tx = DeserBinary(CTransaction, g.map[0])
-    assert len(tx.vin) == 1
-    assert len(tx.vout) == 1
-    assert PSBT_SIGNET_BLOCK in g.map
+    assert len(psbt.tx.vin) == 1
+    assert len(psbt.tx.vout) == 1
+    assert PSBT_SIGNET_BLOCK in psbt.g.map
 
-    # inputs
-    inp = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vin]
+    scriptSig = psbt.i[0].map.get(7, b'')
+    scriptWitness = psbt.i[0].map.get(8, b'')
 
-    # outputs
-    _ = [DeserBinaryStream(PSBTMap, psbtf) for _ in tx.vout]
-
-    assert len(psbtf.read()) == 0
-    scriptSig = inp[0].map.get(7, b'')
-    scriptWitness = inp[0].map.get(8, b'')
-
-    return DeserBinary(CBlock, g.map[PSBT_SIGNET_BLOCK]), ser_string(scriptSig) + scriptWitness
+    return FromBinary(CBlock, psbt.g.map[PSBT_SIGNET_BLOCK]), ser_string(scriptSig) + scriptWitness
 
 def signet_txs_from_template(cb_payout_address):
     tmpl = json.load(sys.stdin)
