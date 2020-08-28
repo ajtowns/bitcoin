@@ -194,37 +194,6 @@ def solve_block(block, signet_solution):
     block.solve()
     return block
 
-def do_signraw(args):
-    if len(args) > 1:
-        print("Only specify scriptPubKey (hex) for block reward")
-        return
-    elif len(args) == 1:
-        cb_payout_address = unhexlify(args[0])
-    else:
-        cb_payout_address = None
-
-    block, signme, spendme = signet_txs_from_template(cb_payout_address)
-
-    cp = subprocess.run(["./bitcoin-cli","-signet",
-                         "signrawtransactionwithwallet",
-                         ToHex(signme),
-                         "[{\"txid\": \"%064x\", \"vout\": %d, \"scriptPubKey\": \"%s\", \"amount\": %s}]" % (spendme.sha256, 0, hexlify(spendme.vout[0].scriptPubKey).decode('ascii'), spendme.vout[0].nValue)],
-                        stdout=subprocess.PIPE, input=b"")
-
-    if cp.returncode != 0:
-        sys.stderr.write("signing failed\n%s" % (cp.stderr.decode('ascii')))
-        return
-    cpjson = json.loads(cp.stdout)
-    assert cpjson.get("complete",False)
-    stx = FromHex(CTransaction(), cpjson["hex"])
-
-    signet_solution = ser_string(stx.vin[0].scriptSig)
-    if len(stx.wit.vtxinwit) > 0 and stx.wit.vtxinwit[0].scriptWitness.stack:
-        signet_solution += stx.wit.vtxinwit[0].serialize()
-
-    block = solve_block(block, signet_solution)
-    print(ToHex(block))
-
 def do_genpsbt(args):
     if len(args) > 1:
         print("Only specify scriptPubKey (hex) for block reward")
@@ -248,21 +217,20 @@ def do_solvepsbt(args):
     print(ToHex(block))
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] in ["signraw", "genpsbt", "solvepsbt"]:
+    if len(sys.argv) >= 2 and sys.argv[1] in ["genpsbt", "solvepsbt"]:
         cmd = sys.argv[1]
         args = sys.argv[2:]
     else:
-        cmd, args = "signraw", sys.argv[1:]
+        sys.stderr.write("Must specify genpsbt or solvepsbt")
+        return
 
-    if cmd == "signraw":
-        return do_signraw(args)
-    elif cmd == "genpsbt":
+    if cmd == "genpsbt":
         return do_genpsbt(args)
     elif cmd == "solvepsbt":
         return do_solvepsbt(args)
     else:
         sys.stderr.write("Bad cmd %r %r %r\n" % (len(sys.argv), cmd, args))
-        assert False
+        return
 
 if __name__ == "__main__":
     main()
