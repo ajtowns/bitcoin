@@ -128,22 +128,9 @@ def create_coinbase(height, value, spk):
     cb.vout = [CTxOut(value, spk)]
     return cb
 
-def pushdata(data):
-    assert 1 < len(data) < 65536
-    l = len(data)
-    if l <= 75:
-        push = bytes([l])
-    elif l <= 255:
-        push = bytes([76,l])
-    elif l <= 65535:
-        push = bytes([77,l%256,l//256])
-    else:
-        assert False
-    return push + data
-
 def get_witness_script(witness_root, witness_nonce):
     commitment = uint256_from_str(hash256(ser_uint256(witness_root) + ser_uint256(witness_nonce)))
-    return b"\x6a" + pushdata(WITNESS_COMMITMENT_HEADER + ser_uint256(commitment))
+    return b"\x6a" + CScriptOp.encode_op_pushdata(WITNESS_COMMITMENT_HEADER + ser_uint256(commitment))
 
 def signet_txs(block, challenge):
     # assumes signet solution has not been added yet so does not need
@@ -151,7 +138,7 @@ def signet_txs(block, challenge):
 
     txs = block.vtx[:]
     txs[0] = CTransaction(txs[0])
-    txs[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER)
+    txs[0].vout[-1].scriptPubKey += CScriptOp.encode_op_pushdata(SIGNET_HEADER)
     hashes = []
     for tx in txs:
         tx.rehash()
@@ -167,7 +154,7 @@ def signet_txs(block, challenge):
     to_spend = CTransaction()
     to_spend.nVersion = 0
     to_spend.nLockTime = 0
-    to_spend.vin = [CTxIn(COutPoint(0, 0xFFFFFFFF), b"\x00" + pushdata(sd), 0)]
+    to_spend.vin = [CTxIn(COutPoint(0, 0xFFFFFFFF), b"\x00" + CScriptOp.encode_op_pushdata(sd), 0)]
     to_spend.vout = [CTxOut(0, challenge)]
     to_spend.rehash()
 
@@ -234,7 +221,7 @@ def signet_txs_from_template(cb_payout_address):
     return block, signme, spendme
 
 def solve_block(block, signet_solution):
-    block.vtx[0].vout[-1].scriptPubKey += pushdata(SIGNET_HEADER + signet_solution)
+    block.vtx[0].vout[-1].scriptPubKey += CScriptOp.encode_op_pushdata(SIGNET_HEADER + signet_solution)
     block.vtx[0].rehash()
     block.hashMerkleRoot = block.calc_merkle_root()
     block.solve()
