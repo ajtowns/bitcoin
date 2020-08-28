@@ -24,6 +24,8 @@ from test_framework.script import CScriptOp
 SIGNET_HEADER = b"\xec\xc7\xda\xa2"
 PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'    # proprietary PSBT global field holding the block being signed
 
+##### some helpers that could go into test_framework
+
 # like FromHex, but without the hex part
 def FromBinary(cls, stream):
     '''deserialize a binary stream (or bytes object) into an object'''
@@ -102,6 +104,8 @@ class PSBT:
     @classmethod
     def from_base64(cls, b64psbt):
         return FromBinary(cls, base64.b64decode(b64psbt))
+
+######
 
 def gbt_height1(challenge):
     return {
