@@ -22,7 +22,7 @@ from test_framework.messages import CBlock, COutPoint, CTransaction, CTxIn, CTxI
 from test_framework.script import CScriptOp
 
 SIGNET_HEADER = b"\xec\xc7\xda\xa2"
-PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'    # proprietary use PSBT golbal field holding the block being signed
+PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'    # proprietary PSBT global field holding the block being signed
 
 # like FromHex, but without the hex part
 def FromBinary(cls, stream):
