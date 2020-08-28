@@ -103,6 +103,24 @@ class PSBT:
     def from_base64(cls, b64psbt):
         return FromBinary(cls, base64.b64decode(b64psbt))
 
+def gbt_height1(challenge):
+    return {
+        "version": 0x20000000,
+        "previousblockhash": "0000032d7f67af9ec7b7152aea0fe7c95b9804ff973265e252f245e0ae61799d",
+        "transactions": [],
+        "coinbasevalue": 5000000000,
+        "target": "00002adc28000000000000000000000000000000000000000000000000000000",
+        "mintime": 1534313276,
+        "noncerange": "00000000ffffffff",
+        "sigoplimit": 80000,
+        "sizelimit": 4000000,
+        "weightlimit": 4000000,
+        "curtime": time.time(),
+        "bits": "1e2adc28",
+        "height": 1,
+        "signet_challenge": challenge,
+        "default_witness_commitment": "6a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf9",
+    }
 
 def create_coinbase(height, value, spk):
     cb = CTransaction()
