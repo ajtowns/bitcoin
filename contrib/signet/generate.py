@@ -5,8 +5,10 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+import argparse
 import base64
 import json
+import logging
 import struct
 import sys
 import time
@@ -19,16 +21,21 @@ sys.path.insert(0, "../test/functional/")
 
 from test_framework.blocktools import WITNESS_COMMITMENT_HEADER, script_BIP34_coinbase_height # noqa: E402
 from test_framework.messages import CBlock, COutPoint, CTransaction, CTxIn, CTxInWitness, CTxOut, FromHex, ToHex, deser_string, hash256, ser_compact_size, ser_string, ser_uint256, uint256_from_str # noqa: E402
-from test_framework.script import CScriptOp
+from test_framework.script import CScriptOp # noqa: E402
+
+logging.basicConfig(
+    format='%(asctime)s %(levelname)s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S')
 
 SIGNET_HEADER = b"\xec\xc7\xda\xa2"
-PSBT_SIGNET_BLOCK = b'\xfc\x06signetb'    # proprietary PSBT global field holding the block being signed
+PSBT_SIGNET_BLOCK = b"\xfc\x06signetb"    # proprietary PSBT global field holding the block being signed
 
 ##### some helpers that could go into test_framework
 
 # like FromHex, but without the hex part
 def FromBinary(cls, stream):
-    '''deserialize a binary stream (or bytes object) into an object'''
+    """deserialize a binary stream (or bytes object) into an object"""
     # handle bytes object by turning it into a stream
     was_bytes = isinstance(stream, bytes)
     if was_bytes:
@@ -59,13 +66,13 @@ class PSBTMap:
         self.map = m
 
     def serialize(self):
-        m = b''
+        m = b""
         for k,v in self.map.items():
             if isinstance(k, int) and 0 <= k and k <= 255:
                 k = bytes([k])
             m += ser_compact_size(len(k)) + k
             m += ser_compact_size(len(v)) + v
-        m += b'\x00'
+        m += b"\x00"
         return m
 
 class PSBT:
@@ -78,7 +85,7 @@ class PSBT:
         self.tx = None
 
     def deserialize(self, f):
-        assert f.read(5) == b'psbt\xff'
+        assert f.read(5) == b"psbt\xff"
         self.g = FromBinary(PSBTMap, f)
         assert 0 in self.g.map
         self.tx = FromBinary(CTransaction, self.g.map[0])
@@ -96,10 +103,10 @@ class PSBT:
         assert len(tx.vout) == len(self.o)
 
         psbt = [x.serialize() for x in [self.g] + self.i + self.o]
-        return b'psbt\xff' + b''.join(psbt)
+        return b"psbt\xff" + b"".join(psbt)
 
     def to_base64(self):
-        return base64.b64encode(self.serialize()).decode('utf8')
+        return base64.b64encode(self.serialize()).decode("utf8")
 
     @classmethod
     def from_base64(cls, b64psbt):
@@ -107,7 +114,7 @@ class PSBT:
 
 ######
 
-def gbt_height1(challenge):
+def gbt_first_block(challenge):
     return {
         "version": 0x20000000,
         "previousblockhash": "0000032d7f67af9ec7b7152aea0fe7c95b9804ff973265e252f245e0ae61799d",
@@ -188,20 +195,23 @@ def do_decode_psbt(b64psbt):
     assert len(psbt.tx.vout) == 1
     assert PSBT_SIGNET_BLOCK in psbt.g.map
 
-    scriptSig = psbt.i[0].map.get(7, b'')
-    scriptWitness = psbt.i[0].map.get(8, b'')
+    scriptSig = psbt.i[0].map.get(7, b"")
+    scriptWitness = psbt.i[0].map.get(8, b"")
 
     return FromBinary(CBlock, psbt.g.map[PSBT_SIGNET_BLOCK]), ser_string(scriptSig) + scriptWitness
 
-def signet_txs_from_template(cb_payout_address):
-    tmpl = json.load(sys.stdin)
+def solve_block(block, signet_solution):
+    block.vtx[0].vout[-1].scriptPubKey += CScriptOp.encode_op_pushdata(SIGNET_HEADER + signet_solution)
+    block.vtx[0].rehash()
+    block.hashMerkleRoot = block.calc_merkle_root()
+    block.solve()
+    return block
+
+def generate_psbt(tmpl, reward_spk):
     signet_spk = tmpl["signet_challenge"]
     signet_spk_bin = unhexlify(signet_spk)
 
-    if cb_payout_address is None:
-        cb_payout_address = signet_spk_bin
-
-    cbtx = create_coinbase(height=tmpl["height"], value=tmpl["coinbasevalue"], spk=cb_payout_address)
+    cbtx = create_coinbase(height=tmpl["height"], value=tmpl["coinbasevalue"], spk=reward_spk)
     cbtx.vin[0].nSequence = 2**32-2
     cbtx.rehash()
 
@@ -222,52 +232,148 @@ def signet_txs_from_template(cb_payout_address):
 
     signme, spendme = signet_txs(block, signet_spk_bin)
 
-    return block, signme, spendme
+    return do_createpsbt(block, signme, spendme)
 
-def solve_block(block, signet_solution):
-    block.vtx[0].vout[-1].scriptPubKey += CScriptOp.encode_op_pushdata(SIGNET_HEADER + signet_solution)
-    block.vtx[0].rehash()
-    block.hashMerkleRoot = block.calc_merkle_root()
-    block.solve()
-    return block
+def get_reward_address(args, height):
+    if args.address is not None:
+        return args.address
+
+    if '*' not in args.descriptor:
+        addr = json.loads(args.bcli("deriveaddresses", args.descriptor))[0]
+        args.address = addr
+        return addr
+
+    remove = [k for k in args.derived_addresses.keys() if k+20 <= height]
+    for k in remove:
+        del args.derived_addresses[k]
+
+    addr = args.derived_addresses.get(height, None)
+    if addr is None:
+        addrs = json.loads(args.bcli("deriveaddresses", args.descriptor, "[%d,%d]" % (height, height+20)))
+        addr = addrs[0]
+        for k, a in enumerate(addrs):
+            args.derived_addresses[height+k] = a
+
+    return addr
+
+def get_reward_addr_spk(args, height):
+    assert args.address is not None or args.descriptor is not None
+
+    if hasattr(args, "reward_spk"):
+        return args.address, args.reward_spk
+
+    reward_addr = get_reward_address(args, height)
+    reward_spk = unhexlify(json.loads(args.bcli("getaddressinfo", reward_addr))["scriptPubKey"])
+    if args.address is not None:
+        # will always be the same, so cache
+        args.reward_spk = reward_spk
+
+    return reward_addr, reward_spk
 
 def do_genpsbt(args):
-    if len(args) > 1:
-        print("Only specify scriptPubKey (hex) for block reward")
-        return
-    elif len(args) == 1:
-        cb_payout_address = unhexlify(args[0])
+    if args.firstblock:
+        tmpl = gbt_first_block()
     else:
-        cb_payout_address = None
-
-    block, signme, spendme = signet_txs_from_template(cb_payout_address)
-    print(do_createpsbt(block, signme, spendme))
+        tmpl = json.load(sys.stdin)
+    _, reward_spk = get_reward_spk(args, tmpl["height"])
+    psbt = generate_psbt(tmpl, reward_spk)
+    print(psbt)
 
 def do_solvepsbt(args):
-    if len(args) > 0:
-        print("No args accepted for solvepsbt")
-        return
     block, signet_solution = do_decode_psbt(sys.stdin.read())
     block = solve_block(block, signet_solution)
-
-    #print("Sol: %r\nBlock: %r\n" % (signet_solution.hex(), block))
     print(ToHex(block))
 
-def main():
-    if len(sys.argv) >= 2 and sys.argv[1] in ["genpsbt", "solvepsbt"]:
-        cmd = sys.argv[1]
-        args = sys.argv[2:]
-    else:
-        sys.stderr.write("Must specify genpsbt or solvepsbt")
-        return
+def do_generate(args):
+    assert args.N == int(args.N) and args.N >= -1
 
-    if cmd == "genpsbt":
-        return do_genpsbt(args)
-    elif cmd == "solvepsbt":
-        return do_solvepsbt(args)
+    blocks = json.loads(args.bcli("getblockchaininfo"))["blocks"]
+
+    loops = args.N if args.N > 0 else 1
+
+    start = time.time()
+    while loops > 0:
+        if args.interval > 0:
+            sleep_for = max(0, args.interval - (time.time()-start) % args.interval)
+            time.sleep(sleep_for)
+            fin = time.time()
+            while start < fin:
+                start += args.interval
+
+        tmpl = json.loads(args.bcli("getblocktemplate", '{"rules":["signet","segwit"]}'))
+        logging.debug("GBT template: %s", tmpl)
+        if args.secondary and tmpl["height"] > blocks+1:
+            logging.info("Chain height has increased from %d to %d, continuing to wait", blocks, tmpl["height"]-1)
+            blocks = tmpl["height"]-1
+            continue
+
+        blocks = tmpl["height"]
+        if args.N > 0:
+            loops -= 1
+
+        reward_addr, reward_spk = get_reward_addr_spk(args, tmpl["height"])
+
+        psbt = generate_psbt(tmpl, reward_spk)
+        psbt_signed = json.loads(args.bcli("-stdin", "walletprocesspsbt", input=psbt.encode('utf8')))
+        if not psbt_signed.get("complete",False):
+            sys.stderr.write("PSBT signing failed")
+            return 1
+        block, signet_solution = do_decode_psbt(psbt_signed["psbt"])
+        block = solve_block(block, signet_solution)
+        logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
+        args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8'))
+
+def bitcoin_cli(basecmd, args, **kwargs):
+    cmd = basecmd + ["-signet"] + args
+    logging.debug("Calling bitcoin-cli: %r", cmd)
+    return subprocess.run(cmd, stdout=subprocess.PIPE, **kwargs, check=True).stdout.strip()
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cli", default="bitcoin-cli", type=str, help="bitcoin-cli command")
+    parser.add_argument("--debug", action="store_true", help="Print debugging info")
+    parser.add_argument("--quiet", action="store_true", help="Only print warnings/errors")
+
+    cmds = parser.add_subparsers(help="sub-commands")
+    genpsbt = cmds.add_parser("genpsbt", help="Generate a block PSBT for signing")
+    genpsbt.set_defaults(fn=do_genpsbt)
+    genpsbt.add_argument("--firstblock", action="store_true", help="Generate PSBT for first block of chain")
+
+    solvepsbt = cmds.add_parser("solvepsbt", help="Solve a signed block PSBT")
+    solvepsbt.set_defaults(fn=do_solvepsbt)
+
+    generate = cmds.add_parser("generate", help="Mine blocks")
+    generate.set_defaults(fn=do_generate)
+    generate.add_argument("N", default=None, type=int, help="How many blocks to generate (0 or -1 for no limit)")
+    generate.add_argument("--interval", default=600.29777, type=int, help="How long to pause between blocks")
+    generate.add_argument("--secondary", action="store_true", help="Only mine a block if no new blocks were found in interval")
+    generate.add_argument("--signcmd", default=None, type=str, help="Alternative signing command")
+
+    for sp in [genpsbt, generate]:
+        sp.add_argument("--address", default=None, type=str, help="Address for block reward payment")
+        sp.add_argument("--descriptor", default=None, type=str, help="Descriptor for block reward payment")
+
+    args = parser.parse_args(sys.argv[1:])
+
+    args.bcli = lambda *a, input=b"", **kwargs: bitcoin_cli(args.cli.split(" "), list(a), input=input, **kwargs)
+
+    if hasattr(args, "address") and hasattr(args, "descriptor"):
+        if args.address is None and args.descriptor is None:
+            sys.stderr.write("Must specify --address or --descriptor\n")
+            return 1
+        elif args.address is not None and args.descriptor is not None:
+            sys.stderr.write("Only specify one of --address or --descriptor\n")
+            return 1
+        args.derived_addresses = {}
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    elif args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
     else:
-        sys.stderr.write("Bad cmd %r %r %r\n" % (len(sys.argv), cmd, args))
-        return
+        logging.getLogger().setLevel(logging.INFO)
+
+    return args.fn(args)
 
 if __name__ == "__main__":
     main()
