@@ -951,6 +951,13 @@ static UniValue submitblock(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block does not start with a coinbase");
     }
 
+    const CChainParams& chainparams = Params();
+    uint32_t max_tries = std::numeric_limits<uint32_t>::max();
+    while (max_tries > 0 && !CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()) && !ShutdownRequested()) {
+        ++block.nNonce;
+        --max_tries;
+    }
+
     uint256 hash = block.GetHash();
     {
         LOCK(cs_main);

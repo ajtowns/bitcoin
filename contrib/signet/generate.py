@@ -119,8 +119,8 @@ def gbt_first_block(challenge, gbci=None):
         gbci = {"blocks": 0, "bestblockhash": "0000032d7f67af9ec7b7152aea0fe7c95b9804ff973265e252f245e0ae61799d",}
     assert gbci["blocks"] < 210000
     return {
-        "height": gbci["blocks"]+1
-        "previousblockhash": gbci["bestblockhash",
+        "height": gbci["blocks"]+1,
+        "previousblockhash": gbci["bestblockhash"],
         "mintime": 1534313276,
         "coinbasevalue": 5000000000,
         "curtime": time.time(),
@@ -201,7 +201,7 @@ def do_decode_psbt(b64psbt):
     assert PSBT_SIGNET_BLOCK in psbt.g.map
 
     scriptSig = psbt.i[0].map.get(7, b"")
-    scriptWitness = psbt.i[0].map.get(8, b"")
+    scriptWitness = psbt.i[0].map.get(8, b"\x00")
 
     return FromBinary(CBlock, psbt.g.map[PSBT_SIGNET_BLOCK]), ser_string(scriptSig) + scriptWitness
 
@@ -209,7 +209,7 @@ def solve_block(block, signet_solution):
     block.vtx[0].vout[-1].scriptPubKey += CScriptOp.encode_op_pushdata(SIGNET_HEADER + signet_solution)
     block.vtx[0].rehash()
     block.hashMerkleRoot = block.calc_merkle_root()
-    block.solve()
+    #block.solve()
     return block
 
 def generate_psbt(tmpl, reward_spk, *, blocktime=None):
@@ -308,7 +308,8 @@ def do_generate(args):
     last_mine_time = 600
 
     if args.backdate:
-        start = min(args.backdate, bci["mediantime"] + 1)
+        start = max(args.backdate, bci["mediantime"] + 1)
+        logging.debug("Setting start time to %d (-backdate=%d)", start, args.backdate)
     else:
         start = time.time()
 
@@ -347,6 +348,7 @@ def do_generate(args):
         reward_addr, reward_spk = get_reward_addr_spk(args, tmpl["height"])
 
         # mine block
+        logging.debug("Mining block start=%d", start)
         mined_blocks += 1
         psbt = generate_psbt(tmpl, reward_spk, blocktime=start)
         psbt_signed = json.loads(args.bcli("-stdin", "walletprocesspsbt", input=psbt.encode('utf8')))
@@ -355,7 +357,7 @@ def do_generate(args):
             return 1
         block, signet_solution = do_decode_psbt(psbt_signed["psbt"])
         block = solve_block(block, signet_solution)
-        r = args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8'))
+        r = args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8')).decode('utf8')
         if r == "":
             logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
         else:
