@@ -114,23 +114,28 @@ class PSBT:
 
 ######
 
-def gbt_first_block(challenge):
+def gbt_first_block(challenge, gbci=None):
+    if gbci is None:
+        gbci = {"blocks": 0, "bestblockhash": "0000032d7f67af9ec7b7152aea0fe7c95b9804ff973265e252f245e0ae61799d",}
+    assert gbci["blocks"] < 210000
     return {
-        "version": 0x20000000,
-        "previousblockhash": "0000032d7f67af9ec7b7152aea0fe7c95b9804ff973265e252f245e0ae61799d",
-        "transactions": [],
-        "coinbasevalue": 5000000000,
-        "target": "00002adc28000000000000000000000000000000000000000000000000000000",
+        "height": gbci["blocks"]+1
+        "previousblockhash": gbci["bestblockhash",
         "mintime": 1534313276,
+        "coinbasevalue": 5000000000,
+        "curtime": time.time(),
+        "bits": "1e2adc28",
+        "target": "00002adc28000000000000000000000000000000000000000000000000000000",
+
+        "signet_challenge": challenge,
+
+        "transactions": [],
+        "default_witness_commitment": "6a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf9",
+        "version": 0x20000000,
         "noncerange": "00000000ffffffff",
         "sigoplimit": 80000,
         "sizelimit": 4000000,
         "weightlimit": 4000000,
-        "curtime": time.time(),
-        "bits": "1e2adc28",
-        "height": 1,
-        "signet_challenge": challenge,
-        "default_witness_commitment": "6a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf9",
     }
 
 def create_coinbase(height, value, spk):
@@ -207,7 +212,7 @@ def solve_block(block, signet_solution):
     block.solve()
     return block
 
-def generate_psbt(tmpl, reward_spk):
+def generate_psbt(tmpl, reward_spk, *, blocktime=None):
     signet_spk = tmpl["signet_challenge"]
     signet_spk_bin = unhexlify(signet_spk)
 
@@ -218,7 +223,9 @@ def generate_psbt(tmpl, reward_spk):
     block = CBlock()
     block.nVersion = tmpl["version"]
     block.hashPrevBlock = int(tmpl["previousblockhash"], 16)
-    block.nTime = tmpl["curtime"]
+    block.nTime = tmpl["curtime"] if blocktime is None else blocktime
+    if block.nTime < tmpl["mintime"]:
+        block.nTime = tmpl["mintime"]
     block.nBits = int(tmpl["bits"], 16)
     block.nNonce = 0
     block.vtx = [cbtx] + [FromHex(CTransaction(), t["data"]) for t in tmpl["transactions"]]
@@ -272,7 +279,8 @@ def get_reward_addr_spk(args, height):
 
 def do_genpsbt(args):
     if args.firstblock:
-        tmpl = gbt_first_block()
+        bci = json.loads(args.bcli("getblockchaininfo"))
+        tmpl = gbt_first_block(bci["signet_challenge"])
     else:
         tmpl = json.load(sys.stdin)
     _, reward_spk = get_reward_spk(args, tmpl["height"])
@@ -285,43 +293,73 @@ def do_solvepsbt(args):
     print(ToHex(block))
 
 def do_generate(args):
-    assert args.N == int(args.N) and args.N >= -1
+    if args.N != int(args.N) or args.N < -1:
+       logging.error("N must be an integer, and at least -1")
+       return 1
 
-    blocks = json.loads(args.bcli("getblockchaininfo"))["blocks"]
+    if args.target_mining_time is not None:
+        if args.target_mining_time <= 0 or args.target_mining_time > 600:
+            logging.error("Target mining time must be between 1 and 600")
+            return 1
 
-    loops = args.N if args.N > 0 else 1
+    bci = json.loads(args.bcli("getblockchaininfo"))
+    nextblock = bci["blocks"] + 1
+    mined_blocks = 0
+    last_mine_time = 600
 
-    start = time.time()
-    while loops > 0:
-        if args.interval > 0:
-            sleep_for = max(0, args.interval - (time.time()-start) % args.interval)
-            time.sleep(sleep_for)
-            fin = time.time()
-            while start < fin:
-                start += args.interval
+    if args.backdate:
+        start = min(args.backdate, bci["mediantime"] + 1)
+    else:
+        start = time.time()
 
-        tmpl = json.loads(args.bcli("getblocktemplate", '{"rules":["signet","segwit"]}'))
+    while args.N <= 0 or mined_blocks < args.N:
+        # sleep
+        if args.block_time > 0:
+            block_time = args.block_time
+        else:
+            block_time = (600.0*2016/2015) * (last_mine_time / args.target_mining_time)
+            block_time = max(150, min(block_time, 2400)) # don't be too fast or too slow
+
+        if block_time > 0:
+            next_time = start + block_time
+            sleep_for = next_time - time.time()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+            start = next_time
+
+        # gbt
+        if nextblock == 1:
+            tmpl = gbt_first_block(bci["signet_challenge"])
+        else:
+            tmpl = json.loads(args.bcli("getblocktemplate", '{"rules":["signet","segwit"]}'))
         logging.debug("GBT template: %s", tmpl)
-        if args.secondary and tmpl["height"] > blocks+1:
-            logging.info("Chain height has increased from %d to %d, continuing to wait", blocks, tmpl["height"]-1)
-            blocks = tmpl["height"]-1
+
+        # work out if we should actually mine
+        if args.secondary and tmpl["height"] > nextblock:
+            if nextblock is not None:
+                logging.info("Chain height increased (%d to %d), waiting", nextblock, tmpl["height"]-1)
+            nextblock = tmpl["height"]
             continue
+        else:
+            nextblock = tmpl["height"] + 1
 
-        blocks = tmpl["height"]
-        if args.N > 0:
-            loops -= 1
-
+        # address for reward
         reward_addr, reward_spk = get_reward_addr_spk(args, tmpl["height"])
 
-        psbt = generate_psbt(tmpl, reward_spk)
+        # mine block
+        mined_blocks += 1
+        psbt = generate_psbt(tmpl, reward_spk, blocktime=start)
         psbt_signed = json.loads(args.bcli("-stdin", "walletprocesspsbt", input=psbt.encode('utf8')))
         if not psbt_signed.get("complete",False):
             sys.stderr.write("PSBT signing failed")
             return 1
         block, signet_solution = do_decode_psbt(psbt_signed["psbt"])
         block = solve_block(block, signet_solution)
-        logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
-        args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8'))
+        r = args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8'))
+        if r == "":
+            logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
+        else:
+            logging.info("Mined block at height %d hash %s payout to %s; submitblock returned %s", tmpl["height"], block.hash, reward_addr, r)
 
 def bitcoin_cli(basecmd, args, **kwargs):
     cmd = basecmd + ["-signet"] + args
@@ -345,8 +383,10 @@ def main():
     generate = cmds.add_parser("generate", help="Mine blocks")
     generate.set_defaults(fn=do_generate)
     generate.add_argument("N", default=None, type=int, help="How many blocks to generate (0 or -1 for no limit)")
-    generate.add_argument("--interval", default=600.29777, type=int, help="How long to pause between blocks")
-    generate.add_argument("--secondary", action="store_true", help="Only mine a block if no new blocks were found in interval")
+    generate.add_argument("--block-time", default=600, type=int, help="How long between blocks")
+    generate.add_argument("--target-mining-time", default=20, type=int, help="How long to spend mining before finding a block")
+    generate.add_argument("--backdate", default=None, type=int, help="Backdate mining to date (unix timestamp)")
+    generate.add_argument("--secondary", action="store_true", help="Only mine a block if no new blocks were found in block-time")
     generate.add_argument("--signcmd", default=None, type=str, help="Alternative signing command")
 
     for sp in [genpsbt, generate]:
