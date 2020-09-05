@@ -305,21 +305,21 @@ def do_generate(args):
     bci = json.loads(args.bcli("getblockchaininfo"))
     nextblock = bci["blocks"] + 1
     mined_blocks = 0
-    last_mine_time = 600
+    last_mine_time = 0
 
     if args.backdate:
         start = max(args.backdate, bci["mediantime"] + 1)
         logging.debug("Setting start time to %d (-backdate=%d)", start, args.backdate)
     else:
-        start = time.time()
+        start = int(time.time())
 
     while args.N <= 0 or mined_blocks < args.N:
         # sleep
-        if args.block_time > 0:
-            block_time = args.block_time
+        if args.target_mining_time:
+            block_time = (600.0*144/143) * (last_mine_time / args.target_mining_time)
+            block_time = max(1, min(int(block_time), 3600)) # don't be too fast or too slow
         else:
-            block_time = (600.0*2016/2015) * (last_mine_time / args.target_mining_time)
-            block_time = max(150, min(block_time, 2400)) # don't be too fast or too slow
+            block_time = args.block_time
 
         if block_time > 0:
             next_time = start + block_time
@@ -348,7 +348,7 @@ def do_generate(args):
         reward_addr, reward_spk = get_reward_addr_spk(args, tmpl["height"])
 
         # mine block
-        logging.debug("Mining block start=%d", start)
+        logging.debug("Mining block start=%s", start)
         mined_blocks += 1
         psbt = generate_psbt(tmpl, reward_spk, blocktime=start)
         psbt_signed = json.loads(args.bcli("-stdin", "walletprocesspsbt", input=psbt.encode('utf8')))
@@ -362,6 +362,7 @@ def do_generate(args):
             logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
         else:
             logging.info("Mined block at height %d hash %s payout to %s; submitblock returned %s", tmpl["height"], block.hash, reward_addr, r)
+        last_mine_time = time.time() - start
 
 def bitcoin_cli(basecmd, args, **kwargs):
     cmd = basecmd + ["-signet"] + args
