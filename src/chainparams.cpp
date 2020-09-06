@@ -13,6 +13,8 @@
 #include <util/strencodings.h>
 #include <versionbitsinfo.h>
 
+#include <arith_uint256.h>
+
 #include <assert.h>
 
 #include <boost/algorithm/string/classification.hpp>
@@ -293,30 +295,51 @@ public:
         consensus.BIP66Height = 1;
         consensus.CSVHeight = 1;
         consensus.SegwitHeight = 1;
-        consensus.nPowTargetTimespan = 1 * 24 * 60 * 60; // one day
+        consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1916;
         consensus.nMinerConfirmationWindow = 2016;
-        consensus.powLimit = uint256S("00002adc28000000000000000000000000000000000000000000000000000000");
+        consensus.powLimit = uint256S("00000377ae000000000000000000000000000000000000000000000000000000");
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601; // January 1, 2008
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
 
         // message start is defined as the first 4 bytes of the sha256d of the block script
+        {
         CHashWriter h(SER_DISK, 0);
         h << consensus.signet_challenge;
         uint256 hash = h.GetHash();
         memcpy(pchMessageStart, hash.begin(), 4);
         LogPrintf("Signet magic: %s\n", HexStr({pchMessageStart, pchMessageStart + 4}).c_str());
+        }
 
         nDefaultPort = 38333;
         nPruneAfterHeight = 1000;
         m_assumed_blockchain_size = 0;
         m_assumed_chain_state_size = 0;
 
-        genesis = CreateGenesisBlock(1534313275, 100123, 0x1e2adc28, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1598918400, 5430342, 0x1e0377ae, 1, 50 * COIN);
+
+        arith_uint256 target;
+        bool neg, over;
+        target.SetCompact(genesis.nBits, &neg, &over);
+        assert(!neg); assert(!over);
+        std::string s = strprintf("got target %s vs powLimit %s\n", target.ToString(), consensus.powLimit.ToString());
+        fprintf(stderr, "%s", s.c_str());
+        assert(target == UintToArith256(consensus.powLimit));
+        assert(target != 0);
+        uint256 h;
+        for(;;) {
+            h = genesis.GetHash();
+            if (UintToArith256(h) > target) {
+                ++genesis.nNonce;
+                continue;
+            }
+            break;
+        }
+
         consensus.hashGenesisBlock = genesis.GetHash();
 
         vFixedSeeds.clear();

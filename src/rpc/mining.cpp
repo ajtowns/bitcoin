@@ -952,10 +952,17 @@ static UniValue submitblock(const JSONRPCRequest& request)
     }
 
     const CChainParams& chainparams = Params();
-    uint32_t max_tries = std::numeric_limits<uint32_t>::max();
-    while (max_tries > 0 && !CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()) && !ShutdownRequested()) {
-        ++block.nNonce;
-        --max_tries;
+    auto fin_time = GetTime<std::chrono::microseconds>() + std::chrono::seconds(120);
+    bool fin = false;
+    while (!fin) {
+        uint32_t max_tries = 50000;
+        while (!fin && max_tries > 0) {
+            fin = CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()) || ShutdownRequested();
+            if (fin) break;
+            ++block.nNonce;
+            --max_tries;
+        }
+        if (GetTime<std::chrono::microseconds>() >= fin_time) break;
     }
 
     uint256 hash = block.GetHash();

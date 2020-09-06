@@ -307,8 +307,10 @@ def do_generate(args):
     mined_blocks = 0
     last_mine_time = 0
 
+    TARGET = 600.0*2016/2015 # 10 minutes, adjusted for the off-by-one bug
+
     if args.backdate:
-        start = max(args.backdate, bci["mediantime"] + 1)
+        start = max(args.backdate, int(bci["mediantime"] + TARGET))
         logging.debug("Setting start time to %d (-backdate=%d)", start, args.backdate)
     else:
         start = int(time.time())
@@ -316,7 +318,7 @@ def do_generate(args):
     while args.N <= 0 or mined_blocks < args.N:
         # sleep
         if args.target_mining_time:
-            block_time = (600.0*144/143) * (last_mine_time / args.target_mining_time)
+            block_time = TARGET * (last_mine_time / args.target_mining_time)
             block_time = max(1, min(int(block_time), 3600)) # don't be too fast or too slow
         else:
             block_time = args.block_time
@@ -349,6 +351,7 @@ def do_generate(args):
 
         # mine block
         logging.debug("Mining block start=%s", start)
+        mining_start = time.time()
         mined_blocks += 1
         psbt = generate_psbt(tmpl, reward_spk, blocktime=start)
         psbt_signed = json.loads(args.bcli("-stdin", "walletprocesspsbt", input=psbt.encode('utf8')))
@@ -358,11 +361,13 @@ def do_generate(args):
         block, signet_solution = do_decode_psbt(psbt_signed["psbt"])
         block = solve_block(block, signet_solution)
         r = args.bcli("-stdin", "submitblock", input=ToHex(block).encode('utf8')).decode('utf8')
+        last_mine_time = time.time() - mining_start
         if r == "":
             logging.info("Mined block height %d hash %s payout to %s", tmpl["height"], block.hash, reward_addr)
         else:
             logging.info("Mined block at height %d hash %s payout to %s; submitblock returned %s", tmpl["height"], block.hash, reward_addr, r)
-        last_mine_time = time.time() - start
+            if args.target_mining_time:
+                last_mine_time *= args.target_mining_time/TARGET
 
 def bitcoin_cli(basecmd, args, **kwargs):
     cmd = basecmd + ["-signet"] + args
