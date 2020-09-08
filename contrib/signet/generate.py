@@ -283,7 +283,7 @@ def do_genpsbt(args):
         tmpl = gbt_first_block(bci["signet_challenge"])
     else:
         tmpl = json.load(sys.stdin)
-    _, reward_spk = get_reward_spk(args, tmpl["height"])
+    _, reward_spk = get_reward_addr_spk(args, tmpl["height"])
     psbt = generate_psbt(tmpl, reward_spk)
     print(psbt)
 
@@ -421,7 +421,11 @@ def main():
     else:
         logging.getLogger().setLevel(logging.INFO)
 
-    return args.fn(args)
+    if hasattr(args, "fn"):
+        return args.fn(args)
+    else:
+        logging.error("Must specify command")
+        return 1
 
 if __name__ == "__main__":
     main()
