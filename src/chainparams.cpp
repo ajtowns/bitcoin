@@ -307,40 +307,21 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
 
         // message start is defined as the first 4 bytes of the sha256d of the block script
-        {
         CHashWriter h(SER_DISK, 0);
         h << consensus.signet_challenge;
         uint256 hash = h.GetHash();
         memcpy(pchMessageStart, hash.begin(), 4);
         LogPrintf("Signet magic: %s\n", HexStr({pchMessageStart, pchMessageStart + 4}).c_str());
-        }
 
         nDefaultPort = 38333;
         nPruneAfterHeight = 1000;
         m_assumed_blockchain_size = 0;
         m_assumed_chain_state_size = 0;
 
-        genesis = CreateGenesisBlock(1598918400, 5430342, 0x1e0377ae, 1, 50 * COIN);
-
-        arith_uint256 target;
-        bool neg, over;
-        target.SetCompact(genesis.nBits, &neg, &over);
-        assert(!neg); assert(!over);
-        std::string s = strprintf("got target %s vs powLimit %s\n", target.ToString(), consensus.powLimit.ToString());
-        fprintf(stderr, "%s", s.c_str());
-        assert(target == UintToArith256(consensus.powLimit));
-        assert(target != 0);
-        uint256 h;
-        for(;;) {
-            h = genesis.GetHash();
-            if (UintToArith256(h) > target) {
-                ++genesis.nNonce;
-                continue;
-            }
-            break;
-        }
-
+        genesis = CreateGenesisBlock(1598918400, 52613770, 0x1e0377ae, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock == uint256S("0x00000008819873e925422c1ff0f99f7cc9bbb232af63a077a480a3633bee1ef6"));
+        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
 
         vFixedSeeds.clear();
 
