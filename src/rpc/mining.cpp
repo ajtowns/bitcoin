@@ -414,7 +414,8 @@ static RPCHelpMan getmininginfo()
                         {RPCResult::Type::NUM, "difficulty", "The current difficulty"},
                         {RPCResult::Type::NUM, "networkhashps", "The network hashes per second"},
                         {RPCResult::Type::NUM, "pooledtx", "The size of the mempool"},
-                        {RPCResult::Type::STR, "chain", "current network name (main, test, regtest)"},
+                        {RPCResult::Type::STR, "chain", "current network name (main, test, regtest, signet)"},
+                        {RPCResult::Type::STR_HEX, "signet_challenge", "(signet only) signet challenge string"},
                         {RPCResult::Type::STR, "warnings", "any network and blockchain warnings"},
                     }},
                 RPCExamples{
@@ -434,6 +435,9 @@ static RPCHelpMan getmininginfo()
     obj.pushKV("networkhashps",    getnetworkhashps().HandleRequest(request));
     obj.pushKV("pooledtx",         (uint64_t)mempool.size());
     obj.pushKV("chain",            Params().NetworkIDString());
+    if (Params().GetConsensus().signet_blocks) {
+        obj.pushKV("signet_challenge",  HexStr(Params().GetConsensus().signet_challenge));
+    }
     obj.pushKV("warnings",         GetWarnings(false).original);
     return obj;
 },
