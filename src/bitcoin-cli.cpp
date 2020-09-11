@@ -515,6 +515,33 @@ static void ParseError(const UniValue& error, std::string& strPrint, int& nRet)
 }
 
 /**
+ * ReplaceAtHeightByBlockHash
+ *
+ * @param method  Name of the method to be called
+ * @param args    Vector of arguments to be modified
+ */
+void ReplaceAtHeightByBlockHash(const std::string& method, std::vector<std::string>& args)
+{
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (!RPCConvertBlockhash(method, i) || args[i].size() <= 1 || args[i][0] != '@') continue;
+
+        std::string bh_method = "getblockhash";
+        std::vector<std::string> bh_args = { args[i].substr(1) };
+        if (args[i] == "@best") {
+            bh_method = "getbestblockhash";
+            bh_args.clear();
+        }
+        DefaultRequestHandler rh;
+        const UniValue reply = ConnectAndCallRPC(&rh, bh_method, bh_args);
+        const UniValue& result = find_value(reply, "result");
+        const UniValue& error = find_value(reply, "error");
+        if (error.isNull() && result.isStr()) {
+            args[i] = result.get_str();
+        }
+    }
+}
+
+/**
  * GetWalletBalances calls listwallets; if more than one wallet is loaded, it then
  * fetches mine.trusted balances for each loaded wallet and pushes them to `result`.
  *
@@ -640,6 +667,7 @@ static int CommandLineRPC(int argc, char *argv[])
             }
             method = args[0];
             args.erase(args.begin()); // Remove trailing method name from arguments vector
+            ReplaceAtHeightByBlockHash(method, args);
         }
         if (nRet == 0) {
             // Perform RPC call
