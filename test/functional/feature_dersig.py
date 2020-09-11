@@ -50,7 +50,7 @@ class BIP66Test(BitcoinTestFramework):
         self.skip_if_no_wallet()
 
     def test_dersig_info(self, *, is_active):
-        assert_equal(self.nodes[0].getblockchaininfo()['softforks']['bip66'],
+        assert_equal(self.nodes[0].getforkinfo()['bip66'],
             {
                 "active": is_active,
                 "height": DERSIG_HEIGHT,

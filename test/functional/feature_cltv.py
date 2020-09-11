@@ -66,7 +66,7 @@ class BIP65Test(BitcoinTestFramework):
         self.skip_if_no_wallet()
 
     def test_cltv_info(self, *, is_active):
-        assert_equal(self.nodes[0].getblockchaininfo()['softforks']['bip65'],
+        assert_equal(self.nodes[0].getforkinfo()['bip65'],
             {
                 "active": is_active,
                 "height": CLTV_HEIGHT,

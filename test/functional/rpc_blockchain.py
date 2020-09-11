@@ -56,6 +56,7 @@ class BlockchainTest(BitcoinTestFramework):
         self.restart_node(0, extra_args=['-stopatheight=207', '-prune=1'])  # Set extra args with pruning after rescan is complete
 
         self._test_getblockchaininfo()
+        self._test_getforkinfo()
         self._test_getchaintxstats()
         self._test_gettxoutsetinfo()
         self._test_getblockheader()
@@ -88,7 +89,6 @@ class BlockchainTest(BitcoinTestFramework):
             'mediantime',
             'pruned',
             'size_on_disk',
-            'softforks',
             'verificationprogress',
             'warnings',
         ]
@@ -124,7 +124,11 @@ class BlockchainTest(BitcoinTestFramework):
         assert_equal(res['prune_target_size'], 576716800)
         assert_greater_than(res['size_on_disk'], 0)
 
-        assert_equal(res['softforks'], {
+    def _test_getforkinfo(self):
+        self.log.info("Test getforkinfo")
+
+        res = self.nodes[0].getforkinfo()
+        assert_equal(res, {
             'bip34': {'type': 'buried', 'active': False, 'height': 500},
             'bip66': {'type': 'buried', 'active': False, 'height': 1251},
             'bip65': {'type': 'buried', 'active': False, 'height': 1351},
