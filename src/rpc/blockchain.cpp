@@ -1318,6 +1318,7 @@ static UniValue getforkinfo(const JSONRPCRequest& request)
     BuriedForkDescPushBack(softforks, blockindex, "bip65", consensusParams.BIP65Height);
     BuriedForkDescPushBack(softforks, blockindex, "csv", consensusParams.CSVHeight);
     BuriedForkDescPushBack(softforks, blockindex, "segwit", consensusParams.SegwitHeight);
+    BIP9SoftForkDescPushBack(softforks, blockindex, "taproot", consensusParams, Consensus::DEPLOYMENT_TAPROOT);
     BIP9SoftForkDescPushBack(softforks, blockindex, "testdummy", consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
 
     return softforks;
