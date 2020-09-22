@@ -3357,6 +3357,11 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block signature validation failure");
     }
 
+    // Signet only: check for invalid version bits
+    if (consensusParams.signet_blocks && (block.nVersion & consensusParams.signet_invalid_version_mask) != 0) {
+        return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, "bad-signet-version", "signet block version has invalid bits set");
+    }
+
     // Check the merkle root.
     if (fCheckMerkleRoot) {
         bool mutated;

@@ -66,6 +66,7 @@ public:
         strNetworkID = CBaseChainParams::MAIN;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_invalid_version_mask = 0;
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000000002dc756eebf4f49723ed8d30cc28a5f108eb94b1ba88ac4f9c22");
         consensus.BIP34Height = 227931;
@@ -177,6 +178,7 @@ public:
         strNetworkID = CBaseChainParams::TESTNET;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_invalid_version_mask = 0;
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP16Exception = uint256S("0x00000000dd30457c001f4095d208cc1296b0eed002427aa599874af7a432b105");
         consensus.BIP34Height = 21111;
@@ -284,6 +286,12 @@ public:
             vSeeds = args.GetArgs("-signetseednode");
         }
 
+        if (args.IsArgSet("-signetmaxvalidversionbit")) {
+            int max_valid = args.GetArg("-signetmaxvalidversionbit", 30);
+            max_valid = std::max(0, std::min(max_valid, 30));
+            consensus.signet_invalid_version_mask = 0x7FFFFFFL - (1 << max_valid) + 1;
+        }
+
         strNetworkID = CBaseChainParams::SIGNET;
         consensus.signet_blocks = true;
         consensus.signet_challenge.assign(bin.begin(), bin.end());
@@ -353,6 +361,7 @@ public:
         strNetworkID =  CBaseChainParams::REGTEST;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
+        consensus.signet_invalid_version_mask = 0;
         consensus.nSubsidyHalvingInterval = 150;
         consensus.BIP16Exception = uint256();
         consensus.BIP34Height = 500; // BIP34 activated on regtest (Used in functional tests)

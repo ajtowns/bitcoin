@@ -87,6 +87,7 @@ struct Params {
      */
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
+    int32_t signet_invalid_version_mask = 0;
 };
 } // namespace Consensus
 

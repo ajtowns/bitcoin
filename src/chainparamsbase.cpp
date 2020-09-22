@@ -27,6 +27,7 @@ void SetupChainParamsBaseOptions(ArgsManager& argsman)
     argsman.AddArg("-signet", "Use the signet chain. Note that the network is defined by the -signetchallenge parameter", ArgsManager::ALLOW_ANY, OptionsCategory::CHAINPARAMS);
     argsman.AddArg("-signetchallenge", "Blocks must satisfy the given script to be considered valid (only for signet networks; defaults to the global default signet test network challenge)", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
     argsman.AddArg("-signetseednode", "Specify a seed node for the signet network, in the hostname[:port] format, e.g. sig.net:1234 (may be used multiple times to specify multiple seed nodes; defaults to the global default signet test network seed node(s))", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
+    argsman.AddArg("-signetmaxvalidversionbit", "Specify the maximum valid version bit for blocks in the signet network (0-31). If any version bit higher than this value is set, the block is considered invalid.", ArgsManager::ALLOW_INT, OptionsCategory::CHAINPARAMS);
 }
 
 static std::unique_ptr<CBaseChainParams> globalChainBaseParams;
