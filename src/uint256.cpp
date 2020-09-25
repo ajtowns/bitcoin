@@ -80,7 +80,7 @@ template std::string base_blob<256>::ToString() const;
 template void base_blob<256>::SetHex(const char*);
 template void base_blob<256>::SetHex(const std::string&);
 
-uint256& UINT256_ONE() {
-    static uint256* one = new uint256(uint256S("0000000000000000000000000000000000000000000000000000000000000001"));
+const uint256& UINT256_ONE() {
+    static const uint256* one = new uint256(uint256S("0000000000000000000000000000000000000000000000000000000000000001"));
     return *one;
 }
