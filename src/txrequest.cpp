@@ -176,6 +176,7 @@ public:
 
 /** Actual implementation for TxRequestTracker's data structure. */
 class TxRequestTracker::Impl {
+private:
     //! Tag for the EntryPeer-based index.
     struct ByPeer {};
     //! Tag for the EntryTxHash-based index.
@@ -226,6 +227,69 @@ class TxRequestTracker::Impl {
     //! Map with this tracker's per-peer statistics.
     std::unordered_map<uint64_t, PeerInfo> m_peerinfo;
 
+public:
+    void SanityCheck() const
+    {
+        // Recompute m_peerdata from m_index.
+        // This verifies the data in it, including the invariant
+        // that no entries with m_total_announcements==0 exist.
+        assert(Impl::SanityCheckRecalculatePeerInfo(m_index) == m_peerinfo);
+
+        for (auto& entry : Impl::SanityCheckCalculatePerTxCounts(m_index, m_computer)) {
+            auto& c = entry.second;
+            // Cannot have only COMPLETED peers (txid should have been deleted)
+            assert(c.m_candidate_delayed + c.m_candidate_ready + c.m_candidate_best + c.m_requested > 0);
+            // Can have at most 1 CANDIDATE_BEST/REQUESTED peer
+            assert(c.m_candidate_best + c.m_requested <= 1);
+            // If there are any CANDIDATE_READY entries, there must be exactly one CANDIDATE_BEST or REQUESTED
+            // entry.
+            if (c.m_candidate_ready > 0) {
+                assert(c.m_candidate_best + c.m_requested == 1);
+            }
+            // If there is both a CANDIDATE_READY and a CANDIDATE_BEST entry, the CANDIDATE_BEST one must be at
+            // least as good as the best CANDIDATE_READY.
+            if (c.m_candidate_ready && c.m_candidate_best) {
+                assert(c.m_priority_candidate_best <= c.m_priority_best_candidate_ready);
+            }
+            // Detect duplicate (peer, txid) entries
+            std::sort(c.m_peers.begin(), c.m_peers.end());
+            assert(std::adjacent_find(c.m_peers.begin(), c.m_peers.end()) == c.m_peers.end());
+            // Verify all per_txhash flags.
+            uint8_t expected_per_txhash = 0;
+            if (c.m_any_preferred_first || c.m_requested) {
+                expected_per_txhash |= TXHASHINFO_NO_MORE_PREFERRED_FIRST;
+            }
+            if (c.m_any_nonpreferred_first || c.m_requested) {
+                expected_per_txhash |= TXHASHINFO_NO_MORE_NONPREFERRED_FIRST;
+            }
+            // All expected flags must be present, but there can be more. If a node went from REQUESTED to
+            // COMPLETED, or was deleted, our expected_per_txhash may miss the relevant bits.
+            assert((expected_per_txhash & ~c.m_or_all_per_txhash) == 0);
+            // No entry can have flags that are a superset of the actual ones (they're always ORed into the actual
+            // one).
+            auto it_last = std::prev(m_index.get<ByTxHash>().lower_bound(
+                EntryTxHash{entry.first, State::TOO_LARGE, 0}));
+            assert(it_last->m_txhash == entry.first);
+            assert(c.m_or_all_per_txhash == it_last->m_per_txhash);
+        }
+    }
+
+    void PostGetRequestableSanityCheck(std::chrono::microseconds now) const
+    {
+        for (const auto& entry : m_index) {
+            if (entry.IsWaiting()) {
+                // REQUESTED and CANDIDATE_DELAYED must have a time in the future (they should have been converted
+                // to COMPLETED/CANDIDATE_READY respectively).
+                assert(entry.m_time > now);
+            } else if (entry.IsSelectable()) {
+                // CANDIDATE_READY and CANDIDATE_BEST cannot have a time in the future (they should have remained
+                // CANDIDATE_DELAYED, or should have been converted back to it if time went backwards).
+                assert(entry.m_time <= now);
+            }
+        }
+    }
+
+private:
     //! Wrapper around Index::...::erase that keeps m_peerinfo and m_per_txhash up to date.
     template<typename Tag>
     typename Index::index<Tag>::type::iterator Erase(typename Index::index<Tag>::type::iterator it)
@@ -562,44 +626,45 @@ public:
         return m_computer.ComputePriority(txhash, peer, preferred, first);
     }
 
-    void SanityCheck() const
+
+    static std::unordered_map<uint64_t, PeerInfo> SanityCheckRecalculatePeerInfo(const Index& index)
     {
-        // Recompute m_peerdata.
-        // This verifies the data in it, including the invariant
-        // that no entries with m_total_announcements==0 exist.
         std::unordered_map<uint64_t, PeerInfo> peerinfo;
-        for (const auto& a : m_index) {
+        for (const auto& a : index) {
             auto& entry = peerinfo[a.m_peer];
             ++entry.m_total;
             entry.m_requested += (a.GetState() == State::REQUESTED);
         }
-        assert(m_peerinfo == peerinfo);
+        return peerinfo;
+    }
 
-        struct Counts {
-            //! Number of CANDIDATE_DELAYED entries for this txhash.
-            size_t m_candidate_delayed = 0;
-            //! Number of CANDIDATE_READY entries for this txhash.
-            size_t m_candidate_ready = 0;
-            //! Number of CANDIDATE_BEST entries for this txhash (at most one).
-            size_t m_candidate_best = 0;
-            //! Number of REQUESTED entries for this txhash.
-            size_t m_requested = 0;
-            //! The priority of the CANDIDATE_BEST entry if one exists, or 0 otherwise.
-            uint64_t m_priority_candidate_best = 0;
-            //! The lowest priority of all CANDIDATE_READY entries (or max() if none exist).
-            uint64_t m_priority_best_candidate_ready = std::numeric_limits<uint64_t>::max();
-            //! All peers we have an entry for this txhash for.
-            std::vector<uint64_t> m_peers;
-            //! Whether any preferred first entry exists.
-            bool m_any_preferred_first = false;
-            //! Whether any non-preferred first entry exists.
-            bool m_any_nonpreferred_first = false;
-            //! OR of all m_per_txhash flags.
-            uint8_t m_or_all_per_txhash = 0;
-        };
+    struct SanityCheckCounts {
+        //! Number of CANDIDATE_DELAYED entries for this txhash.
+        size_t m_candidate_delayed = 0;
+        //! Number of CANDIDATE_READY entries for this txhash.
+        size_t m_candidate_ready = 0;
+        //! Number of CANDIDATE_BEST entries for this txhash (at most one).
+        size_t m_candidate_best = 0;
+        //! Number of REQUESTED entries for this txhash.
+        size_t m_requested = 0;
+        //! The priority of the CANDIDATE_BEST entry if one exists, or 0 otherwise.
+        uint64_t m_priority_candidate_best = 0;
+        //! The lowest priority of all CANDIDATE_READY entries (or max() if none exist).
+        uint64_t m_priority_best_candidate_ready = std::numeric_limits<uint64_t>::max();
+        //! All peers we have an entry for this txhash for.
+        std::vector<uint64_t> m_peers;
+        //! Whether any preferred first entry exists.
+        bool m_any_preferred_first = false;
+        //! Whether any non-preferred first entry exists.
+        bool m_any_nonpreferred_first = false;
+        //! OR of all m_per_txhash flags.
+        uint8_t m_or_all_per_txhash = 0;
+    };
 
-        std::map<uint256, Counts> table;
-        for (const auto& a : m_index) {
+    static std::map<uint256, SanityCheckCounts> SanityCheckCalculatePerTxCounts(const Index& index, const PriorityComputer& computer)
+    {
+        std::map<uint256, SanityCheckCounts> table;
+        for (const auto& a : index) {
             auto& entry = table[a.m_txhash];
             // Classify how many types peers we have for this txid.
             entry.m_candidate_delayed += (a.GetState() == State::CANDIDATE_DELAYED);
@@ -608,11 +673,11 @@ public:
             entry.m_requested += (a.GetState() == State::REQUESTED);
             // And track the priority of the best CANDIDATE_READY/CANDIDATE_BEST entries.
             if (a.GetState() == State::CANDIDATE_BEST) {
-                entry.m_priority_candidate_best = m_computer.ComputePriority(a);
+                entry.m_priority_candidate_best = computer.ComputePriority(a);
             }
             if (a.GetState() == State::CANDIDATE_READY) {
                 entry.m_priority_best_candidate_ready = std::min(entry.m_priority_best_candidate_ready,
-                    m_computer.ComputePriority(a));
+                    computer.ComputePriority(a));
             }
             // Also keep track of which peers this txid has an entry for (so we can detect duplicates).
             entry.m_peers.push_back(a.m_peer);
@@ -621,59 +686,9 @@ public:
             entry.m_any_nonpreferred_first |= (a.m_first && !a.m_preferred);
             entry.m_or_all_per_txhash |= a.m_per_txhash;
         }
-        for (auto& entry : table) {
-            auto& c = entry.second;
-            // Cannot have only COMPLETED peers (txid should have been deleted)
-            assert(c.m_candidate_delayed + c.m_candidate_ready + c.m_candidate_best + c.m_requested > 0);
-            // Can have at most 1 CANDIDATE_BEST/REQUESTED peer
-            assert(c.m_candidate_best + c.m_requested <= 1);
-            // If there are any CANDIDATE_READY entries, there must be exactly one CANDIDATE_BEST or REQUESTED
-            // entry.
-            if (c.m_candidate_ready > 0) {
-                assert(c.m_candidate_best + c.m_requested == 1);
-            }
-            // If there is both a CANDIDATE_READY and a CANDIDATE_BEST entry, the CANDIDATE_BEST one must be at
-            // least as good as the best CANDIDATE_READY.
-            if (c.m_candidate_ready && c.m_candidate_best) {
-                assert(c.m_priority_candidate_best <= c.m_priority_best_candidate_ready);
-            }
-            // Detect duplicate (peer, txid) entries
-            std::sort(c.m_peers.begin(), c.m_peers.end());
-            assert(std::adjacent_find(c.m_peers.begin(), c.m_peers.end()) == c.m_peers.end());
-            // Verify all per_txhash flags.
-            uint8_t expected_per_txhash = 0;
-            if (c.m_any_preferred_first || c.m_requested) {
-                expected_per_txhash |= TXHASHINFO_NO_MORE_PREFERRED_FIRST;
-            }
-            if (c.m_any_nonpreferred_first || c.m_requested) {
-                expected_per_txhash |= TXHASHINFO_NO_MORE_NONPREFERRED_FIRST;
-            }
-            // All expected flags must be present, but there can be more. If a node went from REQUESTED to
-            // COMPLETED, or was deleted, our expected_per_txhash may miss the relevant bits.
-            assert((expected_per_txhash & ~c.m_or_all_per_txhash) == 0);
-            // No entry can have flags that are a superset of the actual ones (they're always ORed into the actual
-            // one).
-            auto it_last = std::prev(m_index.get<ByTxHash>().lower_bound(
-                EntryTxHash{entry.first, State::TOO_LARGE, 0}));
-            assert(it_last->m_txhash == entry.first);
-            assert(c.m_or_all_per_txhash == it_last->m_per_txhash);
-        }
+        return table;
     }
 
-    void PostGetRequestableSanityCheck(std::chrono::microseconds now) const
-    {
-        for (const auto& entry : m_index) {
-            if (entry.IsWaiting()) {
-                // REQUESTED and CANDIDATE_DELAYED must have a time in the future (they should have been converted
-                // to COMPLETED/CANDIDATE_READY respectively).
-                assert(entry.m_time > now);
-            } else if (entry.IsSelectable()) {
-                // CANDIDATE_READY and CANDIDATE_BEST cannot have a time in the future (they should have remained
-                // CANDIDATE_DELAYED, or should have been converted back to it if time went backwards).
-                assert(entry.m_time <= now);
-            }
-        }
-    }
 };
 
 TxRequestTracker::TxRequestTracker(bool deterministic) :
