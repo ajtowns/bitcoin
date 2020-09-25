@@ -231,30 +231,45 @@ public:
     void SanityCheck() const
     {
         // Recompute m_peerdata from m_index.
-        // This verifies the data in it, including the invariant
-        // that no entries with m_total_announcements==0 exist.
+        // This verifies the data in it as it should just be caching statistics on m_index, and also
+        // validates the invariant that no entries with m_total_announcements==0 exist.
         assert(Impl::SanityCheckRecalculatePeerInfo(m_index) == m_peerinfo);
 
+        // Calculate per-tx statistics from m_index, and validate invariants.
         for (auto& entry : Impl::SanityCheckCalculatePerTxCounts(m_index, m_computer)) {
             auto& c = entry.second;
+
             // Cannot have only COMPLETED peers (txid should have been deleted)
             assert(c.m_candidate_delayed + c.m_candidate_ready + c.m_candidate_best + c.m_requested > 0);
+
             // Can have at most 1 CANDIDATE_BEST/REQUESTED peer
             assert(c.m_candidate_best + c.m_requested <= 1);
+
             // If there are any CANDIDATE_READY entries, there must be exactly one CANDIDATE_BEST or REQUESTED
             // entry.
             if (c.m_candidate_ready > 0) {
                 assert(c.m_candidate_best + c.m_requested == 1);
             }
+
             // If there is both a CANDIDATE_READY and a CANDIDATE_BEST entry, the CANDIDATE_BEST one must be at
-            // least as good as the best CANDIDATE_READY.
+            // least as good (equal or lower priority) as the best CANDIDATE_READY.
             if (c.m_candidate_ready && c.m_candidate_best) {
                 assert(c.m_priority_candidate_best <= c.m_priority_best_candidate_ready);
             }
-            // Detect duplicate (peer, txid) entries
+
+            // Any tx cannot have been announced by the same peer twice.
             std::sort(c.m_peers.begin(), c.m_peers.end());
             assert(std::adjacent_find(c.m_peers.begin(), c.m_peers.end()) == c.m_peers.end());
+
             // Verify all per_txhash flags.
+            // The "no-more-first" per_txhash flags are set when:
+            //    - we've seen an entry that wants to be first (per class)
+            //    - when we actually request a tx (both classes)
+            // We can't tell if a COMPLETED request is because we requested it
+            // (in which case both bits of the per_txhash flag should be set)
+            // or because the peer sent some sort of failure indication prior
+            // to us requesting it (in which case one or both bits of the
+            // flag do not need to be set yet). Check what we can:
             uint8_t expected_per_txhash = 0;
             if (c.m_any_preferred_first || c.m_requested) {
                 expected_per_txhash |= TXHASHINFO_NO_MORE_PREFERRED_FIRST;
@@ -262,14 +277,15 @@ public:
             if (c.m_any_nonpreferred_first || c.m_requested) {
                 expected_per_txhash |= TXHASHINFO_NO_MORE_NONPREFERRED_FIRST;
             }
-            // All expected flags must be present, but there can be more. If a node went from REQUESTED to
-            // COMPLETED, or was deleted, our expected_per_txhash may miss the relevant bits.
             assert((expected_per_txhash & ~c.m_or_all_per_txhash) == 0);
-            // No entry can have flags that are a superset of the actual ones (they're always ORed into the actual
-            // one).
+
+            // Looking up this tx must return an entry with this txid or the multi_index is very bad
             auto it_last = std::prev(m_index.get<ByTxHash>().lower_bound(
                 EntryTxHash{entry.first, State::TOO_LARGE, 0}));
-            assert(it_last->m_txhash == entry.first);
+            assert(it_last != m_index.get<ByTxHash>().end() && it_last->m_txhash == entry.first);
+
+            // No entry can have flags that are a superset of the actual ones (they're always ORed into the actual
+            // one).
             assert(c.m_or_all_per_txhash == it_last->m_per_txhash);
         }
     }
