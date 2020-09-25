@@ -29,6 +29,14 @@ static const uint256 UINT256_ZERO;
 //! Note that CANDIDATE is split up into 3 substates (DELAYED, BEST, READY), allowing more efficient
 //! implementation. Also note that the sorting order of EntryTxHash relies on the specific order of values in
 //! this enum.
+//!
+//! Expected behaviour is:
+//!   - when first announced by a peer, the state is CANDIDATE_DELAYED until reqtime arrives
+//!   - announcemnets that have reached their reqtime but not been requested will be either
+//!     CANDIDATE_READY or CANDIDATE_BEST
+//!   - when requested an announcement will be in state REQUESTED until exptime is reach
+//!   - if exptime is reached, or the peer replies to the request (either with NOTFOUND or the tx),
+//!     the state becomes COMPLETED
 enum class State : uint8_t {
     //! A CANDIDATE entry whose reqtime is in the future.
     CANDIDATE_DELAYED,
@@ -63,7 +71,7 @@ using EntryTxHash = std::tuple<const uint256&, State, uint64_t>;
 // 2 [CANDIDATE_READY,CANDIDATE_BEST], time)
 using EntryTime = std::pair<int, std::chrono::microseconds>;
 
-//! An announcement entry.
+//! An announcement entry. This is the data we track for each txid or wtxid that is announced to us.
 class Entry {
 public:
     //! Txid that was announced.
