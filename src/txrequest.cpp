@@ -217,6 +217,8 @@ private:
             >
         >
     >;
+    template<typename Tag>
+    using IndexIter = typename Index::index<Tag>::type::iterator;
 
     //! This tracker's main data structure.
     Index m_index;
@@ -316,7 +318,7 @@ public:
 private:
     //! Wrapper around Index::...::erase that keeps m_peerinfo and m_per_txhash up to date.
     template<typename Tag>
-    typename Index::index<Tag>::type::iterator Erase(typename Index::index<Tag>::type::iterator it)
+    IndexIter<Tag> Erase(IndexIter<Tag> it)
     {
         auto peerit = m_peerinfo.find(it->m_peer);
         peerit->second.m_requested -= it->GetState() == State::REQUESTED;
@@ -334,7 +336,7 @@ private:
 
     //! Wrapper around Index::...::modify that keeps m_peerinfo and m_per_txhash up to date.
     template<typename Tag, typename Modifier>
-    void Modify(typename Index::index<Tag>::type::iterator it, Modifier modifier)
+    void Modify(IndexIter<Tag> it, Modifier modifier)
     {
         auto peerit = m_peerinfo.find(it->m_peer);
         peerit->second.m_requested -= it->GetState() == State::REQUESTED;
@@ -358,7 +360,7 @@ private:
 
     //! Convert a CANDIDATE_DELAYED entry into a CANDIDATE_READY. If this makes it the new best CANDIDATE_READY
     //! (and no REQUESTED exists) and better than the CANDIDATE_BEST (if any), it becomes the new CANDIDATE_BEST.
-    void PromoteCandidateReady(typename Index::index<ByTxHash>::type::iterator it)
+    void PromoteCandidateReady(IndexIter<ByTxHash> it)
     {
         assert(it->GetState() == State::CANDIDATE_DELAYED);
         // Convert CANDIDATE_DELAYED to CANDIDATE_READY first.
@@ -385,7 +387,7 @@ private:
 
     //! Change the state of an entry to something non-IsSelected(). If it was IsSelected(), the next best entry will
     //! be marked CANDIDATE_BEST.
-    void ChangeAndReselect(typename Index::index<ByTxHash>::type::iterator it, State new_state)
+    void ChangeAndReselect(IndexIter<ByTxHash> it, State new_state)
     {
         if (it->IsSelected()) {
             auto it_next = std::next(it);
@@ -402,7 +404,7 @@ private:
     }
 
     //! Check if 'it' is the only Entry for a given txhash that isn't COMPLETED.
-    bool IsOnlyNonCompleted(typename Index::index<ByTxHash>::type::iterator it)
+    bool IsOnlyNonCompleted(IndexIter<ByTxHash> it)
     {
         assert(it->GetState() != State::COMPLETED); // Not allowed to call this on COMPLETED entries.
 
@@ -419,7 +421,7 @@ private:
     //! Convert any entry to a COMPLETED one. If there are no non-COMPLETED entries left for this txid, they are all
     //! deleted. If this was a REQUESTED entry, and there are other CANDIDATEs left, the best one is made
     //! CANDIDATE_BEST. Returns whether the Entry still exists.
-    bool MakeCompleted(typename Index::index<ByTxHash>::type::iterator it)
+    bool MakeCompleted(IndexIter<ByTxHash> it)
     {
         // Nothing to be done if it's already COMPLETED.
         if (it->GetState() == State::COMPLETED) return true;
@@ -532,7 +534,7 @@ public:
 
         // Find last entry for this txhash, and extract per_txhash information from it.
         uint8_t per_txhash = 0;
-        typename Index::index<ByTxHash>::type::iterator it_last = m_index.get<ByTxHash>().end();
+        IndexIter<ByTxHash> it_last = m_index.get<ByTxHash>().end();
         // First find the first entry past this txhash.
         it_last = m_index.get<ByTxHash>().lower_bound(EntryTxHash{gtxid.GetHash(), State::TOO_LARGE, 0});
         if (it_last != m_index.get<ByTxHash>().begin() && std::prev(it_last)->m_txhash == gtxid.GetHash()) {
