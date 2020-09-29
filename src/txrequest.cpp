@@ -216,6 +216,70 @@ struct PeerInfo {
     size_t m_requested = 0; //!< Number of REQUESTED announcements for this peer.
 };
 
+/** Per-txhash statistics object. Only used for sanity checking. */
+struct TxHashInfo
+{
+    //! Number of CANDIDATE_DELAYED entries for this txhash.
+    size_t m_candidate_delayed = 0;
+    //! Number of CANDIDATE_READY entries for this txhash.
+    size_t m_candidate_ready = 0;
+    //! Number of CANDIDATE_BEST entries for this txhash (at most one).
+    size_t m_candidate_best = 0;
+    //! Number of REQUESTED entries for this txhash.
+    size_t m_requested = 0;
+    //! The priority of the CANDIDATE_BEST announcement if one exists, or 0 otherwise.
+    uint64_t m_priority_candidate_best = 0;
+    //! The lowest priority of all CANDIDATE_READY entries (or max() if none exist).
+    uint64_t m_priority_best_candidate_ready = std::numeric_limits<uint64_t>::max();
+    //! All peers we have an announcement for this txhash for.
+    std::vector<uint64_t> m_peers;
+};
+
+/** Compare two PeerInfo objects. Only used for sanity checking. */
+bool operator==(const PeerInfo& a, const PeerInfo& b)
+{
+    return std::tie(a.m_total, a.m_completed, a.m_requested) ==
+           std::tie(b.m_total, b.m_completed, b.m_requested);
+};
+
+/** (Re)compute the PeerInfo map from the index. Only used for sanity checking. */
+std::unordered_map<NodeId, PeerInfo> RecomputePeerInfo(const Index& index)
+{
+    std::unordered_map<NodeId, PeerInfo> ret;
+    for (const Announcement& ann : index) {
+        PeerInfo& info = ret[ann.m_peer];
+        ++info.m_total;
+        info.m_requested += (ann.GetState() == State::REQUESTED);
+        info.m_completed += (ann.GetState() == State::COMPLETED);
+    }
+    return ret;
+}
+
+/** Compute the TxHashInfo map. Only used for sanity checking. */
+std::map<uint256, TxHashInfo> ComputeTxHashInfo(const Index& index, const PriorityComputer& computer)
+{
+    std::map<uint256, TxHashInfo> ret;
+    for (const Announcement& ann : index) {
+        TxHashInfo& info = ret[ann.m_txhash];
+        // Classify how many Entrys of each state we have for this txhash.
+        info.m_candidate_delayed += (ann.GetState() == State::CANDIDATE_DELAYED);
+        info.m_candidate_ready += (ann.GetState() == State::CANDIDATE_READY);
+        info.m_candidate_best += (ann.GetState() == State::CANDIDATE_BEST);
+        info.m_requested += (ann.GetState() == State::REQUESTED);
+        // And track the priority of the best CANDIDATE_READY/CANDIDATE_BEST entries.
+        if (ann.GetState() == State::CANDIDATE_BEST) {
+            info.m_priority_candidate_best = computer(ann);
+        }
+        if (ann.GetState() == State::CANDIDATE_READY) {
+            info.m_priority_best_candidate_ready = std::min(info.m_priority_best_candidate_ready, computer(ann));
+        }
+        // Also keep track of which peers this txhash has a Entry for (so we can detect duplicates).
+        info.m_peers.push_back(ann.m_peer);
+        // Track preferred/first.
+    }
+    return ret;
+}
+
 const uint256 UINT256_ZERO;
 
 }  // namespace
@@ -229,12 +293,69 @@ class TxRequestTracker::Impl {
     //! This tracker's priority computer.
     const PriorityComputer m_computer;
 
-    //! This tracker's main data structure.
+    //! This tracker's main data structure. See SanityCheck() for the invariants that apply to it.
     Index m_index;
 
     //! Map with this tracker's per-peer statistics.
     std::unordered_map<NodeId, PeerInfo> m_peerinfo;
 
+public:
+    void SanityCheck() const
+    {
+        // Recompute m_peerdata from m_index. This verifies the data in it as it should just be caching statistics
+        // on m_index. It also verifies the invariant that no PeerInfo entries exist with m_total==0 exist.
+        assert(m_peerinfo == RecomputePeerInfo(m_index));
+
+        // Calculate per-txhash statistics from m_index, and validate invariants.
+        for (auto& item : ComputeTxHashInfo(m_index, m_computer)) {
+            TxHashInfo& info = item.second;
+
+            // Cannot have only COMPLETED peer (txhash should have been forgotten already)
+            assert(info.m_candidate_delayed + info.m_candidate_ready + info.m_candidate_best + info.m_requested > 0);
+
+            // Can have at most 1 CANDIDATE_BEST/REQUESTED peer
+            assert(info.m_candidate_best + info.m_requested <= 1);
+
+            // If there are any CANDIDATE_READY entries, there must be exactly one CANDIDATE_BEST or REQUESTED
+            // announcement.
+            if (info.m_candidate_ready > 0) {
+                assert(info.m_candidate_best + info.m_requested == 1);
+            }
+
+            // If there is both a CANDIDATE_READY and a CANDIDATE_BEST announcement, the CANDIDATE_BEST one must be
+            // at least as good (equal or lower priority) as the best CANDIDATE_READY.
+            if (info.m_candidate_ready && info.m_candidate_best) {
+                assert(info.m_priority_candidate_best <= info.m_priority_best_candidate_ready);
+            }
+
+            // No txhash can have been announced by the same peer twice.
+            std::sort(info.m_peers.begin(), info.m_peers.end());
+            assert(std::adjacent_find(info.m_peers.begin(), info.m_peers.end()) == info.m_peers.end());
+
+            // Looking up the last ByTxHash announcement with the given txhash must return an Announcement with that
+            // txhash or the multi_index is very bad.
+            auto it_last = std::prev(m_index.get<ByTxHash>().lower_bound(
+                ByTxHashView{item.first, State::TOO_LARGE, 0}));
+            assert(it_last != m_index.get<ByTxHash>().end() && it_last->m_txhash == item.first);
+        }
+    }
+
+    void PostGetRequestableSanityCheck(std::chrono::microseconds now) const
+    {
+        for (const Announcement& ann : m_index) {
+            if (ann.IsWaiting()) {
+                // REQUESTED and CANDIDATE_DELAYED must have a time in the future (they should have been converted
+                // to COMPLETED/CANDIDATE_READY respectively).
+                assert(ann.m_time > now);
+            } else if (ann.IsSelectable()) {
+                // CANDIDATE_READY and CANDIDATE_BEST cannot have a time in the future (they should have remained
+                // CANDIDATE_DELAYED, or should have been converted back to it if time went backwards).
+                assert(ann.m_time <= now);
+            }
+        }
+    }
+
+private:
     //! Wrapper around Index::...::erase that keeps m_peerinfo up to date.
     template<typename Tag>
     Iter<Tag> Erase(Iter<Tag> it)
@@ -541,6 +662,13 @@ public:
 
     //! Count how many announcements are being tracked in total across all peers and transactions.
     size_t Size() const { return m_index.size(); }
+
+    uint64_t ComputePriority(const uint256& txhash, NodeId peer, bool preferred) const
+    {
+        // Return Priority as a uint64_t as Priority is internal.
+        return uint64_t{m_computer(txhash, peer, preferred)};
+    }
+
 };
 
 TxRequestTracker::TxRequestTracker(bool deterministic) :
@@ -554,6 +682,12 @@ size_t TxRequestTracker::CountInFlight(NodeId peer) const { return m_impl->Count
 size_t TxRequestTracker::CountCandidates(NodeId peer) const { return m_impl->CountCandidates(peer); }
 size_t TxRequestTracker::Count(NodeId peer) const { return m_impl->Count(peer); }
 size_t TxRequestTracker::Size() const { return m_impl->Size(); }
+void TxRequestTracker::SanityCheck() const { m_impl->SanityCheck(); }
+
+void TxRequestTracker::PostGetRequestableSanityCheck(std::chrono::microseconds now) const
+{
+    m_impl->PostGetRequestableSanityCheck(now);
+}
 
 void TxRequestTracker::ReceivedInv(NodeId peer, const GenTxid& gtxid, bool preferred,
     std::chrono::microseconds reqtime)
@@ -574,4 +708,9 @@ void TxRequestTracker::ReceivedResponse(NodeId peer, const uint256& txhash)
 std::vector<GenTxid> TxRequestTracker::GetRequestable(NodeId peer, std::chrono::microseconds now)
 {
     return m_impl->GetRequestable(peer, now);
+}
+
+uint64_t TxRequestTracker::ComputePriority(const uint256& txhash, NodeId peer, bool preferred) const
+{
+    return m_impl->ComputePriority(txhash, peer, preferred);
 }
