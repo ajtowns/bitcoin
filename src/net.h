@@ -259,9 +259,9 @@ public:
     uint64_t nRecvBytes;
     mapMsgCmdSize mapRecvBytesPerMsgCmd;
     NetPermissionFlags m_permissionFlags;
-    int64_t m_ping_usec;
-    int64_t m_ping_wait_usec;
-    int64_t m_min_ping_usec;
+    std::chrono::microseconds m_ping_time;
+    std::chrono::microseconds m_ping_wait;
+    std::chrono::microseconds m_min_ping_time;
     CAmount minFeeFilter;
     // Our address, as reported by the peer
     std::string addrLocal;
@@ -595,9 +595,9 @@ public:
     /** When the last ping was sent, or 0 if no ping was ever sent */
     std::atomic<std::chrono::microseconds> m_ping_start{0us};
     // Last measured round-trip time.
-    std::atomic<int64_t> nPingUsecTime{0};
+    std::atomic<std::chrono::microseconds> m_ping_time{0us};
     // Best measured round-trip time.
-    std::atomic<int64_t> nMinPingUsecTime{std::numeric_limits<int64_t>::max()};
+    std::atomic<std::chrono::microseconds> m_min_ping_time{std::chrono::microseconds::max()};
     // Whether a ping is requested.
     std::atomic<bool> fPingQueued{false};
 
@@ -1254,7 +1254,7 @@ struct NodeEvictionCandidate
 {
     NodeId id;
     int64_t nTimeConnected;
-    int64_t nMinPingUsecTime;
+    std::chrono::microseconds m_min_ping_time;
     int64_t nLastBlockTime;
     int64_t nLastTXTime;
     bool fRelevantServices;

@@ -203,14 +203,14 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("bytesrecv", stats.nRecvBytes);
         obj.pushKV("conntime", stats.nTimeConnected);
         obj.pushKV("timeoffset", stats.nTimeOffset);
-        if (stats.m_ping_usec > 0) {
-            obj.pushKV("pingtime", ((double)stats.m_ping_usec) / 1e6);
+        if (stats.m_ping_time > 0us) {
+            obj.pushKV("pingtime", CountSecondsDouble(stats.m_ping_time));
         }
-        if (stats.m_min_ping_usec < std::numeric_limits<int64_t>::max()) {
-            obj.pushKV("minping", ((double)stats.m_min_ping_usec) / 1e6);
+        if (stats.m_min_ping_time < std::chrono::microseconds::max()) {
+            obj.pushKV("minping", CountSecondsDouble(stats.m_min_ping_time));
         }
-        if (stats.m_ping_wait_usec > 0) {
-            obj.pushKV("pingwait", ((double)stats.m_ping_wait_usec) / 1e6);
+        if (stats.m_ping_wait > 0us) {
+            obj.pushKV("pingwait", CountSecondsDouble(stats.m_ping_wait));
         }
         obj.pushKV("version", stats.nVersion);
         // Use the sanitized form of subver here, to avoid tricksy remote peers from
