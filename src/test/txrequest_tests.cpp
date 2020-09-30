@@ -83,11 +83,11 @@ public:
         });
     }
 
-    void ReceivedInv(uint64_t peer, const GenTxid& gtxid, bool pref, std::chrono::microseconds reqtime = MIN_TIME)
+    void ReceivedInv(uint64_t peer, const GenTxid& gtxid, bool pref, bool overload, std::chrono::microseconds reqtime = MIN_TIME)
     {
         auto& runner = m_runner;
         runner.actions.emplace_back(m_now, [=,&runner]() {
-            runner.txrequest.ReceivedInv(peer, gtxid, pref, reqtime);
+            runner.txrequest.ReceivedInv(peer, gtxid, pref, overload, reqtime);
             runner.txrequest.SanityCheck();
         });
     }
@@ -149,8 +149,8 @@ public:
             ok = true;
             for (const auto& order : orders) {
                 for (size_t pos = 1; pos < order.size(); ++pos) {
-                    uint64_t prio_prev = m_runner.txrequest.ComputePriority(ret, order[pos - 1], true);
-                    uint64_t prio_cur = m_runner.txrequest.ComputePriority(ret, order[pos], true);
+                    uint64_t prio_prev = m_runner.txrequest.ComputePriority(ret, order[pos - 1], true, false);
+                    uint64_t prio_cur = m_runner.txrequest.ComputePriority(ret, order[pos], true, false);
                     if (prio_prev >= prio_cur) {
                         ok = false;
                         break;
@@ -195,13 +195,12 @@ void BuildSingleTest(Scenario& scenario, int config)
     bool immediate = config & 1;
     bool preferred = config & 2;
     bool overload = config & 4;
-    if (overload) return; // future
     auto delay = immediate ? NO_TIME : RandomTime();
 
     scenario.SetTestName(strprintf("Single(config=%i)", config));
 
     // Receive an announcement, either immediately requestable or delayed.
-    scenario.ReceivedInv(peer, gtxid, preferred, immediate ? MIN_TIME : scenario.Now() + delay);
+    scenario.ReceivedInv(peer, gtxid, preferred, overload, immediate ? MIN_TIME : scenario.Now() + delay);
     if (immediate) {
         scenario.Check(peer, {gtxid}, 1, 0, 0, "s1");
     } else {
@@ -263,21 +262,28 @@ void BuildPriorityTest(Scenario& scenario, int config)
 
     bool pref1 = config & 2, pref2 = config & 4;
     bool overload1 = config & 8, overload2 = config & 16;
-    if (overload1 || overload2) return; // future
 
-    scenario.ReceivedInv(peer1, gtxid, pref1, MIN_TIME);
+    scenario.ReceivedInv(peer1, gtxid, pref1, overload1, MIN_TIME);
+    // Whether this announcement is expected to have received the "first" marker.
+    bool firstpref1 = pref1 && !overload1;
+    bool firstnpref1 = !pref1 && !overload1;
     scenario.Check(peer1, {gtxid}, 1, 0, 0, "p1");
     if (InsecureRandBool()) scenario.AdvanceTime(RandomTime());
     scenario.Check(peer1, {gtxid}, 1, 0, 0, "p2");
 
-    scenario.ReceivedInv(peer2, gtxid, pref2, MIN_TIME);
+    scenario.ReceivedInv(peer2, gtxid, pref2, overload2, MIN_TIME);
+    // Whether this announcement is expected to have received the "first" marker.
+    bool firstpref2 = pref2 && !firstpref1 && !overload2;
+    bool firstnpref2 = !pref2 && !firstnpref1 && !overload2;
     bool stage2_prio =
         // At this point, peer2 will be given priority if:
         // - It is preferred and peer1 is not
         (pref2 && !pref1) ||
-        // - They're in the same preference class,
+        // - They're in the same preference class, and peer2 got the "first" marker.
+        (pref1 == pref2 && (firstpref2 || firstnpref2)) ||
+        // - They're in the same preference class, neither peer 1 or peer2 got the "first" marker,
         //   and the randomized priority favors peer2 over peer1.
-        (pref1 == pref2 && !prio1);
+        (pref1 == pref2 && !(firstpref1 || firstnpref1 || firstpref2 || firstnpref2) && !prio1);
     uint64_t priopeer = stage2_prio ? peer2 : peer1, otherpeer = stage2_prio ? peer1 : peer2;
     scenario.Check(otherpeer, {}, 1, 0, 0, "p3");
     scenario.Check(priopeer, {gtxid}, 1, 0, 0, "p4");
@@ -319,6 +325,7 @@ void BuildBigPriorityTest(Scenario& scenario, int peers)
     scenario.SetTestName(strprintf("BigPriority(peers=%i)", peers));
 
     // We will have N peers announce the same transaction.
+    std::map<uint64_t, bool> overloaded;
     std::map<uint64_t, bool> preferred;
     std::vector<uint64_t> pref_order, npref_order;
     std::vector<uint64_t> pref_peers, npref_peers;
@@ -338,19 +345,52 @@ void BuildBigPriorityTest(Scenario& scenario, int peers)
     for (int i = 0; i < num_pref; ++i) request_order.push_back(pref_peers[i]);
     for (int i = 0; i < num_npref; ++i) request_order.push_back(npref_peers[i]);
 
-    // Setup pref_order
-    for (int i = 0; i < num_pref; ++i) {
+    // Among the preferred ones, one may or may not get the first marker.
+    // If so, pref_peers[0] must not be overloaded, and must be announced first.
+    // Otherwise, every preferred peer has to be overloaded.
+    bool pref_first = num_pref && InsecureRandBool();
+    if (pref_first) overloaded[pref_peers[0]] = false;
+    for (int i = pref_first; i < num_pref; ++i) {
+        overloaded[pref_peers[i]] = pref_first ? InsecureRandBool() : true;
         pref_order.push_back(pref_peers[i]);
     }
 
-    // Setup npref_order
-    for (int i = 0; i < num_npref; ++i) {
+    // Among the nonpreferred ones, one may or may not get the first marker.
+    // If so, npref_peers[0] must not be overloaded, and must be announced first.
+    // Otherwise, every non-preferred peer has to be overloaded.
+    bool npref_first = num_npref && InsecureRandBool();
+    if (npref_first) overloaded[npref_peers[0]] = false;
+    for (int i = npref_first; i < num_npref; ++i) {
+        overloaded[npref_peers[i]] = npref_first ? InsecureRandBool() : true;
         npref_order.push_back(npref_peers[i]);
     }
 
-    // Determine the announcement order randomly.
+    // Determine the announcement order. Generate random orderings until one is found
+    // that is consistent with the above requirements for the first marker logic.
     std::vector<uint64_t> announce_order = request_order;
-    Shuffle(announce_order.begin(), announce_order.end(), g_insecure_rand_ctx);
+    bool ok;
+    do {
+        Shuffle(announce_order.begin(), announce_order.end(), g_insecure_rand_ctx);
+        ok = true;
+        if (pref_first) {
+            // The first-announced preferred peer must be pref_peers[0].
+            for (const auto peer : announce_order) {
+                if (preferred[peer]) {
+                    ok = (peer == pref_peers[0]);
+                    break;
+                }
+            }
+        }
+        if (ok && npref_first) {
+            // The first-announced non-preferred peer must be npref_peers[0].
+            for (const auto peer : announce_order) {
+                if (!preferred[peer]) {
+                    ok = (peer == npref_peers[0]);
+                    break;
+                }
+            }
+        }
+    } while (!ok);
 
     // Find a gtxid that has a prioritization consistent with the required pref_order and npref_order.
     auto gtxid = scenario.NewGTxid({pref_order, npref_order});
@@ -366,7 +406,7 @@ void BuildBigPriorityTest(Scenario& scenario, int peers)
 
     // Actually announce from all peers simultaneously (but in announce_order).
     for (const auto peer : announce_order) {
-        scenario.ReceivedInv(peer, gtxid, preferred[peer], reqtimes[peer]);
+        scenario.ReceivedInv(peer, gtxid, preferred[peer], overloaded[peer], reqtimes[peer]);
     }
     for (const auto peer : announce_order) {
         scenario.Check(peer, {}, 1, 0, 0, "b1");
@@ -418,9 +458,9 @@ void BuildRequestOrderTest(Scenario& scenario, int config)
     auto reqtime2 = scenario.Now() + RandomTime();
     auto reqtime1 = reqtime2 + RandomTime();
 
-    scenario.ReceivedInv(peer, gtxid1, config & 1, reqtime1);
+    scenario.ReceivedInv(peer, gtxid1, config & 1, config & 2, reqtime1);
     // Simulate time going backwards by giving the second announcement an earlier reqtime.
-    scenario.ReceivedInv(peer, gtxid2, config & 4, reqtime2);
+    scenario.ReceivedInv(peer, gtxid2, config & 4, config & 8, reqtime2);
 
     scenario.AdvanceTime(reqtime2 - MICROSECOND - scenario.Now());
     scenario.Check(peer, {}, 2, 0, 0, "o1");
@@ -455,13 +495,13 @@ void BuildWtxidTest(Scenario& scenario, int config)
 
     // Announce txid first or wtxid first.
     if (config & 1) {
-        scenario.ReceivedInv(peerT, txid, config & 2, reqtimeT);
+        scenario.ReceivedInv(peerT, txid, config & 2, InsecureRandBool(), reqtimeT);
         if (InsecureRandBool()) scenario.AdvanceTime(RandomTime());
-        scenario.ReceivedInv(peerW, wtxid, !(config & 2), reqtimeW);
+        scenario.ReceivedInv(peerW, wtxid, !(config & 2), InsecureRandBool(), reqtimeW);
     } else {
-        scenario.ReceivedInv(peerW, wtxid, !(config & 2), reqtimeW);
+        scenario.ReceivedInv(peerW, wtxid, !(config & 2), InsecureRandBool(), reqtimeW);
         if (InsecureRandBool()) scenario.AdvanceTime(RandomTime());
-        scenario.ReceivedInv(peerT, txid, config & 2, reqtimeT);
+        scenario.ReceivedInv(peerT, txid, config & 2, InsecureRandBool(), reqtimeT);
     }
 
     // Let time pass if needed, and check that the preferred announcement (txid or wtxid)
