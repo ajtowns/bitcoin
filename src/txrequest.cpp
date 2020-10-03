@@ -299,6 +299,9 @@ class TxRequestTracker::Impl {
     //! Map with this tracker's per-peer statistics.
     std::unordered_map<NodeId, PeerInfo> m_peerinfo;
 
+    //! Whether to do debug logging
+    bool m_logging = false;
+
 public:
     void SanityCheck() const
     {
@@ -457,9 +460,14 @@ private:
         if (IsOnlyNonCompleted(it)) {
             // This is the last non-COMPLETED announcement for this txhash. Delete all.
             uint256 txhash = it->m_txhash;
+            int count = 0;
             do {
                 it = Erase<ByTxHash>(it);
+                ++count;
             } while (it != m_index.get<ByTxHash>().end() && it->m_txhash == txhash);
+            if (m_logging) {
+                LogPrint(BCLog::NET, "txrequest expiring txid=%s completed=%d\n", txhash.ToString(), count);
+            }
             return false;
         }
 
@@ -589,6 +597,43 @@ public:
 
     void RequestedTx(NodeId peer, const uint256& txhash, std::chrono::microseconds expiry)
     {
+        if (m_logging && LogAcceptCategory(BCLog::NET)) {
+            int delayed[2] = {0,0};
+            int candidate[2] = {0,0};
+            int completed[2] = {0,0};
+            bool requested = false;
+            int preferred = -1;
+            for (Iter<ByTxHash> it_txid = m_index.get<ByTxHash>().lower_bound(ByTxHashView{txhash, State::CANDIDATE_DELAYED, 0});
+                 it_txid != m_index.get<ByTxHash>().end() && it_txid->m_txhash == txhash;
+                 ++it_txid)
+           {
+                switch (it_txid->GetState()) {
+                case State::CANDIDATE_DELAYED:
+                    ++delayed[it_txid->m_preferred];
+                    break;
+                case State::CANDIDATE_READY:
+                case State::CANDIDATE_BEST:
+                    ++candidate[it_txid->m_preferred];
+                    break;
+                case State::COMPLETED:
+                    ++completed[it_txid->m_preferred];
+                    break;
+                case State::REQUESTED:
+                    requested = true;
+                    break;
+                case State::TOO_LARGE: break; // invalid
+                }
+                if (it_txid->m_peer == peer) preferred = it_txid->m_preferred ? 1 : 0;
+            }
+            LogPrint(BCLog::NET, "txrequest requested txid=%s preferred=%d delayed=[%d,%d] candidate=[%d,%d] completed=[%d,%d]%s peer=%d\n",
+                txhash.ToString(), preferred,
+                delayed[1], delayed[0],
+                candidate[1], candidate[0],
+                completed[1], completed[0],
+                (requested ? " REPLACEMENT" : ""),
+                peer);
+        }
+
         auto it = m_index.get<ByPeer>().find(ByPeerView{peer, true, txhash});
         if (it == m_index.get<ByPeer>().end()) {
             // There is no CANDIDATE_BEST announcement, look for a _READY or _DELAYED instead. If the caller only
@@ -669,6 +714,10 @@ public:
         return uint64_t{m_computer(txhash, peer, preferred)};
     }
 
+    void SetLogging(bool enabled)
+    {
+        m_logging = enabled;
+    }
 };
 
 TxRequestTracker::TxRequestTracker(bool deterministic) :
@@ -713,4 +762,9 @@ std::vector<GenTxid> TxRequestTracker::GetRequestable(NodeId peer, std::chrono::
 uint64_t TxRequestTracker::ComputePriority(const uint256& txhash, NodeId peer, bool preferred) const
 {
     return m_impl->ComputePriority(txhash, peer, preferred);
+}
+
+void TxRequestTracker::SetLogging(bool enabled)
+{
+    m_impl->SetLogging(enabled);
 }

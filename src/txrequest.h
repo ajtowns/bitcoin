@@ -200,6 +200,9 @@ public:
      * This can only be called immediately after GetRequestable, with the same 'now' parameter.
      */
     void PostGetRequestableSanityCheck(std::chrono::microseconds now) const;
+
+    /** Enable/disable logging. */
+    void SetLogging(bool enabled);
 };
 
 #endif // BITCOIN_TXREQUEST_H
