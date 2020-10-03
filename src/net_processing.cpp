@@ -1177,6 +1177,8 @@ PeerManager::PeerManager(const CChainParams& chainparams, CConnman& connman, Ban
     // schedule next run for 10-15 minutes in the future
     const std::chrono::milliseconds delta = std::chrono::minutes{10} + GetRandMillis(std::chrono::minutes{5});
     scheduler.scheduleFromNow([&] { ReattemptInitialBroadcast(scheduler); }, delta);
+
+    m_txrequest.SetLogging(true);
 }
 
 /**
