@@ -330,6 +330,11 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601; // January 1, 2008
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
 
+        // Deployment of Taproot (BIPs 340-342)
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nStartTime = 1199145601; // January 1, 2008
+        consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].nTimeout = 1230767999; // December 31, 2008
+
         // message start is defined as the first 4 bytes of the sha256d of the block script
         CHashWriter h(SER_DISK, 0);
         h << consensus.signet_challenge;
