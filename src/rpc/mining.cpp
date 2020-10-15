@@ -815,6 +815,7 @@ static RPCHelpMan getblocktemplate()
     aRules.push_back("csv");
     if (!fPreSegWit) aRules.push_back("!segwit");
     UniValue vbavailable(UniValue::VOBJ);
+    int32_t vbrequired{0};
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
         ThresholdState state = VersionBitsState(pindexPrev, consensusParams, pos, versionbitscache);
@@ -825,6 +826,7 @@ static RPCHelpMan getblocktemplate()
                 break;
             case ThresholdState::MUST_SIGNAL:
             case ThresholdState::LOCKED_IN:
+                vbrequired |= VersionBitsMask(consensusParams, pos);
                 // Ensure bit is set in block version
                 pblock->nVersion |= VersionBitsMask(consensusParams, pos);
                 // FALL THROUGH to get vbavailable set...
@@ -859,7 +861,7 @@ static RPCHelpMan getblocktemplate()
     result.pushKV("version", pblock->nVersion);
     result.pushKV("rules", aRules);
     result.pushKV("vbavailable", vbavailable);
-    result.pushKV("vbrequired", int(0));
+    result.pushKV("vbrequired", vbrequired);
 
     if (nMaxVersionPreVB >= 2) {
         // If VB is supported by the client, nMaxVersionPreVB is -1, so we won't get here
