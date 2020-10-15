@@ -141,6 +141,7 @@ class BlockchainTest(BitcoinTestFramework):
                     'bit': 28,
                     'startheight': 0,
                     'timeoutheight': 0x7fffffffffffffff,  # testdummy does not have a timeout so is set to the max int64 value
+                    'lockinontimeout': False,
                     'since': 144,
                     'statistics': {
                         'period': 144,
@@ -158,6 +159,7 @@ class BlockchainTest(BitcoinTestFramework):
                     'status': 'active',
                     'startheight': -1,
                     'timeoutheight': 0x7fffffffffffffff,
+                    'lockinontimeout': False,
                     'since': 0
                 },
                 'height': 0,
