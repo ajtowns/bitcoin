@@ -27,7 +27,7 @@ void SetupChainParamsBaseOptions(ArgsManager& argsman)
     argsman.AddArg("-signet", "Use the signet chain. Equivalent to -chain=signet. Note that the network is defined by the -signetchallenge parameter", ArgsManager::ALLOW_ANY, OptionsCategory::CHAINPARAMS);
     argsman.AddArg("-signetchallenge", "Blocks must satisfy the given script to be considered valid (only for signet networks; defaults to the global default signet test network challenge)", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
     argsman.AddArg("-signetseednode", "Specify a seed node for the signet network, in the hostname[:port] format, e.g. sig.net:1234 (may be used multiple times to specify multiple seed nodes; defaults to the global default signet test network seed node(s))", ArgsManager::ALLOW_STRING, OptionsCategory::CHAINPARAMS);
-    argsman.AddArg("-signettaproot", "Enforce taproot soft-fork soft-fork rules (only for signet networks; defaults to 1 on the default global signet, 0 otherwise)", ArgsManager::ALLOW_BOOL, OptionsCategory::CHAINPARAMS);
+    argsman.AddArg("-signettaproot", "Enforce taproot soft-fork rules (only for signet networks; defaults to 1 on the default global signet, 0 otherwise)", ArgsManager::ALLOW_BOOL, OptionsCategory::CHAINPARAMS);
 }
 
 static std::unique_ptr<CBaseChainParams> globalChainBaseParams;
