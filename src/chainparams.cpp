@@ -7,11 +7,11 @@
 
 #include <chainparamsseeds.h>
 #include <consensus/merkle.h>
+#include <deploymentinfo.h>
 #include <hash.h> // for signet block challenge hash
 #include <tinyformat.h>
 #include <util/system.h>
 #include <util/strencodings.h>
-#include <versionbitsinfo.h>
 
 #include <assert.h>
 
