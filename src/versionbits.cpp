@@ -12,6 +12,11 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
     int64_t height_start = StartHeight(params);
     int64_t height_timeout = TimeoutHeight(params);
 
+    // Check if this deployment is never active.
+    if (height_start == Consensus::BIP9Deployment::NEVER_ACTIVE && height_timeout == Consensus::BIP9Deployment::NEVER_ACTIVE ) {
+        return ThresholdState::DEFINED;
+    }
+
     // Check if this deployment is always active.
     if (height_start == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
         return ThresholdState::ACTIVE;
