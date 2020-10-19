@@ -47,6 +47,13 @@ public:
     int64_t BeginTime(const Consensus::Params& params) const override { return Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
 };
 
+class TestNeverActiveConditionChecker : public TestConditionChecker
+{
+public:
+    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
+    int64_t EndTime(const Consensus::Params& params) const override { return 1230768000; }
+};
+
 #define CHECKERS 6
 
 class VersionBitsTester
@@ -60,6 +67,8 @@ class VersionBitsTester
     TestConditionChecker checker[CHECKERS];
     // Another 6 that assume always active activation
     TestAlwaysActiveConditionChecker checker_always[CHECKERS];
+    // Another 6 that assume never active activation
+    TestNeverActiveConditionChecker checker_never[CHECKERS];
 
     // Test counter (to identify failures)
     int num;
@@ -74,6 +83,7 @@ public:
         for (unsigned int  i = 0; i < CHECKERS; i++) {
             checker[i] = TestConditionChecker();
             checker_always[i] = TestAlwaysActiveConditionChecker();
+            checker_never[i] = TestNeverActiveConditionChecker();
         }
         vpblock.clear();
         return *this;
@@ -101,6 +111,10 @@ public:
             if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(checker[i].GetStateSinceHeightFor(vpblock.empty() ? nullptr : vpblock.back()) == height, strprintf("Test %i for StateSinceHeight", num));
                 BOOST_CHECK_MESSAGE(checker_always[i].GetStateSinceHeightFor(vpblock.empty() ? nullptr : vpblock.back()) == 0, strprintf("Test %i for StateSinceHeight (always active)", num));
+
+                // never active may go from DEFINED -> FAILED at the first period
+                const auto never_height = checker_never[i].GetStateSinceHeightFor(vpblock.empty() ? nullptr : vpblock.back());
+                BOOST_CHECK_MESSAGE(never_height == 0 || never_height == checker_never[i].Period(paramsDummy), strprintf("Test %i for StateSinceHeight (never active)", num));
             }
         }
         num++;
@@ -110,11 +124,14 @@ public:
     VersionBitsTester& TestState(ThresholdState exp) {
         for (int i = 0; i < CHECKERS; i++) {
             if (InsecureRandBits(i) == 0) {
-                ThresholdState got = checker[i].GetStateFor(vpblock.empty() ? nullptr : vpblock.back());
-                ThresholdState got_always = checker_always[i].GetStateFor(vpblock.empty() ? nullptr : vpblock.back());
-                int height = vpblock.empty() ? 0 : (1 + vpblock.back()->nHeight);
+                const CBlockIndex* pindex = vpblock.empty() ? nullptr : vpblock.back();
+                ThresholdState got = checker[i].GetStateFor(pindex);
+                ThresholdState got_always = checker_always[i].GetStateFor(pindex);
+                ThresholdState got_never = checker_never[i].GetStateFor(pindex);
+                int height = pindex == nullptr ? 0 : pindex->nHeight + 1;
                 BOOST_CHECK_MESSAGE(got == exp, strprintf("Test %i for %s height %d (got %s)", num, StateName(exp), height, StateName(got)));
                 BOOST_CHECK_MESSAGE(got_always == ThresholdState::ACTIVE, strprintf("Test %i for ACTIVE height %d (got %s; always active case)", num, height, StateName(got_always)));
+                BOOST_CHECK_MESSAGE(got_never == ThresholdState::DEFINED|| got_never == ThresholdState::FAILED, strprintf("Test %i for DEFINED/FAILED height %d (got %s; never active case)", num, height, StateName(got_never)));
             }
         }
         num++;
