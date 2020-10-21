@@ -50,8 +50,8 @@ public:
 class TestNeverActiveConditionChecker : public TestConditionChecker
 {
 public:
-    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
-    int64_t EndTime(const Consensus::Params& params) const override { return 1230768000; }
+    int64_t StartHeight(const Consensus::Params& params) const override { return Consensus::BIP9Deployment::NEVER_ACTIVE; }
+    int64_t TimeoutHeight(const Consensus::Params& params) const override { return Consensus::BIP9Deployment::NEVER_ACTIVE; }
 };
 
 #define CHECKERS 6
