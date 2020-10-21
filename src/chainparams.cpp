@@ -478,7 +478,7 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
         if (vDeploymentParams.size() != 3) {
             throw std::runtime_error("Version bits parameters malformed, expecting deployment:@startheight:@timeoutheight");
         }
-        int64_t startheight, timeoutheight;
+        int64_t startheight = 0, timeoutheight = 0;
         if (vDeploymentParams[1].empty() || vDeploymentParams[1].front() != '@' || !ParseInt64(vDeploymentParams[1].substr(1), &startheight)) {
             throw std::runtime_error(strprintf("Invalid startheight (%s)", vDeploymentParams[1]));
         }
