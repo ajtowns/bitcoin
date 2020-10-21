@@ -3550,20 +3550,12 @@ static bool ContextualCheckBlockHeaderVolatile(const CBlockHeader& block, BlockV
 {
     const Consensus::Params& consensusParams = params.GetConsensus();
 
-    // Enforce MUST_SIGNAL and LOCKED_IN status of deployments
+    // Enforce MUST_SIGNAL status of deployments
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos deployment_pos = Consensus::DeploymentPos(j);
         ThresholdState deployment_state = VersionBitsState(pindexPrev, consensusParams, deployment_pos, versionbitscache);
-        if (deployment_state == ThresholdState::MUST_SIGNAL || deployment_state == ThresholdState::LOCKED_IN) {
-            bool missing_signal{false};
-            if (block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) {
-                if (deployment_state == ThresholdState::MUST_SIGNAL && (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) {
-                    missing_signal = true;
-                }
-            } else {
-                missing_signal = true;
-            }
-            if (missing_signal) {
+        if (deployment_state == ThresholdState::MUST_SIGNAL) {
+            if ((block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) == 0 || (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) {
                 const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
                 return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
             }
