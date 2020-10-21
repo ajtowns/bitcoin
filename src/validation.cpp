@@ -3556,8 +3556,16 @@ static bool ContextualCheckBlockHeaderVolatile(const CBlockHeader& block, BlockV
         ThresholdState deployment_state = VersionBitsState(pindexPrev, consensusParams, deployment_pos, versionbitscache);
         if (deployment_state == ThresholdState::MUST_SIGNAL) {
             if ((block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) == 0 || (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) {
-                const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
-                return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
+                VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
+                if (stats.elapsed == stats.period) {
+                    // first block in new period
+                    stats.count = stats.elapsed = 0;
+                }
+                ++stats.elapsed; ++stats.count;
+                if (stats.count + (stats.period - stats.elapsed) < stats.threshold) {
+                    const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
+                    return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
+                }
             }
         }
     }
