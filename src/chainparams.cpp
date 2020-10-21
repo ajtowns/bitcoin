@@ -392,7 +392,7 @@ public:
         consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains
         consensus.nMinerConfirmationWindow = 144; // Faster than normal for regtest (144 instead of 2016)
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].startheight = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].startheight = 144;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].timeoutheight = Consensus::BIP9Deployment::NO_TIMEOUT;
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].bit = 2;
         consensus.vDeployments[Consensus::DEPLOYMENT_TAPROOT].startheight = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
