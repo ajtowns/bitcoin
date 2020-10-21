@@ -14,7 +14,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
     const bool lockinontimeout = LockinOnTimeout(params);
 
     // Check if this deployment is never active.
-    if (height_start == Consensus::BIP9Deployment::NEVER_ACTIVE && height_timeout == Consensus::BIP9Deployment::NEVER_ACTIVE ) {
+    if (height_start == Consensus::VBitsDeployment::NEVER_ACTIVE && height_timeout == Consensus::VBitsDeployment::NEVER_ACTIVE ) {
         return ThresholdState::DEFINED;
     }
 
