@@ -245,7 +245,7 @@ public:
         m_onion_binds = connOptions.onion_binds;
     }
 
-    CConnman(uint64_t seed0, uint64_t seed1, bool network_active = true);
+    CConnman(uint64_t seed0, uint64_t seed1, bool network_active = true, bool check_addrman = false);
     ~CConnman();
     bool Start(CScheduler& scheduler, const Options& options);
 

@@ -118,7 +118,7 @@ public:
  *        tried ones) is evicted from it, back to the "new" buckets.
  *    * Bucket selection is based on cryptographic hashing, using a randomly-generated 256-bit key, which should not
  *      be observable by adversaries.
- *    * Several indexes are kept for high performance. Defining DEBUG_ADDRMAN will introduce frequent (and expensive)
+ *    * Several indexes are kept for high performance. Setting m_consistency_check will introduce frequent (and expensive)
  *      consistency checks for the entire data structure.
  */
 
@@ -229,6 +229,9 @@ private:
     //! Holds addrs inserted into tried table that collide with existing entries. Test-before-evict discipline used to resolve these collisions.
     std::set<int> m_tried_collisions;
 
+    /** Whether to perform sanity checks before and after each operation. */
+    const bool m_consistency_check{false};
+
 protected:
     //! secret key to randomize bucket select with
     uint256 nKey;
@@ -273,10 +276,8 @@ protected:
     //! Return a random to-be-evicted tried table address.
     CAddrInfo SelectTriedCollision_() EXCLUSIVE_LOCKS_REQUIRED(cs);
 
-#ifdef DEBUG_ADDRMAN
     //! Perform consistency check. Returns an error code or zero.
     int Check_() EXCLUSIVE_LOCKS_REQUIRED(cs);
-#endif
 
     //! Select several addresses at once.
     void GetAddr_(std::vector<CAddress> &vAddr, size_t max_addresses, size_t max_pct) EXCLUSIVE_LOCKS_REQUIRED(cs);
@@ -587,7 +588,7 @@ public:
         mapAddr.clear();
     }
 
-    CAddrMan()
+    CAddrMan(bool consistency_check=false) : m_consistency_check(consistency_check)
     {
         Clear();
     }
@@ -607,14 +608,14 @@ public:
     //! Consistency check
     void Check()
     {
-#ifdef DEBUG_ADDRMAN
-        {
-            LOCK(cs);
-            int err;
-            if ((err=Check_()))
-                LogPrintf("ADDRMAN CONSISTENCY CHECK FAILED!!! err=%i\n", err);
+        if (!m_consistency_check) return;
+
+        LOCK(cs);
+        int err = Check_();
+        if (err) {
+            LogPrintf("ADDRMAN CONSISTENCY CHECK FAILED!!! err=%i\n", err);
+            assert(false);
         }
-#endif
     }
 
     //! Add a single address.
