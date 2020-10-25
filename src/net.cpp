@@ -1827,6 +1827,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
     // Initiate network connections
     const auto start_time = GetTime<std::chrono::seconds>();
+    bool fixedSeedsAdded = false;
 
     // Minimum time before next feeler connection (in microseconds).
     std::chrono::microseconds next_feeler_time = PoissonNextSend(start_time, FEELER_INTERVAL);
@@ -1842,7 +1843,6 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             return;
 
         // Static bool makes sure we only add fixed seeds once in binary lifetime.
-        static bool fixedSeedsAdded = false;
         if (!fixedSeedsAdded && addrman.size() == 0) {
             // When the node starts with an empty peers.dat, there are a few other sources of peers before
             // we fallback on to fixed seeds: -dnsseed, -seednode, -addnode
