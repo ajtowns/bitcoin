@@ -1826,10 +1826,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
     }
 
     // Initiate network connections
-    auto nStart = GetTime<std::chrono::seconds>();
+    const auto start_time = GetTime<std::chrono::seconds>();
 
     // Minimum time before next feeler connection (in microseconds).
-    int64_t nNextFeeler = PoissonNextSend(nStart.count() * 1000 * 1000, FEELER_INTERVAL);
+    std::chrono::microseconds next_feeler_time = PoissonNextSend(start_time, FEELER_INTERVAL);
     while (!interruptNet)
     {
         ProcessAddrFetch();
@@ -1850,7 +1850,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             // 60 seconds for any of those sources to populate addrman.
             bool addFixedSeeds = false;
             // It is cheapest to check if enough time has passed first.
-            if (GetTime<std::chrono::seconds>() > nStart + std::chrono::minutes{1}) {
+            if (GetTime<std::chrono::seconds>() > start_time + std::chrono::minutes{1}) {
                 addFixedSeeds = true;
                 LogPrintf("Adding fixed seeds as 60 seconds have passed and addrman is empty.\n");
             }
@@ -1908,7 +1908,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         }
 
         ConnectionType conn_type = ConnectionType::OUTBOUND_FULL_RELAY;
-        int64_t nTime = GetTimeMicros();
+        auto now = GetTime<std::chrono::microseconds>();
         bool fFeeler = false;
 
         // Determine what type of connection to open. Opening
@@ -1917,7 +1917,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         // until we hit our block-relay-only peer limit.
         // GetTryNewOutboundPeer() gets set when a stale tip is detected, so we
         // try opening an additional OUTBOUND_FULL_RELAY connection. If none of
-        // these conditions are met, check the nNextFeeler timer to decide if
+        // these conditions are met, check the next_feeler_time to decide if
         // we should open a FEELER.
 
         if (nOutboundFullRelay < m_max_outbound_full_relay) {
@@ -1926,8 +1926,8 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             conn_type = ConnectionType::BLOCK_RELAY;
         } else if (GetTryNewOutboundPeer()) {
             // OUTBOUND_FULL_RELAY
-        } else if (nTime > nNextFeeler) {
-            nNextFeeler = PoissonNextSend(nTime, FEELER_INTERVAL);
+        } else if (now > next_feeler_time) {
+            next_feeler_time = PoissonNextSend(now, FEELER_INTERVAL);
             conn_type = ConnectionType::FEELER;
             fFeeler = true;
         } else {
