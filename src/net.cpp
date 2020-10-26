@@ -1673,8 +1673,6 @@ void CConnman::ThreadDNSAddressSeed()
     //   (done in ThreadOpenConnections)
     const std::chrono::seconds seeds_wait_time = (addrman.size() >= DNSSEEDS_DELAY_PEER_THRESHOLD ? DNSSEEDS_DELAY_MANY_PEERS : DNSSEEDS_DELAY_FEW_PEERS);
 
-    const auto start_time = GetTime<std::chrono::milliseconds>();
-
     for (const std::string& seed : seeds) {
         if (seeds_right_now == 0) {
             seeds_right_now += DNSSEEDS_TO_QUERY_AT_ONCE;
@@ -1752,12 +1750,8 @@ void CConnman::ThreadDNSAddressSeed()
     }
     LogPrintf("%d addresses found from DNS seeds\n", found);
 
-    if (addrman.size() != 0) return;
-    const auto wait_until = start_time + std::chrono::minutes{1};
-    const auto now = GetTime<std::chrono::milliseconds>();
-    if (now < wait_until && !interruptNet.sleep_for(wait_until - now)) return;
     if (addrman.size() == 0) {
-        LogPrintf("Adding fixed seeds as 60 seconds have passed and addrman is empty.\n");
+        LogPrintf("Adding fixed seeds as addrman is still empty after trying DNS seeds.\n");
         AddFixedSeeds(addrman);
     }
 }
