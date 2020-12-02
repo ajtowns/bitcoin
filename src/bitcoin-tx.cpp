@@ -6,12 +6,14 @@
 #include <config/bitcoin-config.h>
 #endif
 
+#include <arith_uint256.h>
 #include <clientversion.h>
 #include <coins.h>
 #include <consensus/consensus.h>
 #include <core_io.h>
 #include <key_io.h>
 #include <policy/rbf.h>
+#include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <script/sign.h>
@@ -43,6 +45,9 @@ static void SetupBitcoinTxArgs(ArgsManager &argsman)
     argsman.AddArg("-create", "Create new, empty TX.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-json", "Select JSON output", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-txid", "Output only the hex-encoded transaction id of the resultant transaction.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+
+    argsman.AddArg("-grind", "Grind proof-of-work for a header.", ArgsManager::ALLOW_STRING, OptionsCategory::HIDDEN);
+
     SetupChainParamsBaseOptions(argsman);
 
     argsman.AddArg("delin=N", "Delete input N from TX", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
@@ -72,6 +77,8 @@ static void SetupBitcoinTxArgs(ArgsManager &argsman)
     argsman.AddArg("set=NAME:JSON-STRING", "Set register NAME to given JSON-STRING", ArgsManager::ALLOW_ANY, OptionsCategory::REGISTER_COMMANDS);
 }
 
+static int CommandLineGrind(int argc, char* argv[]);
+
 //
 // This function returns either one of EXIT_ codes when it's expected to stop the process or
 // CONTINUE_EXECUTION when it's expected to continue further.
@@ -83,6 +90,10 @@ static int AppInitRawTx(int argc, char* argv[])
     if (!gArgs.ParseParameters(argc, argv, error)) {
         tfm::format(std::cerr, "Error parsing command line arguments: %s\n", error);
         return EXIT_FAILURE;
+    }
+
+    if (gArgs.GetBoolArg("-grind", false)) {
+        return CommandLineGrind(argc, argv);
     }
 
     // Check for chain settings (Params() calls are only valid after this clause)
@@ -767,6 +778,84 @@ static std::string readStdin()
     boost::algorithm::trim_right(ret);
 
     return ret;
+}
+
+
+static void grind_task(uint32_t nBits, CBlockHeader& header_orig, uint32_t offset, uint32_t step, std::atomic<bool>& found)
+{
+    arith_uint256 target;
+    bool neg, over;
+    target.SetCompact(nBits, &neg, &over);
+    if (target == 0 || neg || over) return;
+    CBlockHeader header = header_orig; // working copy
+    header.nNonce = offset;
+
+    uint32_t finish = std::numeric_limits<uint32_t>::max() - step;
+    finish = finish - (finish % step) + offset;
+
+    while (!found && header.nNonce < finish) {
+        const uint32_t next = (finish - header.nNonce < 5000*step) ? finish : header.nNonce + 5000*step;
+        do {
+            if (UintToArith256(header.GetHash()) <= target) {
+                if (!found.exchange(true)) {
+                    header_orig.nNonce = header.nNonce;
+                }
+                return;
+            }
+            header.nNonce += step;
+        } while(header.nNonce != next);
+    }
+}
+
+static int CommandLineGrind(int argc, char* argv[])
+{
+    std::string strPrint;
+    int nRet = 0;
+    try {
+        // Skip switches; Permit common stdin convention "-"
+        while (argc > 1 && IsSwitchChar(argv[1][0]) &&
+               (argv[1][1] != 0)) {
+            argc--;
+            argv++;
+        }
+        // Require header
+        if (argc != 2) {
+            throw std::runtime_error("Must specify header");
+        }
+
+        CBlockHeader header;
+        if (!DecodeHexBlockHeader(header, argv[1])) {
+            throw std::runtime_error("Could not decode block header");
+        }
+
+        uint32_t nBits = header.nBits;
+        std::atomic<bool> found{false};
+
+        std::vector<std::thread> threads;
+        int n_tasks = std::max(1u, std::thread::hardware_concurrency());
+        for (int i = 0; i < n_tasks; ++i) {
+            threads.emplace_back( grind_task, nBits, std::ref(header), i, n_tasks, std::ref(found) );
+        }
+        for (auto& t : threads) {
+            t.join();
+        }
+        if (!found) {
+            throw std::runtime_error("Could not satisfy difficulty target");
+        }
+
+        CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+        ss << header;
+        strPrint = HexStr(ss);
+    }
+    catch (const std::exception& e) {
+        strPrint = std::string("error: ") + e.what();
+        nRet = EXIT_FAILURE;
+    }
+
+    if (strPrint != "") {
+        tfm::format(nRet == 0 ? std::cout : std::cerr, "%s\n", strPrint);
+    }
+    return nRet;
 }
 
 static int CommandLineRawTx(int argc, char* argv[])
