@@ -38,7 +38,7 @@ CBlockIndex* BlockManager::LookupBlockIndex(const uint256& hash) const
     return it == m_block_index.end() ? nullptr : it->second;
 }
 
-CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block)
+CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block, ChainstateManager& chainman)
 {
     AssertLockHeld(cs_main);
 
@@ -66,8 +66,8 @@ CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block)
     pindexNew->nTimeMax = (pindexNew->pprev ? std::max(pindexNew->pprev->nTimeMax, pindexNew->nTime) : pindexNew->nTime);
     pindexNew->nChainWork = (pindexNew->pprev ? pindexNew->pprev->nChainWork : 0) + GetBlockProof(*pindexNew);
     pindexNew->RaiseValidity(BLOCK_VALID_TREE);
-    if (pindexBestHeader == nullptr || pindexBestHeader->nChainWork < pindexNew->nChainWork)
-        pindexBestHeader = pindexNew;
+    if (chainman.pindexBestHeader == nullptr || chainman.pindexBestHeader->nChainWork < pindexNew->nChainWork)
+        chainman.pindexBestHeader = pindexNew;
 
     m_dirty_blockindex.insert(pindexNew);
 
@@ -315,8 +315,8 @@ bool BlockManager::LoadBlockIndex(
         if (pindex->pprev) {
             pindex->BuildSkip();
         }
-        if (pindex->IsValid(BLOCK_VALID_TREE) && (pindexBestHeader == nullptr || CBlockIndexWorkComparator()(pindexBestHeader, pindex)))
-            pindexBestHeader = pindex;
+        if (pindex->IsValid(BLOCK_VALID_TREE) && (chainman.pindexBestHeader == nullptr || CBlockIndexWorkComparator()(chainman.pindexBestHeader, pindex)))
+            chainman.pindexBestHeader = pindex;
     }
 
     return true;
