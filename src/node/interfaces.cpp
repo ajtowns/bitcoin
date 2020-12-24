@@ -197,9 +197,9 @@ public:
     bool getHeaderTip(int& height, int64_t& block_time) override
     {
         LOCK(::cs_main);
-        if (::pindexBestHeader) {
-            height = ::pindexBestHeader->nHeight;
-            block_time = ::pindexBestHeader->GetBlockTime();
+        if (m_context->chainman->m_blockman.pindexBestHeader) {
+            height = m_context->chainman->m_blockman.pindexBestHeader->nHeight;
+            block_time = m_context->chainman->m_blockman.pindexBestHeader->GetBlockTime();
             return true;
         }
         return false;
