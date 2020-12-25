@@ -23,7 +23,6 @@
 
 std::atomic_bool fImporting(false);
 std::atomic_bool fReindex(false);
-bool fHavePruned = false;
 bool fPruneMode = false;
 uint64_t nPruneTarget = 0;
 
@@ -432,7 +431,7 @@ CBlockIndex* BlockManager::GetLastCheckpoint(const CCheckpointData& data)
     return nullptr;
 }
 
-bool IsBlockPruned(const CBlockIndex* pblockindex)
+bool BlockManager::IsBlockPruned(const CBlockIndex* pblockindex)
 {
     return (fHavePruned && !(pblockindex->nStatus & BLOCK_HAVE_DATA) && pblockindex->nTx > 0);
 }
