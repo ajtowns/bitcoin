@@ -129,14 +129,6 @@ arith_uint256 nMinimumChainWork;
 
 CFeeRate minRelayTxFee = CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
 
-// Internal stuff from blockstorage ...
-extern RecursiveMutex cs_LastBlockFile;
-extern std::vector<CBlockFileInfo> vinfoBlockFile;
-extern int nLastBlockFile;
-extern bool fCheckForPruning;
-void FlushBlockFile(bool fFinalize = false, bool finalize_undo = false);
-// ... TODO move fully to blockstorage
-
 CBlockIndex* BlockManager::LookupBlockIndex(const uint256& hash) const
 {
     AssertLockHeld(cs_main);
@@ -2054,8 +2046,8 @@ bool CChainState::FlushStateToDisk(
         bool fDoFullFlush = false;
 
         CoinsCacheSizeState cache_state = GetCoinsCacheSizeState();
-        LOCK(cs_LastBlockFile);
-        if (fPruneMode && (fCheckForPruning || nManualPruneHeight > 0) && !fReindex) {
+        LOCK(m_blockman.cs_LastBlockFile);
+        if (fPruneMode && (m_blockman.fCheckForPruning || nManualPruneHeight > 0) && !fReindex) {
             // make sure we don't prune above the blockfilterindexes bestblocks
             // pruning is height-based
             int last_prune = m_chain.Height(); // last height we can prune
@@ -2071,7 +2063,7 @@ bool CChainState::FlushStateToDisk(
                 LOG_TIME_MILLIS_WITH_CATEGORY("find files to prune", BCLog::BENCH);
 
                 m_blockman.FindFilesToPrune(setFilesToPrune, m_params.PruneAfterHeight(), m_chain.Height(), last_prune, IsInitialBlockDownload());
-                fCheckForPruning = false;
+                m_blockman.fCheckForPruning = false;
             }
             if (!setFilesToPrune.empty()) {
                 fFlushForPrune = true;
@@ -2109,7 +2101,7 @@ bool CChainState::FlushStateToDisk(
                 LOG_TIME_MILLIS_WITH_CATEGORY("write block and undo data to disk", BCLog::BENCH);
 
                 // First make sure all block and undo data is flushed to disk.
-                FlushBlockFile();
+                m_blockman.FlushBlockFile();
             }
 
             // Then update all block file information (which may refer to block and undo files).
@@ -2119,7 +2111,7 @@ bool CChainState::FlushStateToDisk(
                 std::vector<std::pair<int, const CBlockFileInfo*> > vFiles;
                 vFiles.reserve(m_blockman.setDirtyFileInfo.size());
                 for (std::set<int>::iterator it = m_blockman.setDirtyFileInfo.begin(); it != m_blockman.setDirtyFileInfo.end(); ) {
-                    vFiles.push_back(std::make_pair(*it, &vinfoBlockFile[*it]));
+                    vFiles.push_back(std::make_pair(*it, &m_blockman.vinfoBlockFile[*it]));
                     m_blockman.setDirtyFileInfo.erase(it++);
                 }
                 std::vector<const CBlockIndex*> vBlocks;
@@ -2128,7 +2120,7 @@ bool CChainState::FlushStateToDisk(
                     vBlocks.push_back(*it);
                     m_blockman.setDirtyBlockIndex.erase(it++);
                 }
-                if (!m_blockman.m_block_tree_db->WriteBatchSync(vFiles, nLastBlockFile, vBlocks)) {
+                if (!m_blockman.m_block_tree_db->WriteBatchSync(vFiles, m_blockman.nLastBlockFile, vBlocks)) {
                     return AbortNode(state, "Failed to write to block index database");
                 }
             }
@@ -2182,8 +2174,8 @@ void CChainState::PruneAndFlush()
 {
     BlockValidationState state;
     {
-        LOCK(cs_LastBlockFile);
-        fCheckForPruning = true;
+        LOCK(m_blockman.cs_LastBlockFile);
+        m_blockman.fCheckForPruning = true;
     }
     if (!this->FlushStateToDisk(state, FlushStateMode::NONE)) {
         LogPrintf("%s: failed to flush state (%s)\n", __func__, state.ToString());
@@ -3770,6 +3762,13 @@ void BlockManager::Unload() {
 
     setDirtyBlockIndex.clear();
     setDirtyFileInfo.clear();
+
+    vinfoBlockFile.clear();
+    {
+        LOCK(cs_LastBlockFile);
+        nLastBlockFile = 0;
+        // TODO: reset fCheckForPruning?
+    }
 }
 
 bool BlockManager::LoadBlockIndexDB(std::set<CBlockIndex*, CBlockIndexWorkComparator>& setBlockIndexCandidates)
@@ -4107,11 +4106,6 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     LOCK(cs_main);
     chainman.Unload();
     if (mempool) mempool->clear();
-    vinfoBlockFile.clear();
-    {
-        LOCK(cs_LastBlockFile);
-        nLastBlockFile = 0;
-    }
     g_versionbitscache.Clear();
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();

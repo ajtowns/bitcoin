@@ -92,7 +92,7 @@ std::string CBlockFileInfo::ToString() const
     return strprintf("CBlockFileInfo(blocks=%u, size=%u, heights=%u...%u, time=%s...%s)", nBlocks, nSize, nHeightFirst, nHeightLast, FormatISO8601Date(nTimeFirst), FormatISO8601Date(nTimeLast));
 }
 
-CBlockFileInfo* GetBlockFileInfo(size_t n)
+CBlockFileInfo* BlockManager::GetBlockFileInfo(size_t n)
 {
     LOCK(cs_LastBlockFile);
 
@@ -160,7 +160,7 @@ bool UndoReadFromDisk(CBlockUndo& blockundo, const CBlockIndex* pindex)
     return true;
 }
 
-static void FlushUndoFile(int block_file, bool finalize = false)
+void BlockManager::FlushUndoFile(int block_file, bool finalize)
 {
     FlatFilePos undo_pos_old(block_file, vinfoBlockFile[block_file].nUndoSize);
     if (!UndoFileSeq().Flush(undo_pos_old, finalize)) {
@@ -168,7 +168,7 @@ static void FlushUndoFile(int block_file, bool finalize = false)
     }
 }
 
-void FlushBlockFile(bool fFinalize = false, bool finalize_undo = false)
+void BlockManager::FlushBlockFile(bool fFinalize, bool finalize_undo)
 {
     LOCK(cs_LastBlockFile);
     FlatFilePos block_pos_old(nLastBlockFile, vinfoBlockFile[nLastBlockFile].nSize);
@@ -180,7 +180,7 @@ void FlushBlockFile(bool fFinalize = false, bool finalize_undo = false)
     if (!fFinalize || finalize_undo) FlushUndoFile(nLastBlockFile, finalize_undo);
 }
 
-uint64_t CalculateCurrentUsage()
+uint64_t BlockManager::CalculateCurrentUsage()
 {
     LOCK(cs_LastBlockFile);
 

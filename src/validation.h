@@ -449,6 +449,15 @@ public:
     /** Dirty block file entries. */
     std::set<int> setDirtyFileInfo;
 
+    RecursiveMutex cs_LastBlockFile;
+    std::vector<CBlockFileInfo> vinfoBlockFile;
+    int nLastBlockFile GUARDED_BY(cs_LastBlockFile) = 0;
+    /** Global flag to indicate we should check to see if there are
+     *  block/undo files that should be deleted.  Set on startup
+     *  or if we allocate more file space when we're in prune mode
+     */
+    bool fCheckForPruning GUARDED_BY(cs_LastBlockFile) = false;
+
     /**
      * All pairs A->B, where A (or one of its ancestors) misses transactions, but B has transactions.
      * Pruned nodes may have entries where B is missing data.
@@ -511,6 +520,16 @@ public:
     bool FindUndoPos(BlockValidationState& state, int nFile, FlatFilePos& pos, unsigned int nAddSize);
     bool WriteUndoDataForBlock(const CBlockUndo& blockundo, BlockValidationState& state, CBlockIndex* pindex, const CChainParams& chainparams);
     FlatFilePos SaveBlockToDisk(const CBlock& block, int nHeight, CChain& active_chain, const CChainParams& chainparams, const FlatFilePos* dbp);
+
+    void FlushUndoFile(int block_file, bool finalize = false);
+
+    void FlushBlockFile(bool fFinalize = false, bool finalize_undo = false);
+
+    /** Calculate the amount of disk space the block & undo files currently use */
+    uint64_t CalculateCurrentUsage();
+
+    /** Get block file info entry for one block file */
+    CBlockFileInfo* GetBlockFileInfo(size_t n);
 
     ~BlockManager() {
         Unload();
