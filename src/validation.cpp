@@ -2067,9 +2067,9 @@ bool CChainState::FlushStateToDisk(
             }
             if (!setFilesToPrune.empty()) {
                 fFlushForPrune = true;
-                if (!fHavePruned) {
+                if (!m_blockman.fHavePruned) {
                     m_blockman.m_block_tree_db->WriteFlag("prunedblockfiles", true);
-                    fHavePruned = true;
+                    m_blockman.fHavePruned = true;
                 }
             }
         }
@@ -4110,7 +4110,6 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();
     }
-    fHavePruned = false;
 }
 
 bool ChainstateManager::LoadBlockIndex()
@@ -4339,7 +4338,7 @@ void CChainState::CheckBlockIndex()
         if (!pindex->HaveTxsDownloaded()) assert(pindex->nSequenceId <= 0); // nSequenceId can't be set positive for blocks that aren't linked (negative is used for preciousblock)
         // VALID_TRANSACTIONS is equivalent to nTx > 0 for all nodes (whether or not pruning has occurred).
         // HAVE_DATA is only equivalent to nTx > 0 (or VALID_TRANSACTIONS) if no pruning has occurred.
-        if (!fHavePruned) {
+        if (!m_blockman.fHavePruned) {
             // If we've never pruned, then HAVE_DATA should be equivalent to nTx > 0
             assert(!(pindex->nStatus & BLOCK_HAVE_DATA) == (pindex->nTx == 0));
             assert(pindexFirstMissing == pindexFirstNeverProcessed);
@@ -4398,7 +4397,7 @@ void CChainState::CheckBlockIndex()
         if (pindexFirstMissing == nullptr) assert(!foundInUnlinked); // We aren't missing data for any parent -- cannot be in m_blocks_unlinked.
         if (pindex->pprev && (pindex->nStatus & BLOCK_HAVE_DATA) && pindexFirstNeverProcessed == nullptr && pindexFirstMissing != nullptr) {
             // We HAVE_DATA for this block, have received data for all parents at some point, but we're currently missing data for some parent.
-            assert(fHavePruned); // We must have pruned.
+            assert(m_blockman.fHavePruned); // We must have pruned.
             // This block may have entered m_blocks_unlinked if:
             //  - it has a descendant that at some point had more work than the
             //    tip, and

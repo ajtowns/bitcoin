@@ -622,7 +622,7 @@ public:
     bool havePruned() override
     {
         LOCK(cs_main);
-        return ::fHavePruned;
+        return m_node.chainman->m_blockman.fHavePruned;
     }
     bool isReadyToBroadcast() override { return !::fImporting && !::fReindex && !isInitialBlockDownload(); }
     bool isInitialBlockDownload() override {

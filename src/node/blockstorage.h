@@ -38,15 +38,13 @@ static const unsigned int MAX_BLOCKFILE_SIZE = 0x8000000; // 128 MiB
 extern std::atomic_bool fImporting;
 extern std::atomic_bool fReindex;
 /** Pruning-related variables and constants */
-/** True if any block files have ever been pruned. */
-extern bool fHavePruned;
 /** True if we're running in -prune mode. */
 extern bool fPruneMode;
 /** Number of MiB of block files that we're trying to stay below. */
 extern uint64_t nPruneTarget;
 
-//! Check whether the block associated with this index entry is pruned or not.
-bool IsBlockPruned(const CBlockIndex* pblockindex);
+// //! Check whether the block associated with this index entry is pruned or not.
+// bool IsBlockPruned(const CBlockIndex* pblockindex);
 
 void CleanupBlockRevFiles();
 

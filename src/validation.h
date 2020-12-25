@@ -468,6 +468,9 @@ public:
 
     bool LoadBlockIndexDB(std::set<CBlockIndex*, CBlockIndexWorkComparator>& setBlockIndexCandidates) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
+    /** True if any block files have ever been pruned. */
+    bool fHavePruned = false;
+
     /**
      * Load the blocktree off disk and into memory. Populate certain metadata
      * per index entry (nStatus, nChainWork, nTimeMax, etc.) as well as peripheral
@@ -530,6 +533,9 @@ public:
 
     /** Get block file info entry for one block file */
     CBlockFileInfo* GetBlockFileInfo(size_t n);
+
+    //! Check whether the block associated with this index entry is pruned or not.
+    bool IsBlockPruned(const CBlockIndex* pblockindex);
 
     ~BlockManager() {
         Unload();

@@ -274,10 +274,10 @@ static bool rest_block(const std::any& context,
     CBlock block;
     CBlockIndex* pblockindex = nullptr;
     CBlockIndex* tip = nullptr;
+    ChainstateManager* maybe_chainman = GetChainman(context, req);
+    if (!maybe_chainman) return false;
+    ChainstateManager& chainman = *maybe_chainman;
     {
-        ChainstateManager* maybe_chainman = GetChainman(context, req);
-        if (!maybe_chainman) return false;
-        ChainstateManager& chainman = *maybe_chainman;
         LOCK(cs_main);
         tip = chainman.ActiveChain().Tip();
         pblockindex = chainman.m_blockman.LookupBlockIndex(hash);
@@ -285,7 +285,7 @@ static bool rest_block(const std::any& context,
             return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
         }
 
-        if (IsBlockPruned(pblockindex))
+        if (chainman.m_blockman.IsBlockPruned(pblockindex))
             return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not available (pruned data)");
 
         if (!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
@@ -312,7 +312,7 @@ static bool rest_block(const std::any& context,
     }
 
     case RetFormat::JSON: {
-        UniValue objBlock = blockToJSON(block, tip, pblockindex, showTxDetails);
+        UniValue objBlock = blockToJSON(WITH_LOCK(::cs_main, return std::ref(chainman.m_blockman)), block, tip, pblockindex, showTxDetails);
         std::string strJSON = objBlock.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
         req->WriteReply(HTTP_OK, strJSON);

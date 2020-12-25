@@ -199,7 +199,7 @@ UniValue blockheaderToJSON(const CBlockIndex* tip, const CBlockIndex* blockindex
     return result;
 }
 
-UniValue blockToJSON(const CBlock& block, const CBlockIndex* tip, const CBlockIndex* blockindex, bool txDetails)
+UniValue blockToJSON(BlockManager& blockman, const CBlock& block, const CBlockIndex* tip, const CBlockIndex* blockindex, bool txDetails)
 {
     UniValue result = blockheaderToJSON(tip, blockindex);
 
@@ -209,7 +209,7 @@ UniValue blockToJSON(const CBlock& block, const CBlockIndex* tip, const CBlockIn
     UniValue txs(UniValue::VARR);
     if (txDetails) {
         CBlockUndo blockUndo;
-        const bool have_undo = !IsBlockPruned(blockindex) && UndoReadFromDisk(blockUndo, blockindex);
+        const bool have_undo = !blockman.IsBlockPruned(blockindex) && UndoReadFromDisk(blockUndo, blockindex);
         for (size_t i = 0; i < block.vtx.size(); ++i) {
             const CTransactionRef& tx = block.vtx.at(i);
             // coinbase transaction (i == 0) doesn't have undo data
@@ -894,10 +894,10 @@ static RPCHelpMan getblockheader()
     };
 }
 
-static CBlock GetBlockChecked(const CBlockIndex* pblockindex)
+static CBlock GetBlockChecked(BlockManager& blockman, const CBlockIndex* pblockindex)
 {
     CBlock block;
-    if (IsBlockPruned(pblockindex)) {
+    if (blockman.IsBlockPruned(pblockindex)) {
         throw JSONRPCError(RPC_MISC_ERROR, "Block not available (pruned data)");
     }
 
@@ -911,10 +911,10 @@ static CBlock GetBlockChecked(const CBlockIndex* pblockindex)
     return block;
 }
 
-static CBlockUndo GetUndoChecked(const CBlockIndex* pblockindex)
+static CBlockUndo GetUndoChecked(BlockManager& blockman, const CBlockIndex* pblockindex)
 {
     CBlockUndo blockUndo;
-    if (IsBlockPruned(pblockindex)) {
+    if (blockman.IsBlockPruned(pblockindex)) {
         throw JSONRPCError(RPC_MISC_ERROR, "Undo data not available (pruned data)");
     }
 
@@ -996,8 +996,8 @@ static RPCHelpMan getblock()
     CBlock block;
     const CBlockIndex* pblockindex;
     const CBlockIndex* tip;
+    ChainstateManager& chainman = EnsureAnyChainman(request.context);
     {
-        ChainstateManager& chainman = EnsureAnyChainman(request.context);
         LOCK(cs_main);
         pblockindex = chainman.m_blockman.LookupBlockIndex(hash);
         tip = chainman.ActiveChain().Tip();
@@ -1006,7 +1006,7 @@ static RPCHelpMan getblock()
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         }
 
-        block = GetBlockChecked(pblockindex);
+        block = GetBlockChecked(chainman.m_blockman, pblockindex);
     }
 
     if (verbosity <= 0)
@@ -1017,7 +1017,7 @@ static RPCHelpMan getblock()
         return strHex;
     }
 
-    return blockToJSON(block, tip, pblockindex, verbosity >= 2);
+    return blockToJSON(WITH_LOCK(::cs_main, return std::ref(chainman.m_blockman)), block, tip, pblockindex, verbosity >= 2);
 },
     };
 }
@@ -2024,8 +2024,8 @@ static RPCHelpMan getblockstats()
         }
     }
 
-    const CBlock block = GetBlockChecked(pindex);
-    const CBlockUndo blockUndo = GetUndoChecked(pindex);
+    const CBlock block = GetBlockChecked(chainman.m_blockman, pindex);
+    const CBlockUndo blockUndo = GetUndoChecked(chainman.m_blockman, pindex);
 
     const bool do_all = stats.size() == 0; // Calculate everything if nothing selected (default)
     const bool do_mediantxsize = do_all || stats.count("mediantxsize") != 0;

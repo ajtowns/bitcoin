@@ -40,7 +40,7 @@ static void BlockToJsonVerbose(benchmark::Bench& bench)
 {
     TestBlockAndIndex data;
     bench.run([&] {
-        auto univalue = blockToJSON(data.block, &data.blockindex, &data.blockindex, /*verbose*/ true);
+        auto univalue = blockToJSON(WITH_LOCK(::cs_main, return std::ref(data.testing_setup->m_node.chainman->m_blockman)), data.block, &data.blockindex, &data.blockindex, /*verbose*/ true);
         ankerl::nanobench::doNotOptimizeAway(univalue);
     });
 }
@@ -50,7 +50,7 @@ BENCHMARK(BlockToJsonVerbose);
 static void BlockToJsonVerboseWrite(benchmark::Bench& bench)
 {
     TestBlockAndIndex data;
-    auto univalue = blockToJSON(data.block, &data.blockindex, &data.blockindex, /*verbose*/ true);
+    auto univalue = blockToJSON(WITH_LOCK(::cs_main, return std::ref(data.testing_setup->m_node.chainman->m_blockman)), data.block, &data.blockindex, &data.blockindex, /*verbose*/ true);
     bench.run([&] {
         auto str = univalue.write();
         ankerl::nanobench::doNotOptimizeAway(str);
