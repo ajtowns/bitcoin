@@ -72,19 +72,23 @@ public:
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, const Consensus::Params& params, ThresholdConditionCache& cache) const;
 };
 
-/** BIP 9 allows multiple softforks to be deployed in parallel. We cache per-period state for every one of them
- *  keyed by the bit position used to signal support. */
-struct VersionBitsCache
+/** BIP 9 allows multiple softforks to be deployed in parallel. We cache
+ *  per-period state for every one of them. */
+
+class VersionBitsCache
 {
+private:
     Mutex cs;
     ThresholdConditionCache caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(cs);
 
+public:
+    static BIP9Stats Statistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+    static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+    ThresholdState State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+    int StateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+
     void Clear();
 };
-
-ThresholdState VersionBitsState(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-BIP9Stats VersionBitsStatistics(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
-int VersionBitsStateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos, VersionBitsCache& cache);
-uint32_t VersionBitsMask(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
 #endif // BITCOIN_VERSIONBITS_H
