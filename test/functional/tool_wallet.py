@@ -183,10 +183,11 @@ class ToolWalletTest(BitcoinTestFramework):
 
     def test_invalid_tool_commands_and_args(self):
         self.log.info('Testing that various invalid commands raise with specific error messages')
-        self.assert_raises_tool_error('Invalid command: foo', 'foo')
+        self.assert_raises_tool_error("Error parsing command line arguments: Invalid command 'foo'", 'foo')
         # `bitcoin-wallet help` raises an error. Use `bitcoin-wallet -help`.
-        self.assert_raises_tool_error('Invalid command: help', 'help')
-        self.assert_raises_tool_error('Error: two methods provided (info and create). Only one method should be provided.', 'info', 'create')
+        self.assert_raises_tool_error("Error parsing command line arguments: Invalid command 'help'", 'help')
+        self.assert_raises_tool_error('Error: Incorrect number of methods provided (info, create). Please refer to `-help`. Exactly one method should be provided.', 'info', 'create')
+        self.assert_raises_tool_error('Error: Incorrect number of methods provided (). Please refer to `-help`. Exactly one method should be provided.')
         self.assert_raises_tool_error('Error parsing command line arguments: Invalid parameter -foo', '-foo')
         locked_dir = os.path.join(self.options.tmpdir, "node0", "regtest", "wallets")
         error = 'Error initializing wallet database environment "{}"!'.format(locked_dir)

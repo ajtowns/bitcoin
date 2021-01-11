@@ -33,18 +33,18 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddArg("-format=<format>", "The format of the wallet file to create. Either \"bdb\" or \"sqlite\". Only used with 'createfromdump'", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-printtoconsole", "Send trace/debug info to console (default: 1 when no -debug is true, 0 otherwise).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
 
-    argsman.AddArg("info", "Get wallet info", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
-    argsman.AddArg("create", "Create new wallet file", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
-    argsman.AddArg("salvage", "Attempt to recover private keys from a corrupt wallet. Warning: 'salvage' is experimental.", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
-    argsman.AddArg("dump", "Print out all of the wallet key-value records", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
-    argsman.AddArg("createfromdump", "Create new wallet file from dumped records", ArgsManager::ALLOW_ANY, OptionsCategory::COMMANDS);
+    argsman.AddArg("info", "Get wallet info", ArgsManager::COMMAND, OptionsCategory::COMMANDS);
+    argsman.AddArg("create", "Create new wallet file", ArgsManager::COMMAND, OptionsCategory::COMMANDS);
+    argsman.AddArg("salvage", "Attempt to recover private keys from a corrupt wallet. Warning: 'salvage' is experimental.", ArgsManager::COMMAND, OptionsCategory::COMMANDS);
+    argsman.AddArg("dump", "Print out all of the wallet key-value records", ArgsManager::COMMAND, OptionsCategory::COMMANDS);
+    argsman.AddArg("createfromdump", "Create new wallet file from dumped records", ArgsManager::COMMAND, OptionsCategory::COMMANDS);
 }
 
 static bool WalletAppInit(ArgsManager& args, int argc, char* argv[])
 {
     SetupWalletToolArgs(args);
     std::string error_message;
-    if (!args.ParseParameters(argc, argv, error_message)) {
+    if (!args.ParseParameters(argc, argv, error_message, /* accept_any_command */ false)) {
         tfm::format(std::cerr, "Error parsing command line arguments: %s\n", error_message);
         return false;
     }
@@ -95,24 +95,14 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    std::string method {};
-    for(int i = 1; i < argc; ++i) {
-        if (!IsSwitchChar(argv[i][0])) {
-            if (!method.empty()) {
-                tfm::format(std::cerr, "Error: two methods provided (%s and %s). Only one method should be provided.\n", method, argv[i]);
-                return EXIT_FAILURE;
-            }
-            method = argv[i];
-        }
-    }
-
-    if (method.empty()) {
-        tfm::format(std::cerr, "No method provided. Run `bitcoin-wallet -help` for valid methods.\n");
+    const std::vector<std::string> cmds{args.GetCommands()};
+    if (cmds.size() != 1) {
+        tfm::format(std::cerr, "Error: Incorrect number of methods provided (%s). Please refer to `-help`. Exactly one method should be provided.\n", Join(cmds, ", "));
         return EXIT_FAILURE;
     }
 
     // A name must be provided when creating a file
-    if (method == "create" && !args.IsArgSet("-wallet")) {
+    if (cmds.at(0) == "create" && !args.IsArgSet("-wallet")) {
         tfm::format(std::cerr, "Wallet name must be provided when creating a new wallet.\n");
         return EXIT_FAILURE;
     }
@@ -121,7 +111,7 @@ int main(int argc, char* argv[])
 
     ECCVerifyHandle globalVerifyHandle;
     ECC_Start();
-    if (!WalletTool::ExecuteWalletToolFunc(args, method, name)) {
+    if (!WalletTool::ExecuteWalletToolFunc(args, cmds.at(0), name)) {
         return EXIT_FAILURE;
     }
     ECC_Stop();
