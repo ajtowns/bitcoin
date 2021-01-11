@@ -171,6 +171,7 @@ public:
         NETWORK_ONLY = 0x200,
         // This argument's value is sensitive (such as a password).
         SENSITIVE = 0x400,
+        COMMAND = 0x800,
     };
 
 protected:
@@ -183,6 +184,7 @@ protected:
 
     mutable RecursiveMutex cs_args;
     util::Settings m_settings GUARDED_BY(cs_args);
+    std::vector<std::string> m_commands GUARDED_BY(cs_args);
     std::string m_network GUARDED_BY(cs_args);
     std::set<std::string> m_network_only_args GUARDED_BY(cs_args);
     std::map<OptionsCategory, std::map<std::string, Arg>> m_available_args GUARDED_BY(cs_args);
@@ -220,7 +222,7 @@ public:
      */
     void SelectConfigNetwork(const std::string& network);
 
-    [[nodiscard]] bool ParseParameters(int argc, const char* const argv[], std::string& error);
+    [[nodiscard]] bool ParseParameters(int argc, const char* const argv[], std::string& error, bool accept_any_command = true);
     [[nodiscard]] bool ReadConfigFiles(std::string& error, bool ignore_invalid_keys = false);
 
     /**
@@ -235,6 +237,9 @@ public:
      * Log warnings for unrecognized section names in the config file.
      */
     const std::list<SectionInfo> GetUnrecognizedSections() const;
+
+    /** Return a vector of all commands */
+    std::vector<std::string> GetCommands() const;
 
     /**
      * Return a vector of strings of the given argument

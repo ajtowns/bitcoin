@@ -3,7 +3,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <sync.h>
 #include <util/system.h>
 
 #ifdef HAVE_BOOST_PROCESS
@@ -11,6 +10,8 @@
 #endif // HAVE_BOOST_PROCESS
 
 #include <chainparamsbase.h>
+#include <sync.h>
+#include <util/check.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/translation.h>
@@ -281,7 +282,7 @@ void ArgsManager::SelectConfigNetwork(const std::string& network)
     m_network = network;
 }
 
-bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::string& error)
+bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::string& error, bool accept_any_command)
 {
     LOCK(cs_args);
     m_settings.command_line_options.clear();
@@ -310,8 +311,16 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
             key[0] = '-';
 #endif
 
-        if (key[0] != '-')
-            break;
+        if (key[0] != '-') {
+            if (accept_any_command) break;
+            Optional<unsigned int> flags = GetArgFlags(key);
+            if (!flags || !(*flags & ArgsManager::COMMAND)) {
+                error = strprintf("Invalid command '%s'", argv[i]);
+                return false;
+            }
+            m_commands.push_back(key);
+            continue;
+        }
 
         // Transform --foo to -foo
         if (key.length() > 1 && key[1] == '-')
@@ -357,6 +366,12 @@ Optional<unsigned int> ArgsManager::GetArgFlags(const std::string& name) const
         }
     }
     return nullopt;
+}
+
+std::vector<std::string> ArgsManager::GetCommands() const
+{
+    LOCK(cs_args);
+    return m_commands;
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
@@ -518,6 +533,11 @@ void ArgsManager::AddArg(const std::string& name, const std::string& help, unsig
     auto ret = arg_map.emplace(arg_name, Arg{name.substr(eq_index, name.size() - eq_index), help, flags});
     assert(ret.second); // Make sure an insertion actually happened
 
+    if (flags & ArgsManager::COMMAND) {
+        Assert(flags == ArgsManager::COMMAND); // Combination not allowed
+        Assert(name.find('=') == std::string::npos);
+        Assert(name.find('-') == std::string::npos);
+    }
     if (flags & ArgsManager::NETWORK_ONLY) {
         m_network_only_args.emplace(arg_name);
     }
