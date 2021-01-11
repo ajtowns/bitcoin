@@ -57,7 +57,14 @@ FUZZ_TARGET(system)
             if (args_manager.GetArgFlags(argument_name) != nullopt) {
                 break;
             }
-            args_manager.AddArg(argument_name, fuzzed_data_provider.ConsumeRandomLengthString(16), fuzzed_data_provider.ConsumeIntegral<unsigned int>(), options_category);
+            const std::string help = fuzzed_data_provider.ConsumeRandomLengthString(16);
+            auto flags = fuzzed_data_provider.ConsumeIntegral<unsigned int>();
+            if (flags & ArgsManager::COMMAND) {
+                flags = ArgsManager::COMMAND;
+                if (argument_name.find('-') != std::string::npos) break;
+                if (argument_name.find('=') != std::string::npos) break;
+            }
+            args_manager.AddArg(argument_name, help, flags, options_category);
             break;
         }
         case 5: {
