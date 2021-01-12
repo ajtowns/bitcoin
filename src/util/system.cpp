@@ -282,7 +282,7 @@ void ArgsManager::SelectConfigNetwork(const std::string& network)
     m_network = network;
 }
 
-bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::string& error, bool accept_any_command)
+bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::string& error)
 {
     LOCK(cs_args);
     m_settings.command_line_options.clear();
@@ -311,15 +311,19 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
             key[0] = '-';
 #endif
 
-        if (key[0] != '-') {
-            if (accept_any_command) break;
-            Optional<unsigned int> flags = GetArgFlags(key);
-            if (!flags || !(*flags & ArgsManager::COMMAND)) {
-                error = strprintf("Invalid command '%s'", argv[i]);
-                return false;
+        if (key == "" || key[0] != '-') {
+            if (!m_accept_any_command) {
+                Optional<unsigned int> flags = GetArgFlags(key);
+                if (!flags || !(*flags & ArgsManager::COMMAND)) {
+                    error = strprintf("Invalid command '%s'", argv[i]);
+                    return false;
+                }
+                m_command = key;
+                while (++i < argc) {
+                    m_command_arguments.push_back(argv[i]);
+                }
             }
-            m_commands.push_back(key);
-            continue;
+            break;
         }
 
         // Transform --foo to -foo
@@ -368,10 +372,16 @@ Optional<unsigned int> ArgsManager::GetArgFlags(const std::string& name) const
     return nullopt;
 }
 
-std::vector<std::string> ArgsManager::GetCommands() const
+std::string ArgsManager::GetCommand() const
 {
     LOCK(cs_args);
-    return m_commands;
+    return m_command;
+}
+
+std::vector<std::string> ArgsManager::GetArguments() const
+{
+    LOCK(cs_args);
+    return m_command_arguments;
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const
@@ -519,8 +529,22 @@ void ArgsManager::ForceSetArg(const std::string& strArg, const std::string& strV
     m_settings.forced_settings[SettingName(strArg)] = strValue;
 }
 
+void ArgsManager::AddCmd(const std::string& cmd, const std::string& help, const OptionsCategory& cat)
+{
+    Assert(cmd.find('=') == std::string::npos);
+    Assert(cmd.find('-') == std::string::npos);
+
+    LOCK(cs_args);
+    m_accept_any_command = false; // latch to false
+    std::map<std::string, Arg>& arg_map = m_available_args[cat];
+    auto ret = arg_map.emplace(cmd, Arg{"", help, ArgsManager::COMMAND});
+    assert(ret.second); // Fail on duplicate commands
+}
+
 void ArgsManager::AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat)
 {
+    assert((flags & ArgsManager::COMMAND) == 0); // use AddCmd
+
     // Split arg name from its help param
     size_t eq_index = name.find('=');
     if (eq_index == std::string::npos) {
@@ -533,11 +557,6 @@ void ArgsManager::AddArg(const std::string& name, const std::string& help, unsig
     auto ret = arg_map.emplace(arg_name, Arg{name.substr(eq_index, name.size() - eq_index), help, flags});
     assert(ret.second); // Make sure an insertion actually happened
 
-    if (flags & ArgsManager::COMMAND) {
-        Assert(flags == ArgsManager::COMMAND); // Combination not allowed
-        Assert(name.find('=') == std::string::npos);
-        Assert(name.find('-') == std::string::npos);
-    }
     if (flags & ArgsManager::NETWORK_ONLY) {
         m_network_only_args.emplace(arg_name);
     }
