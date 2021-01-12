@@ -4099,16 +4099,6 @@ void CChainState::UnloadBlockIndex() {
     setBlockIndexCandidates.clear();
 }
 
-// May NOT be used after any connections are up as much
-// of the peer-processing logic assumes a consistent
-// block index state
-void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
-{
-    LOCK(cs_main);
-    chainman.Unload();
-    if (mempool) mempool->clear();
-}
-
 bool ChainstateManager::LoadBlockIndex()
 {
     AssertLockHeld(cs_main);
