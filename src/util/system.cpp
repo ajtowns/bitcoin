@@ -312,18 +312,17 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
 #endif
 
         if (key == "" || key[0] != '-') {
-            if (!m_accept_any_command) {
+            if (m_accept_any_command) break;
+
+            if (m_command.empty()) {
                 Optional<unsigned int> flags = GetArgFlags(key);
                 if (!flags || !(*flags & ArgsManager::COMMAND)) {
                     error = strprintf("Invalid command '%s'", argv[i]);
                     return false;
                 }
-                m_command = key;
-                while (++i < argc) {
-                    m_command_arguments.push_back(argv[i]);
-                }
             }
-            break;
+            m_command.push_back(key);
+            continue;
         }
 
         // Transform --foo to -foo
@@ -372,16 +371,17 @@ Optional<unsigned int> ArgsManager::GetArgFlags(const std::string& name) const
     return nullopt;
 }
 
-std::string ArgsManager::GetCommand() const
+bool ArgsManager::GetCommand(std::string& cmd, std::vector<std::string>& args) const
 {
     LOCK(cs_args);
-    return m_command;
-}
+    auto it = m_command.begin();
+    if (it == m_command.end()) return false;
+    cmd = *it;
 
-std::vector<std::string> ArgsManager::GetArguments() const
-{
-    LOCK(cs_args);
-    return m_command_arguments;
+    while (++it != m_command.end()) {
+        args.push_back(*it);
+    }
+    return true;
 }
 
 std::vector<std::string> ArgsManager::GetArgs(const std::string& strArg) const

@@ -184,8 +184,7 @@ protected:
 
     mutable RecursiveMutex cs_args;
     util::Settings m_settings GUARDED_BY(cs_args);
-    std::string m_command GUARDED_BY(cs_args);
-    std::vector<std::string> m_command_arguments GUARDED_BY(cs_args);
+    std::vector<std::string> m_command GUARDED_BY(cs_args);
     std::string m_network GUARDED_BY(cs_args);
     std::set<std::string> m_network_only_args GUARDED_BY(cs_args);
     std::map<OptionsCategory, std::map<std::string, Arg>> m_available_args GUARDED_BY(cs_args);
@@ -240,11 +239,10 @@ public:
      */
     const std::list<SectionInfo> GetUnrecognizedSections() const;
 
-    /** Return the command */
-    std::string GetCommand() const;
-
-    /** Return the command's arguments */
-    std::vector<std::string> GetArguments() const;
+    /**
+     * Get the command (returns false if no command provided)
+     */
+    bool GetCommand(std::string& cmd, std::vector<std::string>& args) const;
 
     /**
      * Return a vector of strings of the given argument

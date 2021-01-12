@@ -95,9 +95,14 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    const std::string cmd{args.GetCommand()};
-    if (args.GetArguments().size() != 0) {
-        tfm::format(std::cerr, "Error: Additional arguments provided (%s). Please refer to `-help`. Commands do not take arguments.\n", Join(args.GetArguments(), ", "));
+    std::vector<std::string> cmdargs;
+    std::string cmd;
+    if (!args.GetCommand(cmd, cmdargs)) {
+        tfm::format(std::cerr, "Error: Command not provided. Please refer to `-help`.");
+        return EXIT_FAILURE;
+    }
+    if (cmdargs.size() != 0) {
+        tfm::format(std::cerr, "Error: Additional arguments provided (%s). Please refer to `-help`. Commands do not take arguments.\n", Join(cmdargs, ", "));
         return EXIT_FAILURE;
     }
 
