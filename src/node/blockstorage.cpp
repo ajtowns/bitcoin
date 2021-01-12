@@ -324,21 +324,6 @@ bool BlockManager::LoadBlockIndex(
     return true;
 }
 
-void BlockManager::Unload()
-{
-    m_blocks_unlinked.clear();
-
-    m_block_index.clear();
-
-    {
-        LOCK(cs_LastBlockFile);
-        m_blockfile_info.clear();
-        m_last_blockfile = 0;
-    }
-    m_dirty_blockindex.clear();
-    m_dirty_fileinfo.clear();
-}
-
 bool BlockManager::WriteBlockIndexDB()
 {
     LOCK(cs_LastBlockFile);

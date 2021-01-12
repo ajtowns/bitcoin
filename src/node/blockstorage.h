@@ -133,9 +133,6 @@ public:
         const Consensus::Params& consensus_params,
         ChainstateManager& chainman) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-    /** Clear all data members. */
-    void Unload() EXCLUSIVE_LOCKS_REQUIRED(cs_main);
-
     CBlockIndex* AddToBlockIndex(const CBlockHeader& block, ChainstateManager& chainman) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
     /** Create a new block index entry for a given block hash */
     CBlockIndex* InsertBlockIndex(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
@@ -165,11 +162,6 @@ public:
     bool IsBlockPruned(const CBlockIndex* pblockindex);
 
     std::array<ThresholdConditionCache, VERSIONBITS_NUM_BITS> warningcache GUARDED_BY(cs_main);
-
-    ~BlockManager()
-    {
-        Unload();
-    }
 };
 
 void CleanupBlockRevFiles();
