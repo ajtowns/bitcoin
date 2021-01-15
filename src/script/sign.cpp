@@ -92,7 +92,7 @@ bool MutableTransactionSignatureCreator::CreateSchnorrSig(const SigningProvider&
         execdata.m_tapleaf_hash = *leaf_hash;
     }
     uint256 hash;
-    if (!SignatureHashSchnorr(hash, execdata, *txTo, nIn, nHashType, sigversion, *m_txdata, MissingDataBehavior::FAIL)) return false;
+    if (!SignatureHashSchnorr(hash, execdata, *txTo, nIn, nHashType, sigversion, KeyVersion::TAPROOT, *m_txdata, MissingDataBehavior::FAIL)) return false;
     sig.resize(64);
     if (!key.SignSchnorr(hash, sig, merkle_root, nullptr)) return false;
     if (nHashType) sig.push_back(nHashType);
@@ -553,7 +553,7 @@ class DummySignatureChecker final : public BaseSignatureChecker
 public:
     DummySignatureChecker() {}
     bool CheckECDSASignature(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override { return true; }
-    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, const ScriptExecutionData& execdata, ScriptError* serror) const override { return true; }
+    bool CheckSchnorrSignature(Span<const unsigned char> sig, const VersionedXOnlyPubKey& verpubkey, SigVersion sigversion, const ScriptExecutionData& execdata, ScriptError* serror) const override { return true; }
 };
 const DummySignatureChecker DUMMY_CHECKER;
 
