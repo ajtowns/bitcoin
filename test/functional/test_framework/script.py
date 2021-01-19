@@ -752,11 +752,8 @@ class TestFrameworkScript(unittest.TestCase):
 def TaprootSignatureHash(txTo, spent_utxos, hash_type, input_index = 0, scriptpath = False, script = CScript(), codeseparator_pos = -1, annex = None, leaf_ver = LEAF_VERSION_TAPSCRIPT, key_ver = KEY_VERSION_TAPROOT):
     assert (len(txTo.vin) == len(spent_utxos))
     assert key_ver == KEY_VERSION_TAPROOT or key_ver == KEY_VERSION_ANYPREVOUT
-    if key_ver == KEY_VERSION_TAPROOT:
-        assert((hash_type >= 0 and hash_type <= 3) or (hash_type >= 0x81 and hash_type <= 0x83))
     if key_ver == KEY_VERSION_ANYPREVOUT:
-        assert scriptpath
-        assert hash_type in [0,1,2,3,0x41,0x42,0x43,0x81,0x82,0x83,0xc1,0xc2,0xc3]
+        assert False # not tested yet
     assert (input_index < len(txTo.vin))
     out_type = SIGHASH_ALL if hash_type == 0 else hash_type & 3
     in_type = hash_type & SIGHASH_OUTMASK
@@ -804,7 +801,8 @@ def TaprootSignatureHash(txTo, spent_utxos, hash_type, input_index = 0, scriptpa
             ss += TaggedHash("TapLeaf", bytes([leaf_ver]) + ser_string(script))
         ss += bytes([key_ver])
         ss += struct.pack("<i", codeseparator_pos)
-    assert len(ss) ==  175 - (in_type == SIGHASH_ANYONECANPAY) * 49 - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32 + (annex is not None) * 32 + scriptpath * 37
+    if in_type not in [SIGHASH_ANYPREVOUT, SIGHASH_ANYPREVOUTANYSCRIPT]:
+        assert len(ss) ==  175 - (in_type == SIGHASH_ANYONECANPAY) * 49 - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32 + (annex is not None) * 32 + scriptpath * 37
     return TaggedHash("TapSighash", ss)
 
 def taproot_tree_helper(scripts):
