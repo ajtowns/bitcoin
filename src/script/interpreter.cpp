@@ -371,6 +371,7 @@ static bool EvalChecksigPreTapscript(const valtype& vchSig, const valtype& vchPu
 static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, ScriptExecutionData& execdata, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* serror, bool& success)
 {
     assert(sigversion == SigVersion::TAPSCRIPT);
+    assert(execdata.m_internal_key); // caller must provide the internal key
 
     /*
      *  The following validation sequence is consensus critical. Please note how --
