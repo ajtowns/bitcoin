@@ -1328,6 +1328,7 @@ class TaprootTest(BitcoinTestFramework):
 
         left = done
         while left:
+            self.log.info("- left %i" % left)
             # Construct CTransaction with random nVersion, nLocktime
             tx = CTransaction()
             tx.nVersion = random.choice([1, 2, random.randint(-0x80000000, 0x7fffffff)])
