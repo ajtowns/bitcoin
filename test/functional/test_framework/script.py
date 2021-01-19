@@ -780,12 +780,12 @@ def TaprootSignatureHash(txTo, spent_utxos, hash_type, input_index = 0, scriptpa
     ss += bytes([spend_type])
     if in_type == SIGHASH_ANYONECANPAY:
         ss += txTo.vin[input_index].prevout.serialize()
-        ss += ser_string(spk)
         ss += struct.pack("<q", spent_utxos[input_index].nValue)
+        ss += ser_string(spk)
         ss += struct.pack("<I", txTo.vin[input_index].nSequence)
     elif in_type == SIGHASH_ANYPREVOUT:
-        ss += ser_string(spk)
         ss += struct.pack("<q", spent_utxos[input_index].nValue)
+        ss += ser_string(spk)
         ss += struct.pack("<I", txTo.vin[input_index].nSequence)
     elif in_type == SIGHASH_ANYPREVOUTANYSCRIPT:
         ss += struct.pack("<q", spent_utxos[input_index].nValue)
