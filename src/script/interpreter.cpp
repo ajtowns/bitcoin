@@ -1860,11 +1860,12 @@ static bool ExecuteWitnessScript(const Span<const valtype>& stack_span, const CS
     return true;
 }
 
-static bool VerifyTaprootCommitment(const std::vector<unsigned char>& control, const std::vector<unsigned char>& program, const CScript& script, uint256& tapleaf_hash)
+static bool VerifyTaprootCommitment(const std::vector<unsigned char>& control, const std::vector<unsigned char>& program, const CScript& script, uint256& tapleaf_hash, std::optional<XOnlyPubKey>* internal_key)
 {
     const int path_len = (control.size() - TAPROOT_CONTROL_BASE_SIZE) / TAPROOT_CONTROL_NODE_SIZE;
     //! The inner pubkey (x-only, so no Y coordinate parity).
     const XOnlyPubKey p{uint256(std::vector<unsigned char>(control.begin() + 1, control.begin() + TAPROOT_CONTROL_BASE_SIZE))};
+    if (internal_key) *internal_key = p;
     //! The output pubkey (taken from the scriptPubKey).
     const XOnlyPubKey q{uint256(program)};
     // Compute the tapleaf hash.
@@ -1944,7 +1945,7 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
             if (control.size() < TAPROOT_CONTROL_BASE_SIZE || control.size() > TAPROOT_CONTROL_MAX_SIZE || ((control.size() - TAPROOT_CONTROL_BASE_SIZE) % TAPROOT_CONTROL_NODE_SIZE) != 0) {
                 return set_error(serror, SCRIPT_ERR_TAPROOT_WRONG_CONTROL_SIZE);
             }
-            if (!VerifyTaprootCommitment(control, program, exec_script, execdata.m_tapleaf_hash)) {
+            if (!VerifyTaprootCommitment(control, program, exec_script, execdata.m_tapleaf_hash, &execdata.m_internal_key)) {
                 return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_MISMATCH);
             }
             execdata.m_tapleaf_hash_init = true;
