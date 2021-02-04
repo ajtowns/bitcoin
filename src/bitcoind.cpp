@@ -70,7 +70,7 @@ static bool AppInit(int argc, char* argv[])
         }
         // Check for chain settings (Params() calls are only valid after this clause)
         try {
-            SelectParams(args.GetChainName());
+            SelectParams(args);
         } catch (const std::exception& e) {
             return InitError(Untranslated(strprintf("%s\n", e.what())));
         }

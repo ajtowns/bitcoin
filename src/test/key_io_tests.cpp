@@ -10,6 +10,7 @@
 #include <script/script.h>
 #include <test/util/setup_common.h>
 #include <util/strencodings.h>
+#include <util/system.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -25,7 +26,7 @@ BOOST_AUTO_TEST_CASE(key_io_valid_parse)
     UniValue tests = read_json(std::string(json_tests::key_io_valid, json_tests::key_io_valid + sizeof(json_tests::key_io_valid)));
     CKey privkey;
     CTxDestination destination;
-    SelectParams(CBaseChainParams::MAIN);
+    SelectParams(gArgs, CBaseChainParams::MAIN);
 
     for (unsigned int idx = 0; idx < tests.size(); idx++) {
         UniValue test = tests[idx];
@@ -38,7 +39,7 @@ BOOST_AUTO_TEST_CASE(key_io_valid_parse)
         std::vector<unsigned char> exp_payload = ParseHex(test[1].get_str());
         const UniValue &metadata = test[2].get_obj();
         bool isPrivkey = find_value(metadata, "isPrivkey").get_bool();
-        SelectParams(find_value(metadata, "chain").get_str());
+        SelectParams(gArgs, find_value(metadata, "chain").get_str());
         bool try_case_flip = find_value(metadata, "tryCaseFlip").isNull() ? false : find_value(metadata, "tryCaseFlip").get_bool();
         if (isPrivkey) {
             bool isCompressed = find_value(metadata, "isCompressed").get_bool();
@@ -97,7 +98,7 @@ BOOST_AUTO_TEST_CASE(key_io_valid_gen)
         std::vector<unsigned char> exp_payload = ParseHex(test[1].get_str());
         const UniValue &metadata = test[2].get_obj();
         bool isPrivkey = find_value(metadata, "isPrivkey").get_bool();
-        SelectParams(find_value(metadata, "chain").get_str());
+        SelectParams(gArgs, find_value(metadata, "chain").get_str());
         if (isPrivkey) {
             bool isCompressed = find_value(metadata, "isCompressed").get_bool();
             CKey key;
@@ -114,7 +115,7 @@ BOOST_AUTO_TEST_CASE(key_io_valid_gen)
         }
     }
 
-    SelectParams(CBaseChainParams::MAIN);
+    SelectParams(gArgs, CBaseChainParams::MAIN);
 }
 
 
@@ -137,7 +138,7 @@ BOOST_AUTO_TEST_CASE(key_io_invalid)
 
         // must be invalid as public and as private key
         for (const auto& chain : { CBaseChainParams::MAIN, CBaseChainParams::TESTNET, CBaseChainParams::SIGNET, CBaseChainParams::REGTEST }) {
-            SelectParams(chain);
+            SelectParams(gArgs, chain);
             destination = DecodeDestination(exp_base58string);
             BOOST_CHECK_MESSAGE(!IsValidDestination(destination), "IsValid pubkey in mainnet:" + strTest);
             privkey = DecodeSecret(exp_base58string);

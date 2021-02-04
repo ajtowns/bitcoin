@@ -95,7 +95,7 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
         assert(success);
         assert(error.empty());
     }
-    SelectParams(chainName);
+    SelectParams(gArgs, chainName);
     SeedInsecureRand();
     if (G_TEST_LOG_FUN) LogInstance().PushBackCallback(G_TEST_LOG_FUN);
     InitLogging(*m_node.args);

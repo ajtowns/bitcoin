@@ -20,7 +20,7 @@
 void initialize_block()
 {
     static const ECCVerifyHandle verify_handle;
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(gArgs, CBaseChainParams::REGTEST);
 }
 
 FUZZ_TARGET_INIT(block, initialize_block)

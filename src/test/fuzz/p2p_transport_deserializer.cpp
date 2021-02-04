@@ -14,7 +14,7 @@
 
 void initialize_p2p_transport_deserializer()
 {
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(gArgs, CBaseChainParams::REGTEST);
 }
 
 FUZZ_TARGET_INIT(p2p_transport_deserializer, initialize_p2p_transport_deserializer)

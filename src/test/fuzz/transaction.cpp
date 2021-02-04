@@ -23,7 +23,7 @@
 
 void initialize_transaction()
 {
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(gArgs, CBaseChainParams::REGTEST);
 }
 
 FUZZ_TARGET_INIT(transaction, initialize_transaction)

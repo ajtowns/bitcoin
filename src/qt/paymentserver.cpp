@@ -96,11 +96,11 @@ void PaymentServer::ipcParseCommandLine(int argc, char* argv[])
                 auto tempChainParams = CreateChainParams(gArgs, CBaseChainParams::MAIN);
 
                 if (IsValidDestinationString(r.address.toStdString(), *tempChainParams)) {
-                    SelectParams(CBaseChainParams::MAIN);
+                    SelectParams(gArgs, CBaseChainParams::MAIN);
                 } else {
                     tempChainParams = CreateChainParams(gArgs, CBaseChainParams::TESTNET);
                     if (IsValidDestinationString(r.address.toStdString(), *tempChainParams)) {
-                        SelectParams(CBaseChainParams::TESTNET);
+                        SelectParams(gArgs, CBaseChainParams::TESTNET);
                     }
                 }
             }

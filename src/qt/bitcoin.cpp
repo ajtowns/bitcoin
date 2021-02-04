@@ -546,7 +546,7 @@ int GuiMain(int argc, char* argv[])
 
     // Check for chain settings (Params() calls are only valid after this clause)
     try {
-        SelectParams(gArgs.GetChainName());
+        SelectParams(gArgs);
     } catch(std::exception &e) {
         InitError(Untranslated(strprintf("%s\n", e.what())));
         QMessageBox::critical(nullptr, PACKAGE_NAME, QObject::tr("Error: %1").arg(e.what()));

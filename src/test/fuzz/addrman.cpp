@@ -19,7 +19,7 @@
 
 void initialize_addrman()
 {
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(gArgs, CBaseChainParams::REGTEST);
 }
 
 class CAddrManDeterministic : public CAddrMan

@@ -71,7 +71,7 @@ static bool WalletAppInit(ArgsManager& args, int argc, char* argv[])
         return false;
     }
     // Check for chain settings (Params() calls are only valid after this clause)
-    SelectParams(args.GetChainName());
+    SelectParams(args);
 
     return true;
 }
