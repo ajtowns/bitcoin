@@ -139,7 +139,7 @@ class BlockchainTest(BitcoinTestFramework):
                 'bip8': {
                     'status': 'started',
                     'bit': 28,
-                    'startheight': 0,
+                    'startheight': 144,
                     'timeoutheight': 0x7fffffffffffffff,  # testdummy does not have a timeout so is set to the max int64 value
                     'lockinontimeout': False,
                     'since': 144,
@@ -157,9 +157,9 @@ class BlockchainTest(BitcoinTestFramework):
                 'type': 'bip8',
                 'bip8': {
                     'status': 'active',
-                    'startheight': -1,
-                    'timeoutheight': 0x7fffffffffffffff,
-                    'lockinontimeout': False,
+                    'startheight': 0,
+                    'timeoutheight': 0,
+                    'lockinontimeout': True,
                     'since': 0
                 },
                 'height': 0,
