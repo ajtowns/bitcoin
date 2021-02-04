@@ -339,9 +339,10 @@ public:
 
     /**
      * Returns the appropriate chain name from the program arguments.
-     * @return CBaseChainParams::MAIN by default; raises runtime error if an invalid combination is given.
+     * @return CBaseChainParams::MAIN by default
      */
     std::string GetChainName() const;
+    bool GetChainName(std::string& name) const;
 
     /**
      * Add argument

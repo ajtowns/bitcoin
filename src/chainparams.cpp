@@ -529,5 +529,10 @@ void SelectParams(ArgsManager& args, const std::string& chain)
 
 void SelectParams(ArgsManager& args)
 {
-    SelectParams(args, args.GetChainName());
+     std::string chain;
+     if (args.GetChainName(chain)) {
+         SelectParams(args, chain);
+     } else {
+         throw std::runtime_error("Invalid combination of -regtest, -signet, -testnet and -chain. Can use at most one.");
+     }
 }

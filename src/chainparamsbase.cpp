@@ -63,5 +63,10 @@ void SelectBaseParams(ArgsManager& args, const std::string& chain)
 
 void SelectBaseParams(ArgsManager& args)
 {
-    SelectBaseParams(args, args.GetChainName());
+     std::string chain;
+     if (args.GetChainName(chain)) {
+         SelectBaseParams(args, chain);
+     } else {
+         throw std::runtime_error("Invalid combination of -regtest, -signet, -testnet and -chain. Can use at most one.");
+     }
 }

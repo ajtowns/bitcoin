@@ -978,7 +978,7 @@ bool ArgsManager::ReadConfigFiles(std::string& error, bool ignore_invalid_keys)
     return true;
 }
 
-std::string ArgsManager::GetChainName() const
+bool ArgsManager::GetChainName(std::string& name) const
 {
     auto get_net = [&](const std::string& arg) {
         LOCK(cs_args);
@@ -993,18 +993,25 @@ std::string ArgsManager::GetChainName() const
     const bool fTestNet = get_net("-testnet");
     const bool is_chain_arg_set = IsArgSet("-chain");
 
-    if ((int)is_chain_arg_set + (int)fRegTest + (int)fSigNet + (int)fTestNet > 1) {
-        throw std::runtime_error("Invalid combination of -regtest, -signet, -testnet and -chain. Can use at most one.");
-    }
-    if (fRegTest)
-        return CBaseChainParams::REGTEST;
-    if (fSigNet) {
-        return CBaseChainParams::SIGNET;
-    }
-    if (fTestNet)
-        return CBaseChainParams::TESTNET;
+    const bool one_or_zero = ((int)is_chain_arg_set + (int)fRegTest + (int)fSigNet + (int)fTestNet) <= 1;
 
-    return GetArg("-chain", CBaseChainParams::MAIN);
+    if (fRegTest) {
+        name = CBaseChainParams::REGTEST;
+    } else if (fTestNet) {
+        name = CBaseChainParams::TESTNET;
+    } else if (fSigNet) {
+        name = CBaseChainParams::SIGNET;
+    } else {
+        name = GetArg("-chain", CBaseChainParams::MAIN);
+    }
+    return one_or_zero;
+}
+
+std::string ArgsManager::GetChainName() const
+{
+    std::string name;
+    (void)GetChainName(name);
+    return name;
 }
 
 bool ArgsManager::UseDefaultSection(const std::string& arg) const
