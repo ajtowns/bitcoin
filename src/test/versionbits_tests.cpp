@@ -244,14 +244,14 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
 {
     // Check that ComputeBlockVersion will set the appropriate bit correctly
     const auto period = CreateChainParams(*m_node.args, CBaseChainParams::REGTEST)->GetConsensus().nMinerConfirmationWindow;
-    gArgs.ForceSetArg("-vbparams", strprintf("testdummy:@%s:@%s", period, period * 2));
+    gArgs.ForceSetArg("-vbparams", strprintf("testdummy:@%s:@%s:0", period, period * 2));
     const auto chainParams = CreateChainParams(*m_node.args, CBaseChainParams::REGTEST);
-    const Consensus::Params &mainnetParams = chainParams->GetConsensus();
+    const Consensus::Params &params = chainParams->GetConsensus();
 
     // Use the TESTDUMMY deployment for testing purposes.
-    int64_t bit = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit;
-    int64_t startheight = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].startheight;
-    int64_t timeoutheight = mainnetParams.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].timeoutheight;
+    int64_t bit = params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit;
+    int64_t startheight = params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].startheight;
+    int64_t timeoutheight = params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].timeoutheight;
     const int64_t nTime = TestTime(startheight);
 
     assert(startheight < timeoutheight);
@@ -265,24 +265,24 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     // Before the chain has reached startheight-1, the bit should not be set.
     CBlockIndex *lastBlock = nullptr;
     lastBlock = firstChain.Mine(startheight - 1, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit), 0);
+    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & (1<<bit), 0);
 
     // Advance to the next block and transition to STARTED,
     lastBlock = firstChain.Mine(startheight, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
     // so ComputeBlockVersion should now set the bit,
-    BOOST_CHECK((ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit)) != 0);
+    BOOST_CHECK((ComputeBlockVersion(lastBlock, params) & (1<<bit)) != 0);
     // and should also be using the VERSIONBITS_TOP_BITS.
-    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
+    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
 
     // Check that ComputeBlockVersion will set the bit until timeoutheight
     // These blocks are all before timeoutheight is reached.
     lastBlock = firstChain.Mine(timeoutheight - 1, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK((ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit)) != 0);
-    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
+    BOOST_CHECK((ComputeBlockVersion(lastBlock, params) & (1<<bit)) != 0);
+    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
 
     // The next block should trigger no longer setting the bit.
     lastBlock = firstChain.Mine(timeoutheight, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit), 0);
+    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & (1<<bit), 0);
 
     // On a new chain:
     // verify that the bit will be set after lock-in, and then stop being set
@@ -291,24 +291,24 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     // Mine up until startheight-1, and check that the bit will be on for the
     // next period.
     lastBlock = secondChain.Mine(startheight, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK((ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit)) != 0);
+    BOOST_CHECK((ComputeBlockVersion(lastBlock, params) & (1<<bit)) != 0);
 
     // Mine another block, signaling the new bit.
-    lastBlock = secondChain.Mine(startheight + mainnetParams.nMinerConfirmationWindow, nTime, VERSIONBITS_TOP_BITS | (1<<bit)).Tip();
+    lastBlock = secondChain.Mine(startheight + params.nMinerConfirmationWindow, nTime, VERSIONBITS_TOP_BITS | (1<<bit)).Tip();
     // After one period of setting the bit on each block, it should have locked in.
     // We keep setting the bit for one more period though, until activation.
-    BOOST_CHECK((ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit)) != 0);
+    BOOST_CHECK((ComputeBlockVersion(lastBlock, params) & (1<<bit)) != 0);
 
     // Now check that we keep mining the block until the end of this period, and
     // then stop at the beginning of the next period.
-    lastBlock = secondChain.Mine(startheight + (mainnetParams.nMinerConfirmationWindow * 2) - 1, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK((ComputeBlockVersion(lastBlock, mainnetParams) & (1 << bit)) != 0);
-    lastBlock = secondChain.Mine(startheight + (mainnetParams.nMinerConfirmationWindow * 2), nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
-    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & (1<<bit), 0);
+    lastBlock = secondChain.Mine(startheight + (params.nMinerConfirmationWindow * 2) - 1, nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
+    BOOST_CHECK((ComputeBlockVersion(lastBlock, params) & (1 << bit)) != 0);
+    lastBlock = secondChain.Mine(startheight + (params.nMinerConfirmationWindow * 2), nTime, VERSIONBITS_LAST_OLD_BLOCK_VERSION).Tip();
+    BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & (1<<bit), 0);
 
     // Finally, verify that after a soft fork has activated, CBV no longer uses
     // VERSIONBITS_LAST_OLD_BLOCK_VERSION.
-    //BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, mainnetParams) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
+    //BOOST_CHECK_EQUAL(ComputeBlockVersion(lastBlock, params) & VERSIONBITS_TOP_MASK, VERSIONBITS_TOP_BITS);
 }
 
 
