@@ -1241,7 +1241,7 @@ static void VBitsSoftForkDescPushBack(UniValue& softforks, const std::string &na
         UniValue statsUV(UniValue::VOBJ);
         VBitsStats statsStruct = VersionBitsTipStatistics(consensusParams, id);
         statsUV.pushKV("period", statsStruct.period);
-        if (ThresholdState::STARTED == thresholdState) {
+        if (thresholdState != ThresholdState::LOCKED_IN) {
             statsUV.pushKV("threshold", statsStruct.threshold);
         }
         statsUV.pushKV("elapsed", statsStruct.elapsed);
