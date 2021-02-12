@@ -37,12 +37,6 @@ using SecondsDouble = std::chrono::duration<double, std::chrono::seconds::period
  */
 inline double CountSecondsDouble(SecondsDouble t) { return t.count(); }
 
-/**
- * DEPRECATED
- * Use either GetSystemTimeInSeconds (not mockable) or GetTime<T> (mockable)
- */
-int64_t GetTime();
-
 /** Returns the system time (not mockable) */
 int64_t GetTimeMillis();
 /** Returns the system time (not mockable) */
@@ -50,14 +44,43 @@ int64_t GetTimeMicros();
 /** Returns the system time (not mockable) */
 int64_t GetSystemTimeInSeconds(); // Like GetTime(), but not mockable
 
-/** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument */
-void SetMockTime(int64_t nMockTimeIn);
-/** For testing */
-int64_t GetMockTime();
+/** Mockable clock
+ *
+ * Example usage:
+ *    mockable_clock::time_point t1 = mockable_clock::now();
+ *    mockable_clock::time_point t2 = mockable_clock::now();
+ *    if (t2 - t1 > 20m) return; // took too long
+ */
+struct mockable_clock
+{
+    using duration = std::chrono::microseconds;
+    using rep = duration::rep;
+    using period = duration::period;
+    using time_point = std::chrono::time_point<mockable_clock>;
+    static const bool is_steady = false;
+    static constexpr time_point epoch{duration{0}};
+    static time_point now() noexcept;
 
-/** Return system time (or mocked time, if set) */
+    static time_point real_time() noexcept;
+    static std::chrono::seconds mock_time() noexcept;
+    static void set_mock_time(std::chrono::seconds since_epoch) noexcept;
+};
+
+/** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument (DEPRECATED) */
+static inline void SetMockTime(int64_t nMockTimeIn) { mockable_clock::set_mock_time(std::chrono::seconds{nMockTimeIn}); }
+
+/** For testing (DEPRECATED) */
+static inline int64_t GetMockTime() { return count_seconds(mockable_clock::mock_time()); }
+
+/** Return system time (or mocked time, if set) (DEPRECATED) */
 template <typename T>
-T GetTime();
+static inline T GetTime() { return std::chrono::duration_cast<T>(mockable_clock::now().time_since_epoch()); }
+
+/**
+ * DEPRECATED
+ * Use either GetSystemTimeInSeconds (not mockable) or GetTime<T> (mockable)
+ */
+static inline int64_t GetTime() { return GetTime<std::chrono::seconds>().count(); }
 
 /**
  * ISO 8601 formatting is preferred. Use the FormatISO8601{DateTime,Date}

@@ -21,16 +21,13 @@
 
 void UninterruptibleSleep(const std::chrono::microseconds& n) { std::this_thread::sleep_for(n); }
 
-static std::atomic<int64_t> nMockTime(0); //!< For testing
+static std::atomic<std::chrono::seconds> g_mock_time{0s}; //!< For testing
 
-int64_t GetTime()
+mockable_clock::time_point mockable_clock::real_time() noexcept
 {
-    int64_t mocktime = nMockTime.load(std::memory_order_relaxed);
-    if (mocktime) return mocktime;
-
-    time_t now = time(nullptr);
-    assert(now > 0);
-    return now;
+    int64_t micros = (boost::posix_time::microsec_clock::universal_time() -
+                      boost::posix_time::ptime(boost::gregorian::date(1970,1,1))).total_microseconds();
+    return time_point{std::chrono::microseconds{micros}};
 }
 
 bool ChronoSanityCheck()
@@ -65,29 +62,21 @@ bool ChronoSanityCheck()
     return true;
 }
 
-template <typename T>
-T GetTime()
+std::chrono::seconds mockable_clock::mock_time() noexcept
 {
-    const std::chrono::seconds mocktime{nMockTime.load(std::memory_order_relaxed)};
-
-    return std::chrono::duration_cast<T>(
-        mocktime.count() ?
-            mocktime :
-            std::chrono::microseconds{GetTimeMicros()});
-}
-template std::chrono::seconds GetTime();
-template std::chrono::milliseconds GetTime();
-template std::chrono::microseconds GetTime();
-
-void SetMockTime(int64_t nMockTimeIn)
-{
-    Assert(nMockTimeIn >= 0);
-    nMockTime.store(nMockTimeIn, std::memory_order_relaxed);
+    return std::chrono::seconds{g_mock_time.load(std::memory_order_relaxed)};
 }
 
-int64_t GetMockTime()
+mockable_clock::time_point mockable_clock::now() noexcept
 {
-    return nMockTime.load(std::memory_order_relaxed);
+    std::chrono::seconds mock = mock_time();
+    return mock.count() ?  time_point{mock} : real_time();
+}
+
+void mockable_clock::set_mock_time(std::chrono::seconds since_epoch) noexcept
+{
+    Assert(since_epoch.count() >= 0);
+    g_mock_time.store(since_epoch, std::memory_order_relaxed);
 }
 
 int64_t GetTimeMillis()
