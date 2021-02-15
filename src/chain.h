@@ -73,7 +73,7 @@ public:
          SetNull();
      }
 
-     std::string ToString() const;
+     //std::string ToString() const;
 
      /** update statistics (does not update nSize) */
      void AddBlock(unsigned int nHeightIn, uint64_t nTimeIn) {

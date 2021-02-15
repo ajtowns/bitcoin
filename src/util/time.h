@@ -44,11 +44,15 @@ int64_t GetTimeMicros();
 /** Returns the system time (not mockable) */
 int64_t GetSystemTimeInSeconds(); // Like GetTime(), but not mockable
 
+/** System clock */
+using steady_clock = std::chrono::steady_clock;
+using steady_time = std::chrono::steady_clock::time_point;
+
 /** Mockable clock
  *
  * Example usage:
- *    mockable_clock::time_point t1 = mockable_clock::now();
- *    mockable_clock::time_point t2 = mockable_clock::now();
+ *    mockable_time t1 = mockable_clock::now();
+ *    mockable_time t2 = mockable_clock::now();
  *    if (t2 - t1 > 20m) return; // took too long
  */
 struct mockable_clock
@@ -65,6 +69,7 @@ struct mockable_clock
     static std::chrono::seconds mock_time() noexcept;
     static void set_mock_time(std::chrono::seconds since_epoch) noexcept;
 };
+using mockable_time = mockable_clock::time_point;
 
 /** For testing. Set e.g. with the setmocktime rpc, or -mocktime argument (DEPRECATED) */
 static inline void SetMockTime(int64_t nMockTimeIn) { mockable_clock::set_mock_time(std::chrono::seconds{nMockTimeIn}); }
@@ -86,6 +91,10 @@ static inline int64_t GetTime() { return GetTime<std::chrono::seconds>().count()
  * ISO 8601 formatting is preferred. Use the FormatISO8601{DateTime,Date}
  * helper functions if possible.
  */
+std::string FormatISO8601DateTime(mockable_time nTime);
+std::string FormatISO8601Date(mockable_time nTime);
+int64_t ParseISO8601DateTime(const std::string& str);
+
 std::string FormatISO8601DateTime(int64_t nTime);
 std::string FormatISO8601Date(int64_t nTime);
 int64_t ParseISO8601DateTime(const std::string& str);
