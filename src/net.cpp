@@ -600,6 +600,8 @@ void CNode::copyStats(CNodeStats &stats, const std::vector<bool> &m_asmap)
     } else {
         stats.minFeeFilter = 0;
     }
+    X(m_times_delayed);
+    X(m_times_not_delayed);
 
     stats.m_ping_usec = m_last_ping_time;
     stats.m_min_ping_usec = m_min_ping_time;
@@ -2149,8 +2151,18 @@ void CConnman::ThreadMessageHandler()
                 continue;
 
             // Receive messages
-            bool fMoreNodeWork = m_msgproc->ProcessMessages(pnode, flagInterruptMsgProc);
-            fMoreWork |= (fMoreNodeWork && !pnode->fPauseSend);
+            {
+                std::chrono::microseconds start = GetTime<std::chrono::microseconds>();
+                if (start >= pnode->m_delay_processing_until.load()) {
+                    bool fMoreNodeWork = m_msgproc->ProcessMessages(pnode, flagInterruptMsgProc);
+                    fMoreWork |= (fMoreNodeWork && !pnode->fPauseSend);
+                    std::chrono::microseconds fin = GetTime<std::chrono::microseconds>();
+                    pnode->m_delay_processing_until = std::clamp(pnode->m_delay_processing_until.load() + 20*(fin-start), fin - 10s, fin + 60s);
+                    ++pnode->m_times_not_delayed;
+                } else {
+                    ++pnode->m_times_delayed;
+                }
+            }
             if (flagInterruptMsgProc)
                 return;
             // Send messages

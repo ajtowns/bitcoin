@@ -202,6 +202,8 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("bytesrecv", stats.nRecvBytes);
         obj.pushKV("conntime", stats.nTimeConnected);
         obj.pushKV("timeoffset", stats.nTimeOffset);
+        obj.pushKV("times_delayed", stats.m_times_delayed);
+        obj.pushKV("times_not_delayed", stats.m_times_not_delayed);
         if (stats.m_ping_usec > 0) {
             obj.pushKV("pingtime", ((double)stats.m_ping_usec) / 1e6);
         }

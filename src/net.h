@@ -272,6 +272,8 @@ public:
     Network m_network;
     uint32_t m_mapped_as;
     ConnectionType m_conn_type;
+    int64_t m_times_delayed;
+    int64_t m_times_not_delayed;
 };
 
 
@@ -460,6 +462,9 @@ public:
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
     std::atomic_bool fPauseSend{false};
+    std::atomic<std::chrono::microseconds> m_delay_processing_until{std::chrono::microseconds::min()};
+    std::atomic<int64_t> m_times_delayed{0};
+    std::atomic<int64_t> m_times_not_delayed{0};
 
     bool IsOutboundOrBlockRelayConn() const {
         switch (m_conn_type) {
