@@ -438,7 +438,11 @@ BOOST_AUTO_TEST_CASE(sighash_anyprevout_schnorr)
             uint256 shts_trk_default, shts_trk_all;
             BOOST_CHECK(SignatureHashSchnorr(shts_trk_default, execdata, txTo, nIn, SIGHASH_DEFAULT, sigversion, KeyVersion::TAPROOT, txdata));
             BOOST_CHECK(SignatureHashSchnorr(shts_trk_all, execdata, txTo, nIn, SIGHASH_ALL, sigversion, KeyVersion::TAPROOT, txdata));
-            BOOST_CHECK(shts_trk_default == shts_trk_all);
+            
+            // sighash does not match because sighash flags differ (0x0 vs. 0x1)
+            BOOST_CHECK(shts_trk_default != shts_trk_all);
+
+            // TODO: confirm that behavior is the same when using SIGHASH_DEFAULT and SIGHASH_ALL
         }
 
         // with the ANYPREVOUT (0x1) key version, SIGHASH_DEFAULT should behave like SIGHASH_ALL
@@ -446,7 +450,11 @@ BOOST_AUTO_TEST_CASE(sighash_anyprevout_schnorr)
             uint256 shts_trk_default, shts_trk_all, shts_apo_default, shts_apo_all;
             BOOST_CHECK(SignatureHashSchnorr(shts_apo_default, execdata, txTo, nIn, SIGHASH_DEFAULT, sigversion, KeyVersion::ANYPREVOUT, txdata));
             BOOST_CHECK(SignatureHashSchnorr(shts_apo_all, execdata, txTo, nIn, SIGHASH_ALL, sigversion, KeyVersion::ANYPREVOUT, txdata));
-            BOOST_CHECK(shts_apo_default == shts_apo_all);
+            
+            // sighash does not match because sighash flags differ (0x0 vs. 0x1)
+            BOOST_CHECK(shts_apo_default != shts_apo_all);
+
+            // TODO: confirm that behavior is the same when using SIGHASH_DEFAULT and SIGHASH_ALL
         }
         
         int nHashType_outmask = nHashType & SIGHASH_OUTPUT_MASK;
@@ -466,95 +474,108 @@ BOOST_AUTO_TEST_CASE(sighash_anyprevout_schnorr)
 
         // check transactions using the TAPROOT (0x0) key version
         {
-            uint256 tmp, shts_trk_default, shts_trk_all;
-
-            // should behave like SIGHASH_ALL when no sighash is set (SIGHASH_DEFAULT) 
-            BOOST_CHECK(SignatureHashSchnorr(shts_trk_default, execdata, txTo, nIn, SIGHASH_DEFAULT, sigversion, KeyVersion::TAPROOT, txdata));
-            BOOST_CHECK(SignatureHashSchnorr(shts_trk_all, execdata, txTo, nIn, SIGHASH_ALL, sigversion, KeyVersion::TAPROOT, txdata));
-
             // should fail unless no sighash input flag or the ANYONECANPAY input flag is set 
-            uint256 shts_trk, shts_trk_acp;
+            
             if (nHashType_outmask == SIGHASH_DEFAULT) {
-                BOOST_CHECK(SignatureHashSchnorr(shts_trk, execdata, txTo, nIn, nHashType_outmask, sigversion, KeyVersion::TAPROOT, txdata));
+                uint256 tmp;
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, txdata));
             }
             // otherwise all other output sighash flags should fail when any input sighash flags are set except SIGHASH_ANYONECANPAY (0x80)
             else {
+                uint256 tmp, shts_trk_acp;
                 BOOST_CHECK(SignatureHashSchnorr(shts_trk_acp, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, txdata));
+            
+                // TODO: confirm correct SIGHASH_ANYONECANPAY input sighash flag behavior
             }
         }
 
         // check transactions using the ANYPREVOUT (0x1) key version
         {
-            uint256 tmp, shts, shts_acp, shts_apo, shts_apoas;
-            uint256 shts_tx2_acp, shts_tx2_apo, shts_tx2_apoas;
-            uint256 shts_tx3_acp, shts_tx3_apo, shts_tx3_apoas;
-            uint256 shts_tx4_acp, shts_tx4_apo, shts_tx4_apoas;
+            // compute base sighash without input sighash flags
+            uint256 shts;
+            BOOST_CHECK(SignatureHashSchnorr(shts, execdata, txTo, nIn, nHashType_outmask, sigversion, KeyVersion::ANYPREVOUT, txdata));
 
-            // should behave like SIGHASH_ALL when no sighash is set (SIGHASH_DEFAULT), and fail if any input sighash is set any output sighash set
+            // should behave like SIGHASH_ALL when no sighash is set (SIGHASH_DEFAULT), and fail if any other input sighash is set
             if (nHashType_outmask == SIGHASH_DEFAULT) {
-                BOOST_CHECK(SignatureHashSchnorr(shts, execdata, txTo, nIn, nHashType_outmask, sigversion, KeyVersion::ANYPREVOUT, txdata));
+                uint256 tmp;
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::ANYPREVOUT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::ANYPREVOUT, txdata));
                 BOOST_CHECK(false == SignatureHashSchnorr(tmp, execdata, txTo, nIn, nHashType_outmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::ANYPREVOUT, txdata));
             }
             // otherwise any output sighash flags should succeed with any input sighash flags
             else {
-                BOOST_CHECK(SignatureHashSchnorr(shts_acp, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, txdata));
-                BOOST_CHECK(SignatureHashSchnorr(shts_apo, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, txdata));
-                BOOST_CHECK(SignatureHashSchnorr(shts_apoas, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, txdata));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_acp, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, tx2data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_apo, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, tx2data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_apoas, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, tx2data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_acp, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, tx3data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_apo, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, tx3data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_apoas, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, tx3data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_acp, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::TAPROOT, tx4data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_apo, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::TAPROOT, tx4data));
-                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_apoas, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::TAPROOT, tx4data));
+                uint256 shts_acp, shts_apo, shts_apoas;
+                BOOST_CHECK(SignatureHashSchnorr(shts_acp, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::ANYPREVOUT, txdata));
+                BOOST_CHECK(SignatureHashSchnorr(shts_apo, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::ANYPREVOUT, txdata));
+                BOOST_CHECK(SignatureHashSchnorr(shts_apoas, execdata, txTo, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::ANYPREVOUT, txdata));
+                
+                uint256 shts_tx2_acp, shts_tx2_apo, shts_tx2_apoas;
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_acp, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::ANYPREVOUT, tx2data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_apo, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::ANYPREVOUT, tx2data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx2_apoas, execdata, tx2To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::ANYPREVOUT, tx2data));
+                
+                uint256 shts_tx3_acp, shts_tx3_apo, shts_tx3_apoas;
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_acp, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::ANYPREVOUT, tx3data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_apo, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::ANYPREVOUT, tx3data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx3_apoas, execdata, tx3To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::ANYPREVOUT, tx3data));
+                
+                uint256 shts_tx4_acp, shts_tx4_apo, shts_tx4_apoas;
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_acp, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYONECANPAY, sigversion, KeyVersion::ANYPREVOUT, tx4data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_apo, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUT, sigversion, KeyVersion::ANYPREVOUT, tx4data));
+                BOOST_CHECK(SignatureHashSchnorr(shts_tx4_apoas, execdata, tx4To, nIn, nHashType_inoutmask | SIGHASH_ANYPREVOUTANYSCRIPT, sigversion, KeyVersion::ANYPREVOUT, tx4data));
+
+                // adding the SIGHASH_ANYONECANPAY input flag should always create unique sighash results
+                BOOST_CHECK(shts != shts_tx2_acp);
+                BOOST_CHECK(shts_acp != shts_tx2_acp);
+                BOOST_CHECK(shts_acp != shts_tx3_acp);
+                BOOST_CHECK(shts_tx2_acp != shts_tx3_acp);
+
+                // adding the SIGHASH_ANYPREVOUT input flag should only create identical sighashes when the input script and sequence does not change
+                BOOST_CHECK(shts_apo == shts_tx2_apo);
+                if (txTo.vin[nIn].scriptSig == tx3To.vin[nIn].scriptSig || txTo.vin[nIn].nSequence == tx3To.vin[nIn].nSequence) {
+                    BOOST_CHECK(shts_apo == shts_tx3_apo);
+                }
+                else {
+                    BOOST_CHECK(shts_apo != shts_tx3_apo);
+                }
+                if (tx2To.vin[nIn].scriptSig == tx3To.vin[nIn].scriptSig || tx2To.vin[nIn].nSequence == tx3To.vin[nIn].nSequence) {
+                    BOOST_CHECK(shts_tx2_apo == shts_tx3_apo);
+                }
+                else {
+                    BOOST_CHECK(shts_tx2_apo != shts_tx3_apo);
+                }
+                BOOST_CHECK(shts != shts_tx2_apo);
+                BOOST_CHECK(shts != shts_tx3_apo);
+                BOOST_CHECK(shts_acp != shts_tx2_apo);
+                BOOST_CHECK(shts_acp != shts_tx3_apo);
+
+                // adding the SIGHASH_ANYPREVOUTANYSCRIPT input flag should create identical sighashes if the output value of the inputs do not change
+                BOOST_CHECK(shts_apoas == shts_tx2_apoas);
+                BOOST_CHECK(shts_apoas == shts_tx3_apoas);
+                BOOST_CHECK(shts_tx2_apoas == shts_tx3_apoas);
+                BOOST_CHECK(shts != shts_tx2_apoas);
+                BOOST_CHECK(shts != shts_tx3_apoas);
+                BOOST_CHECK(shts_acp != shts_tx2_apoas);
+                BOOST_CHECK(shts_acp != shts_tx3_apoas);
+
+                // should always create unique sighashes if the output value of the inputs change
+                BOOST_CHECK(shts != shts_tx4_acp);
+                BOOST_CHECK(shts != shts_tx4_apo);
+                BOOST_CHECK(shts != shts_tx4_apoas);
+                BOOST_CHECK(shts_acp != shts_tx4_acp);
+                BOOST_CHECK(shts_acp != shts_tx4_apo);
+                BOOST_CHECK(shts_acp != shts_tx4_apoas);
+                BOOST_CHECK(shts_apo != shts_tx4_acp);
+                BOOST_CHECK(shts_apo != shts_tx4_apo);
+                BOOST_CHECK(shts_apo != shts_tx4_apoas);
+                BOOST_CHECK(shts_apoas != shts_tx4_acp);
+                BOOST_CHECK(shts_apoas != shts_tx4_apo);
+                BOOST_CHECK(shts_apoas != shts_tx4_apoas);
             }
-
-            // adding the SIGHASH_ANYONECANPAY input flag should always create unique sighash results
-            BOOST_CHECK(shts != shts_tx2_acp);
-            BOOST_CHECK(shts_acp != shts_tx2_acp);
-            BOOST_CHECK(shts_acp != shts_tx3_acp);
-            BOOST_CHECK(shts_tx2_acp != shts_tx3_acp);
-
-            // adding the SIGHASH_ANYPREVOUT input flag should only create identical sighashes when the input script and sequence does not change
-            BOOST_CHECK(shts_apo == shts_tx2_apo);
-            BOOST_CHECK(shts_apo != shts_tx3_apo);
-            BOOST_CHECK(shts_tx2_apo != shts_tx3_apo);
-            BOOST_CHECK(shts != shts_tx2_apo);
-            BOOST_CHECK(shts != shts_tx3_apo);
-            BOOST_CHECK(shts_acp != shts_tx2_apo);
-            BOOST_CHECK(shts_acp != shts_tx3_apo);
-
-            // adding the SIGHASH_ANYPREVOUTANYSCRIPT input flag should create identical sighashes if the output value of the inputs do not change
-            BOOST_CHECK(shts_apoas == shts_tx2_apoas);
-            BOOST_CHECK(shts_apoas == shts_tx3_apoas);
-            BOOST_CHECK(shts_tx2_apoas == shts_tx3_apoas);
-            BOOST_CHECK(shts != shts_tx2_apoas);
-            BOOST_CHECK(shts != shts_tx3_apoas);
-            BOOST_CHECK(shts_acp != shts_tx2_apoas);
-            BOOST_CHECK(shts_acp != shts_tx3_apoas);
-
-            // should always create unique sighashes if the output value of the inputs change
-            BOOST_CHECK(shts != shts_tx4_acp);
-            BOOST_CHECK(shts != shts_tx4_apo);
-            BOOST_CHECK(shts != shts_tx4_apoas);
-            BOOST_CHECK(shts_acp != shts_tx4_acp);
-            BOOST_CHECK(shts_acp != shts_tx4_apo);
-            BOOST_CHECK(shts_acp != shts_tx4_apoas);
-            BOOST_CHECK(shts_apo != shts_tx4_acp);
-            BOOST_CHECK(shts_apo != shts_tx4_apo);
-            BOOST_CHECK(shts_apo != shts_tx4_apoas);
-            BOOST_CHECK(shts_apoas != shts_tx4_acp);
-            BOOST_CHECK(shts_apoas != shts_tx4_apo);
-            BOOST_CHECK(shts_apoas != shts_tx4_apoas);
         }
 
         #if defined(PRINT_SIGHASH_JSON)
