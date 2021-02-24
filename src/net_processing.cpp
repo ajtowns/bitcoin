@@ -212,9 +212,6 @@ struct Peer {
     /** Whether a ping has been requested by the user */
     std::atomic<bool> m_ping_queued{false};
 
-    /** Set of txids to reconsider once their parent transactions have been accepted **/
-    std::set<uint256> m_orphan_work_set GUARDED_BY(g_cs_orphans);
-
     /** Protects m_getdata_requests **/
     Mutex m_getdata_requests_mutex;
     /** Work queue of items requested by this peer **/
@@ -2100,11 +2097,15 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
     AssertLockHeld(cs_main);
     AssertLockHeld(g_cs_orphans);
 
-    if (peer.m_orphan_work_set.empty()) return false;
+    auto work_set_it = m_orphanage.m_peer_work_set.find(peer.m_id);
+    if (work_set_it == m_orphanage.m_peer_work_set.end()) return false;
 
-    while (!peer.m_orphan_work_set.empty()) {
-        const uint256 orphanHash = *peer.m_orphan_work_set.begin();
-        peer.m_orphan_work_set.erase(peer.m_orphan_work_set.begin());
+    std::set<uint256>& orphan_work_set = work_set_it->second;
+
+    while (!orphan_work_set.empty()) {
+        auto it = orphan_work_set.begin();
+        const uint256 orphanHash = *it;
+        it = orphan_work_set.erase(it);
 
         const auto [porphanTx, from_peer] = m_orphanage.GetTx(orphanHash);
         if (porphanTx == nullptr) continue;
@@ -2115,7 +2116,7 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
         if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
             LogPrint(BCLog::MEMPOOL, "   accepted orphan tx %s\n", orphanHash.ToString());
             _RelayTransaction(orphanHash, porphanTx->GetWitnessHash());
-            m_orphanage.AddChildrenToWorkSet(*porphanTx, peer.m_orphan_work_set);
+            m_orphanage.AddChildrenToWorkSet(*porphanTx, peer.m_id);
             m_orphanage.EraseTx(orphanHash);
             for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
                 AddToCompactExtraTransactions(removedTx);
@@ -2170,7 +2171,7 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
 
     m_mempool.check(m_chainman.ActiveChainstate());
 
-    return !peer.m_orphan_work_set.empty();
+    return !orphan_work_set.empty();
 }
 
 bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& peer,
@@ -3111,7 +3112,7 @@ void PeerManagerImpl::_ProcessMessage(CNode& pfrom, const std::string& msg_type,
             m_txrequest.ForgetTxHash(tx.GetHash());
             m_txrequest.ForgetTxHash(tx.GetWitnessHash());
             _RelayTransaction(tx.GetHash(), tx.GetWitnessHash());
-            m_orphanage.AddChildrenToWorkSet(tx, peer->m_orphan_work_set);
+            m_orphanage.AddChildrenToWorkSet(tx, peer->m_id);
 
             pfrom.nLastTXTime = GetTime();
 
