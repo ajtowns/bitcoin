@@ -316,7 +316,17 @@ private:
      */
     bool MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer);
 
-    void ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(m_mutex_message_handling, cs_main, g_cs_orphans);
+    /**
+     * Reconsider orphan transactions after a parent has been accepted to the mempool.
+     *
+     * @param[in,out]  peer             The peer whose orphan transactions we will reconsider. Generally only one
+     *                                  orphan will be reconsidered on each call of this function. This peer's set
+     *                                  may be added to if accepting an orphan causes its children to be
+     *                                  reconsidered.
+     * @return                          True if there are still orphans in this peer's work set
+     */
+    bool ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(m_mutex_message_handling, cs_main, g_cs_orphans);
+
     /** Process a single headers message from a peer. */
     void ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
                                const std::vector<CBlockHeader>& headers,
@@ -2084,19 +2094,13 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
     return;
 }
 
-/**
- * Reconsider orphan transactions after a parent has been accepted to the mempool.
- *
- * @param[in,out]  peer             The peer whose orphan transactions we will reconsider. Generally only one
- *                                  orphan will be reconsidered on each call of this function. This peer's set
- *                                  may be added to if accepting an orphan causes its children to be
- *                                  reconsidered.
- */
-void PeerManagerImpl::ProcessOrphanTx(Peer& peer)
+bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
 {
     AssertLockHeld(m_mutex_message_handling);
     AssertLockHeld(cs_main);
     AssertLockHeld(g_cs_orphans);
+
+    if (peer.m_orphan_work_set.empty()) return false;
 
     while (!peer.m_orphan_work_set.empty()) {
         const uint256 orphanHash = *peer.m_orphan_work_set.begin();
@@ -2163,7 +2167,10 @@ void PeerManagerImpl::ProcessOrphanTx(Peer& peer)
             break;
         }
     }
+
     m_mempool.check(m_chainman.ActiveChainstate());
+
+    return !peer.m_orphan_work_set.empty();
 }
 
 bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& peer,
@@ -3895,9 +3902,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
 
     {
         LOCK2(cs_main, g_cs_orphans);
-        if (!peer->m_orphan_work_set.empty()) {
-            ProcessOrphanTx(*peer);
-        }
+        if (ProcessOrphanTx(*peer)) return true;
     }
 
     if (pfrom->fDisconnect)
@@ -3908,11 +3913,6 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
     {
         LOCK(peer->m_getdata_requests_mutex);
         if (!peer->m_getdata_requests.empty()) return true;
-    }
-
-    {
-        LOCK(g_cs_orphans);
-        if (!peer->m_orphan_work_set.empty()) return true;
     }
 
     // Don't bother if send buffer is too full to respond anyway
