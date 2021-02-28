@@ -2126,8 +2126,13 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
     }
 }
 
+Mutex g_mutex_net_message_handler_thread;
+
 void CConnman::ThreadMessageHandler()
 {
+    // only one instance of this thread allowed
+    LOCK(g_mutex_net_message_handler_thread);
+
     while (!flagInterruptMsgProc)
     {
         std::vector<CNode*> vNodesCopy;
@@ -2152,10 +2157,7 @@ void CConnman::ThreadMessageHandler()
             if (flagInterruptMsgProc)
                 return;
             // Send messages
-            {
-                LOCK(pnode->cs_sendProcessing);
-                m_msgproc->SendMessages(pnode);
-            }
+            m_msgproc->SendMessages(pnode);
 
             if (flagInterruptMsgProc)
                 return;

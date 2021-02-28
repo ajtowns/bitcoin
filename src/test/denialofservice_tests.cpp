@@ -100,7 +100,7 @@ BOOST_AUTO_TEST_CASE(outbound_slow_chain_eviction)
 
     // Test starts here
     {
-        LOCK(dummyNode1.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode1)); // should result in getheaders
     }
     {
@@ -113,7 +113,7 @@ BOOST_AUTO_TEST_CASE(outbound_slow_chain_eviction)
     // Wait 21 minutes
     SetMockTime(nStartTime+21*60);
     {
-        LOCK(dummyNode1.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode1)); // should result in getheaders
     }
     {
@@ -123,7 +123,7 @@ BOOST_AUTO_TEST_CASE(outbound_slow_chain_eviction)
     // Wait 3 more minutes
     SetMockTime(nStartTime+24*60);
     {
-        LOCK(dummyNode1.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode1)); // should result in disconnect
     }
     BOOST_CHECK(dummyNode1.fDisconnect == true);
@@ -235,7 +235,7 @@ BOOST_AUTO_TEST_CASE(peer_discouragement)
     dummyNode1.fSuccessfullyConnected = true;
     peerLogic->Misbehaving(dummyNode1.GetId(), DISCOURAGEMENT_THRESHOLD, /* message */ ""); // Should be discouraged
     {
-        LOCK(dummyNode1.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode1));
     }
     BOOST_CHECK(banman->IsDiscouraged(addr1));
@@ -248,14 +248,14 @@ BOOST_AUTO_TEST_CASE(peer_discouragement)
     dummyNode2.fSuccessfullyConnected = true;
     peerLogic->Misbehaving(dummyNode2.GetId(), DISCOURAGEMENT_THRESHOLD - 1, /* message */ "");
     {
-        LOCK(dummyNode2.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode2));
     }
     BOOST_CHECK(!banman->IsDiscouraged(addr2)); // 2 not discouraged yet...
     BOOST_CHECK(banman->IsDiscouraged(addr1));  // ... but 1 still should be
     peerLogic->Misbehaving(dummyNode2.GetId(), 1, /* message */ "");         // 2 reaches discouragement threshold
     {
-        LOCK(dummyNode2.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode2));
     }
     BOOST_CHECK(banman->IsDiscouraged(addr1));  // Expect both 1 and 2
@@ -286,7 +286,7 @@ BOOST_AUTO_TEST_CASE(DoS_bantime)
 
     peerLogic->Misbehaving(dummyNode.GetId(), DISCOURAGEMENT_THRESHOLD, /* message */ "");
     {
-        LOCK(dummyNode.cs_sendProcessing);
+        LOCK(g_mutex_net_message_handler_thread);
         BOOST_CHECK(peerLogic->SendMessages(&dummyNode));
     }
     BOOST_CHECK(banman->IsDiscouraged(addr));

@@ -87,6 +87,9 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 
 typedef int64_t NodeId;
 
+/** Mutex for guarding anything only accessed by SendMessages/ProcessMessages */
+extern Mutex g_mutex_net_message_handler_thread;
+
 struct AddedNodeInfo
 {
     std::string strAddedNode;
@@ -417,8 +420,6 @@ public:
     std::list<CNetMessage> vProcessMsg GUARDED_BY(cs_vProcessMsg);
     size_t nProcessQueueSize{0};
 
-    RecursiveMutex cs_sendProcessing;
-
     uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
 
     std::atomic<int64_t> nLastSend{0};
@@ -546,8 +547,8 @@ public:
     std::vector<CAddress> vAddrToSend;
     std::unique_ptr<CRollingBloomFilter> m_addr_known{nullptr};
     bool fGetAddr{false};
-    std::chrono::microseconds m_next_addr_send GUARDED_BY(cs_sendProcessing){0};
-    std::chrono::microseconds m_next_local_addr_send GUARDED_BY(cs_sendProcessing){0};
+    std::chrono::microseconds m_next_addr_send GUARDED_BY(g_mutex_net_message_handler_thread){0};
+    std::chrono::microseconds m_next_local_addr_send GUARDED_BY(g_mutex_net_message_handler_thread){0};
 
     struct TxRelay {
         mutable RecursiveMutex cs_filter;
@@ -777,7 +778,7 @@ public:
     * @param[in]   interrupt       Interrupt condition for processing threads
     * @return                      True if there is more work to be done
     */
-    virtual bool ProcessMessages(CNode* pnode, std::atomic<bool>& interrupt) = 0;
+    virtual bool ProcessMessages(CNode* pnode, std::atomic<bool>& interrupt) EXCLUSIVE_LOCKS_REQUIRED(g_mutex_net_message_handler_thread) = 0;
 
     /**
     * Send queued protocol messages to a given node.
@@ -785,7 +786,7 @@ public:
     * @param[in]   pnode           The node which we are sending messages to.
     * @return                      True if there is more work to be done
     */
-    virtual bool SendMessages(CNode* pnode) EXCLUSIVE_LOCKS_REQUIRED(pnode->cs_sendProcessing) = 0;
+    virtual bool SendMessages(CNode* pnode) EXCLUSIVE_LOCKS_REQUIRED(g_mutex_net_message_handler_thread) = 0;
 
 
 protected:

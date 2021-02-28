@@ -256,8 +256,8 @@ public:
     /** Implement NetEventsInterface */
     void InitializeNode(CNode* pnode) override;
     void FinalizeNode(const CNode& node, bool& fUpdateConnectionTime) override;
-    bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) override;
-    bool SendMessages(CNode* pto) override EXCLUSIVE_LOCKS_REQUIRED(pto->cs_sendProcessing);
+    bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) EXCLUSIVE_LOCKS_REQUIRED(g_mutex_net_message_handler_thread) override;
+    bool SendMessages(CNode* pto) override EXCLUSIVE_LOCKS_REQUIRED(g_mutex_net_message_handler_thread);
 
     /** Implement PeerManager */
     void CheckForStaleTipAndEvictPeers() override;
