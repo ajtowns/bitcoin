@@ -3513,6 +3513,14 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
     return true;
 }
 
+static bool g_prohibited_deployment[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(cs_main) {};
+
+void ProhibitDeployment(Consensus::DeploymentPos dep)
+{
+    assert(0 <= (int)dep && (int)dep < Consensus::MAX_VERSION_BITS_DEPLOYMENTS);
+    g_prohibited_deployment[dep] = true;
+}
+
 /** Context-dependent validity checks, but rechecked in ConnectBlock().
  *  Note that -reindex-chainstate skips the validation that happens here!
  */
@@ -3523,20 +3531,32 @@ static bool ContextualCheckBlockHeaderVolatile(const CBlockHeader& block, BlockV
     // Enforce MUST_SIGNAL status of deployments
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos deployment_pos = Consensus::DeploymentPos(j);
+        const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
+
         ThresholdState deployment_state = VersionBitsState(pindexPrev, consensusParams, deployment_pos, versionbitscache);
-        if (deployment_state == ThresholdState::MUST_SIGNAL) {
-            if ((block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) == 0 || (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) {
-                VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
-                if (stats.elapsed == stats.period) {
-                    // first block in new period
-                    stats.count = stats.elapsed = 0;
-                }
-                ++stats.elapsed; ++stats.count;
-                if (stats.count + (stats.period - stats.elapsed) < stats.threshold) {
-                    const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
-                    return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
-                }
+        bool signalling = ((block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) == 1 && (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS);
+
+        if (!signalling && deployment_state == ThresholdState::MUST_SIGNAL) {
+            VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
+            if (stats.elapsed == stats.period) {
+                // first block in new period
+                stats.count = stats.elapsed = 0;
             }
+            ++stats.elapsed;
+            if (stats.count + (stats.period - stats.elapsed) < stats.threshold) {
+                return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
+            }
+        } else if (deployment_state == ThresholdState::STARTED && signalling && g_prohibited_deployment[deployment_pos]) {
+            VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
+            if (stats.elapsed == stats.period) {
+                // first block in new period
+                stats.count = stats.elapsed = 0;
+            }
+            if (stats.count + 1 >= stats.threshold) {
+                return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-set-"} + deployment_name, std::string{deployment_name} + " must not be signalled");
+            }
+        } else if (deployment_state == ThresholdState::ACTIVE) {
+            return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-set-"} + deployment_name, std::string{deployment_name} + " must not be signalled");
         }
     }
 

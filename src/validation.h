@@ -1046,4 +1046,7 @@ inline bool IsBlockPruned(const CBlockIndex* pblockindex)
  */
 const AssumeutxoData* ExpectedAssumeutxo(const int height, const CChainParams& params);
 
+/** Prohibit activation of a deployment */
+void ProhibitDeployment(Consensus::DeploymentPos dep) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
 #endif // BITCOIN_VALIDATION_H
