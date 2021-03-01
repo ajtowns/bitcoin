@@ -20,24 +20,37 @@ enum DeploymentPos
 };
 
 /**
- * Struct for each individual consensus rule change using BIP9.
+ * Struct for each individual consensus rule change using version bits (BIP 8).
  */
-struct BIP9Deployment {
+struct VBitsDeployment {
     /** Bit position to select the particular bit in nVersion. */
     int bit;
-    /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
-    int64_t nStartTime;
-    /** Timeout/expiry MedianTime for the deployment attempt. */
-    int64_t nTimeout;
+    /** Start block height for version bits miner confirmation. Must be a retarget block, can be in the past. */
+    int64_t startheight;
+    /** Timeout/expiry block height for the deployment attempt. Must be a retarget block. */
+    int64_t timeoutheight;
+    /** If true, final period before timeout will transition to MUST_SIGNAL. */
+    bool lockinontimeout{false};
 
-    /** Constant for nTimeout very far in the future. */
+    /** Constant for timeoutheight very far in the future. */
     static constexpr int64_t NO_TIMEOUT = std::numeric_limits<int64_t>::max();
 
-    /** Special value for nStartTime indicating that the deployment is always active.
+    /** Indicate that the deployment is always active.
      *  This is useful for testing, as it means tests don't need to deal with the activation
-     *  process (which takes at least 3 BIP9 intervals). Only tests that specifically test the
+     *  process (which takes at least 3 intervals). Only tests that specifically test the
      *  behaviour during activation cannot use this. */
-    static constexpr int64_t ALWAYS_ACTIVE = -1;
+    inline void SetAlwaysActive() {
+        startheight = timeoutheight = 0;
+        lockinontimeout = true;
+    }
+
+    /** Indicate that the deployment is entirely disabled. */
+    inline void SetNeverActive() {
+        startheight = timeoutheight = 0;
+        lockinontimeout = false;
+    }
+
+    bool IsNeverActive() const { return timeoutheight <= startheight && !lockinontimeout; }
 };
 
 /**
@@ -61,17 +74,17 @@ struct Params {
      * Note that segwit v0 script rules are enforced on all blocks except the
      * BIP 16 exception blocks. */
     int SegwitHeight;
-    /** Don't warn about unknown BIP 9 activations below this height.
+    /** Don't warn about unknown versionbits activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
-    int MinBIP9WarningHeight;
+    int MinVBitsWarningHeight;
     /**
      * Minimum blocks including miner confirmation of the total of 2016 blocks in a retargeting period,
-     * (nPowTargetTimespan / nPowTargetSpacing) which is also used for BIP9 deployments.
+     * (nPowTargetTimespan / nPowTargetSpacing) which is also used for versionbits deployments.
      * Examples: 1916 for 95%, 1512 for testchains.
      */
     uint32_t nRuleChangeActivationThreshold;
     uint32_t nMinerConfirmationWindow;
-    BIP9Deployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
+    VBitsDeployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
     /** Proof of work parameters */
     uint256 powLimit;
     bool fPowAllowMinDifficultyBlocks;

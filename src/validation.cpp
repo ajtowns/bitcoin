@@ -48,6 +48,7 @@
 #include <util/system.h>
 #include <util/translation.h>
 #include <validationinterface.h>
+#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <string>
@@ -1814,7 +1815,7 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         ThresholdState state = VersionBitsState(pindexPrev, params, static_cast<Consensus::DeploymentPos>(i), versionbitscache);
-        if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
+        if (state == ThresholdState::LOCKED_IN || state == ThresholdState::MUST_SIGNAL || state == ThresholdState::STARTED) {
             nVersion |= VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(i));
         }
     }
@@ -1828,19 +1829,21 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
 class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
 {
 private:
+    const Consensus::Params& params;
     int bit;
 
 public:
-    explicit WarningBitsConditionChecker(int bitIn) : bit(bitIn) {}
+    explicit WarningBitsConditionChecker(const Consensus::Params& paramsIn, int bitIn) : params(paramsIn), bit(bitIn) {}
 
-    int64_t BeginTime(const Consensus::Params& params) const override { return 0; }
-    int64_t EndTime(const Consensus::Params& params) const override { return std::numeric_limits<int64_t>::max(); }
-    int Period(const Consensus::Params& params) const override { return params.nMinerConfirmationWindow; }
-    int Threshold(const Consensus::Params& params) const override { return params.nRuleChangeActivationThreshold; }
+    int64_t StartHeight() const override { return 0; }
+    int64_t TimeoutHeight() const override { return std::numeric_limits<int64_t>::max(); }
+    bool LockinOnTimeout() const override { return false; }
+    int Period() const override { return params.nMinerConfirmationWindow; }
+    int Threshold() const override { return params.nRuleChangeActivationThreshold; }
 
-    bool Condition(const CBlockIndex* pindex, const Consensus::Params& params) const override
+    bool Condition(const CBlockIndex* pindex) const override
     {
-        return pindex->nHeight >= params.MinBIP9WarningHeight &&
+        return pindex->nHeight >= params.MinVBitsWarningHeight &&
                ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
                ((pindex->nVersion >> bit) & 1) != 0 &&
                ((ComputeBlockVersion(pindex->pprev, params) >> bit) & 1) == 0;
@@ -1920,6 +1923,8 @@ static int64_t nTimeCallbacks = 0;
 static int64_t nTimeTotal = 0;
 static int64_t nBlocksTotal = 0;
 
+static bool ContextualCheckBlockHeaderVolatile(const CBlockHeader&, BlockValidationState&, const CChainParams&, const CBlockIndex* pindexPrev) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
  *  can fail if those validity checks fail (among other reasons). */
@@ -1952,6 +1957,10 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
             return AbortNode(state, "Corrupt block found indicating potential hardware failure; shutting down");
         }
         return error("%s: Consensus::CheckBlock: %s", __func__, state.ToString());
+    }
+
+    if (!ContextualCheckBlockHeaderVolatile(block, state, chainparams, pindex->pprev)) {
+        return error("%s: Consensus::ContextualCheckBlockHeaderVolatile: %s", __func__, state.ToString());
     }
 
     // verify that the view's current state corresponds to the previous block
@@ -2448,8 +2457,8 @@ static void UpdateTip(CTxMemPool& mempool, const CBlockIndex* pindexNew, const C
     if (!::ChainstateActive().IsInitialBlockDownload()) {
         const CBlockIndex* pindex = pindexNew;
         for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {
-            WarningBitsConditionChecker checker(bit);
-            ThresholdState state = checker.GetStateFor(pindex, chainParams.GetConsensus(), warningcache[bit]);
+            WarningBitsConditionChecker checker(chainParams.GetConsensus(), bit);
+            ThresholdState state = checker.GetStateFor(pindex, warningcache[bit]);
             if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN) {
                 const bilingual_str warning = strprintf(_("Warning: unknown new rules activated (versionbit %i)"), bit);
                 if (state == ThresholdState::ACTIVE) {
@@ -3498,6 +3507,38 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
        (block.nVersion < 4 && nHeight >= consensusParams.BIP65Height))
             return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, strprintf("bad-version(0x%08x)", block.nVersion),
                                  strprintf("rejected nVersion=0x%08x block", block.nVersion));
+
+    if (!ContextualCheckBlockHeaderVolatile(block, state, params, pindexPrev)) return false;
+
+    return true;
+}
+
+/** Context-dependent validity checks, but rechecked in ConnectBlock().
+ *  Note that -reindex-chainstate skips the validation that happens here!
+ */
+static bool ContextualCheckBlockHeaderVolatile(const CBlockHeader& block, BlockValidationState& state, const CChainParams& params, const CBlockIndex* pindexPrev) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+{
+    const Consensus::Params& consensusParams = params.GetConsensus();
+
+    // Enforce MUST_SIGNAL status of deployments
+    for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+        Consensus::DeploymentPos deployment_pos = Consensus::DeploymentPos(j);
+        ThresholdState deployment_state = VersionBitsState(pindexPrev, consensusParams, deployment_pos, versionbitscache);
+        if (deployment_state == ThresholdState::MUST_SIGNAL) {
+            if ((block.nVersion & VersionBitsMask(consensusParams, deployment_pos)) == 0 || (block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) {
+                VBitsStats stats = VersionBitsStatistics(pindexPrev, consensusParams, deployment_pos);
+                if (stats.elapsed == stats.period) {
+                    // first block in new period
+                    stats.count = stats.elapsed = 0;
+                }
+                ++stats.elapsed; ++stats.count;
+                if (stats.count + (stats.period - stats.elapsed) < stats.threshold) {
+                    const auto& deployment_name = VersionBitsDeploymentInfo[deployment_pos].name;
+                    return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, std::string{"bad-vbit-unset-"} + deployment_name, std::string{deployment_name} + " must be signalled");
+                }
+            }
+        }
+    }
 
     return true;
 }
@@ -5015,7 +5056,7 @@ ThresholdState VersionBitsTipState(const Consensus::Params& params, Consensus::D
     return VersionBitsState(::ChainActive().Tip(), params, pos, versionbitscache);
 }
 
-BIP9Stats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos)
+VBitsStats VersionBitsTipStatistics(const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(cs_main);
     return VersionBitsStatistics(::ChainActive().Tip(), params, pos);
