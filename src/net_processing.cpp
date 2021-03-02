@@ -322,7 +322,7 @@ private:
      *                                  reconsidered.
      * @return                          True if there are still orphans in this peer's work set
      */
-    bool ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(m_mutex_message_handling, cs_main) LOCKS_EXCLUDED(g_cs_orphans);
+    bool ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(m_mutex_message_handling, cs_main);
 
     /** Process a single headers message from a peer. */
     void ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
