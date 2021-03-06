@@ -64,6 +64,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     dep.bit = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, VERSIONBITS_NUM_BITS-1);
     dep.nStartTime = block_start_time + start_block*600;
     dep.nTimeout = block_start_time + end_block*600;
+    dep.min_activation_height = 0;
 
     TestConditionChecker checker(dep, period, threshold);
 

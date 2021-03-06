@@ -40,6 +40,7 @@ public:
         m_dep_storage.bit = 8;
         m_dep_storage.nStartTime = TestTime(10000);
         m_dep_storage.nTimeout = TestTime(20000);
+        m_dep_storage.min_activation_height = 0;
     }
 
     TestConditionChecker& operator=(const TestConditionChecker& other)

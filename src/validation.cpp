@@ -1845,6 +1845,7 @@ public:
         m_dep_storage.bit = bitIn;
         m_dep_storage.nStartTime = 0;
         m_dep_storage.nTimeout = std::numeric_limits<int64_t>::max();
+        m_dep_storage.min_activation_height = 0;
     }
 
     bool Condition(const CBlockIndex* pindex) const override

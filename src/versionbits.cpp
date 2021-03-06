@@ -11,6 +11,7 @@ ThresholdState ThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexP
     int nThreshold = m_threshold;
     int64_t nTimeStart = m_dep.nStartTime;
     int64_t nTimeTimeout = m_dep.nTimeout;
+    int min_activation_height = m_dep.min_activation_height;
 
     // Check if this deployment is always active.
     if (nTimeStart == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
@@ -78,8 +79,10 @@ ThresholdState ThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexP
                 break;
             }
             case ThresholdState::LOCKED_IN: {
-                // Always progresses into ACTIVE.
-                stateNext = ThresholdState::ACTIVE;
+                // Progresses into ACTIVE provided activation height will have been reached.
+                if (pindexPrev->nHeight + 1 >= min_activation_height) {
+                    stateNext = ThresholdState::ACTIVE;
+                }
                 break;
             }
             case ThresholdState::FAILED:
