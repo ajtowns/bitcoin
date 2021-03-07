@@ -64,7 +64,7 @@ public:
     /** Returns whether a block signals or not */
     virtual bool Condition(const CBlockIndex* pindex) const;
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the current period */
-    BIP9Stats GetStateStatisticsFor(const CBlockIndex* pindex) const;
+    BIP9Stats GetStateStatisticsFor(const CBlockIndex* pindexPrev) const;
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
     ThresholdState GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
