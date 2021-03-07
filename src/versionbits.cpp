@@ -5,7 +5,7 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
+ThresholdState ThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
 {
     int nPeriod = m_period;
     int nThreshold = m_threshold;
@@ -94,7 +94,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
     return state;
 }
 
-BIP9Stats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlockIndex* pindex) const
+BIP9Stats ThresholdConditionChecker::GetStateStatisticsFor(const CBlockIndex* pindex) const
 {
     BIP9Stats stats = {};
 
@@ -123,7 +123,7 @@ BIP9Stats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlockI
     return stats;
 }
 
-int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
+int ThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
 {
     int64_t start_time = m_dep.nStartTime;
     if (start_time == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
@@ -158,7 +158,7 @@ int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex*
     return pindexPrev->nHeight + 1;
 }
 
-bool AbstractThresholdConditionChecker::Condition(const CBlockIndex* pindex) const
+bool ThresholdConditionChecker::Condition(const CBlockIndex* pindex) const
 {
     return (((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (pindex->nVersion & Mask()) != 0);
 }
@@ -167,9 +167,9 @@ namespace {
 /**
  * Class to implement versionbits logic.
  */
-class VersionBitsConditionChecker : public AbstractThresholdConditionChecker {
+class VersionBitsConditionChecker : public ThresholdConditionChecker {
 public:
-    explicit VersionBitsConditionChecker(const Consensus::Params& params, Consensus::DeploymentPos id) : AbstractThresholdConditionChecker(params.vDeployments[id], params.nMinerConfirmationWindow, params.nRuleChangeActivationThreshold) { }
+    explicit VersionBitsConditionChecker(const Consensus::Params& params, Consensus::DeploymentPos id) : ThresholdConditionChecker(params.vDeployments[id], params.nMinerConfirmationWindow, params.nRuleChangeActivationThreshold) { }
 };
 } // namespace
 

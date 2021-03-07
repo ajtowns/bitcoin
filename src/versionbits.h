@@ -52,14 +52,14 @@ struct BIP9Stats {
 /**
  * Class that implements BIP9-style threshold logic, and caches results.
  */
-class AbstractThresholdConditionChecker {
+class ThresholdConditionChecker {
 protected:
     const Consensus::BIP9Deployment& m_dep;
     const int m_period;
     const int m_threshold;
 
 public:
-    AbstractThresholdConditionChecker(const Consensus::BIP9Deployment& dep, int period, int threshold) : m_dep{dep}, m_period{period}, m_threshold{threshold} { }
+    ThresholdConditionChecker(const Consensus::BIP9Deployment& dep, int period, int threshold) : m_dep{dep}, m_period{period}, m_threshold{threshold} { }
 
     /** Returns whether a block signals or not */
     virtual bool Condition(const CBlockIndex* pindex) const;

@@ -1829,7 +1829,7 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
 /**
  * Threshold condition checker that triggers when unknown versionbits are seen on the network.
  */
-class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
+class WarningBitsConditionChecker : public ThresholdConditionChecker
 {
 private:
     Consensus::BIP9Deployment m_dep_storage;
@@ -1838,7 +1838,7 @@ private:
 
 public:
     explicit WarningBitsConditionChecker(const Consensus::Params& params, int bitIn) :
-        AbstractThresholdConditionChecker(m_dep_storage, params.nMinerConfirmationWindow, params.nRuleChangeActivationThreshold),
+        ThresholdConditionChecker(m_dep_storage, params.nMinerConfirmationWindow, params.nRuleChangeActivationThreshold),
         m_min_height{params.MinBIP9WarningHeight},
         m_params{params}
     {
