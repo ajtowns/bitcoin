@@ -52,6 +52,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     // note states will change *after* these blocks because mediantime lags
     int start_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * 20);
     int end_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(start_block, period * 20);
+    int delay_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * 20);
 
     // between genesis and 2100-01-01
     const uint32_t block_start_time = fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(1231006505, 4102444800);
@@ -64,7 +65,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     dep.bit = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, VERSIONBITS_NUM_BITS-1);
     dep.nStartTime = block_start_time + start_block*600;
     dep.nTimeout = block_start_time + end_block*600;
-    dep.min_activation_height = 0;
+    dep.min_activation_height = delay_block;
 
     TestConditionChecker checker(dep, period, threshold);
 
@@ -127,7 +128,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
                     break;
                 case ThresholdState::ACTIVE:
                     assert(last_state == ThresholdState::LOCKED_IN);
-                    assert(since == last_since + period);
+                    assert(since >= last_since + period);
                     break;
                 case ThresholdState::FAILED:
                     assert(last_state == ThresholdState::STARTED || last_state == ThresholdState::DEFINED);
@@ -174,9 +175,16 @@ FUZZ_TARGET_INIT(versionbits, initialize)
             if (prev != nullptr && block_offset == 0) {
                 int64_t prev_mtp = prev->GetMedianTimePast();
                 if (prev_mtp >= dep.nTimeout) {
-                    assert(state == ThresholdState::ACTIVE || state == ThresholdState::FAILED);
+                    if (blocks.size() >= (size_t)dep.min_activation_height) {
+                        assert(state == ThresholdState::ACTIVE || state == ThresholdState::FAILED);
+                    } else {
+                        assert(state == ThresholdState::LOCKED_IN || state == ThresholdState::FAILED);
+                    }
                 } else if (prev_mtp >= dep.nStartTime) {
                     assert(state != ThresholdState::DEFINED);
+                }
+                if (blocks.size() < (size_t)dep.min_activation_height) {
+                    assert(state != ThresholdState::ACTIVE);
                 }
             }
 
