@@ -254,7 +254,7 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
         // activated soft fork could be later changed to be earlier to avoid
         // overlap.)
         for (int j=i+1; j<(int) Consensus::MAX_VERSION_BITS_DEPLOYMENTS; j++) {
-            if (VersionBitsMask(mainnetParams, static_cast<Consensus::DeploymentPos>(j)) == bitmask) {
+            if (static_cast<uint32_t>(VersionBitsMask(mainnetParams, static_cast<Consensus::DeploymentPos>(j))) == bitmask) {
                 BOOST_CHECK(mainnetParams.vDeployments[j].nStartTime > mainnetParams.vDeployments[i].nTimeout ||
                         mainnetParams.vDeployments[i].nStartTime > mainnetParams.vDeployments[j].nTimeout);
             }
