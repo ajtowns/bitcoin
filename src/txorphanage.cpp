@@ -140,7 +140,7 @@ unsigned int TxOrphanage::LimitOrphans(unsigned int max_orphans)
     return nEvicted;
 }
 
-void TxOrphanage::AddChildrenToWorkSet(const CTransaction& tx, NodeId peer)
+void TxOrphanage::AddChildrenToWorkSet(const CTransaction& tx)
 {
     LOCK(m_mutex);
 
@@ -148,7 +148,7 @@ void TxOrphanage::AddChildrenToWorkSet(const CTransaction& tx, NodeId peer)
         const auto it_by_prev = m_outpoint_to_orphan_it.find(COutPoint(tx.GetHash(), i));
         if (it_by_prev != m_outpoint_to_orphan_it.end()) {
             for (const auto& elem : it_by_prev->second) {
-                m_peer_work_set.emplace(peer, elem->first);
+                m_peer_work_set.emplace(elem->second.fromPeer, elem->first);
             }
         }
     }
