@@ -1513,7 +1513,7 @@ static bool HandleMissingData(MissingDataBehavior mdb)
 }
 
 template<typename T>
-bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, const KeyVersion keyversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
+bool SignatureHashSchnorr(uint256& hash_out, const ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, KeyVersion keyversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
 {
     uint8_t ext_flag;
     assert(keyversion == KeyVersion::TAPROOT || keyversion == KeyVersion::ANYPREVOUT);
