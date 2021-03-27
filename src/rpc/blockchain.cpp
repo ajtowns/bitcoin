@@ -1233,12 +1233,13 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     switch (thresholdState) {
     case ThresholdState::DEFINED: bip9.pushKV("status", "defined"); break;
     case ThresholdState::STARTED: bip9.pushKV("status", "started"); break;
+    case ThresholdState::LAST_CHANCE: bip9.pushKV("status", "last_chance"); break;
     case ThresholdState::DELAYED: bip9.pushKV("status", "delayed"); break;
     case ThresholdState::LOCKED_IN: bip9.pushKV("status", "locked_in"); break;
     case ThresholdState::ACTIVE: bip9.pushKV("status", "active"); break;
     case ThresholdState::FAILED: bip9.pushKV("status", "failed"); break;
     }
-    if (ThresholdState::STARTED == thresholdState)
+    if (ThresholdState::STARTED == thresholdState || ThresholdState::LAST_CHANCE == thresholdState)
     {
         bip9.pushKV("bit", consensusParams.vDeployments[id].bit);
     }
@@ -1246,7 +1247,7 @@ static void BIP9SoftForkDescPushBack(UniValue& softforks, const std::string &nam
     bip9.pushKV("timeout", consensusParams.vDeployments[id].nTimeout);
     int64_t since_height = VersionBitsStateSinceHeight(::ChainActive().Tip(), consensusParams, id, versionbitscache);
     bip9.pushKV("since", since_height);
-    if (ThresholdState::STARTED == thresholdState)
+    if (ThresholdState::STARTED == thresholdState || ThresholdState::LAST_CHANCE == thresholdState)
     {
         UniValue statsUV(UniValue::VOBJ);
         BIP9Stats statsStruct = VersionBitsStatistics(::ChainActive().Tip(), consensusParams, id);

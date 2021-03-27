@@ -1820,6 +1820,7 @@ int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Para
         ThresholdState state = VersionBitsState(pindexPrev, params, static_cast<Consensus::DeploymentPos>(i), versionbitscache);
         switch (state) {
         case ThresholdState::STARTED:
+        case ThresholdState::LAST_CHANCE:
         case ThresholdState::DELAYED:
         case ThresholdState::LOCKED_IN:
             nVersion |= VersionBitsMask(params, static_cast<Consensus::DeploymentPos>(i));

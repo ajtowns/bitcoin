@@ -58,17 +58,14 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
         switch (state) {
             case ThresholdState::DEFINED: {
                 if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                    stateNext = ThresholdState::FAILED;
+                    stateNext = ThresholdState::LAST_CHANCE;
                 } else if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
                     stateNext = ThresholdState::STARTED;
                 }
                 break;
             }
-            case ThresholdState::STARTED: {
-                if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                    stateNext = ThresholdState::FAILED;
-                    break;
-                }
+            case ThresholdState::STARTED:
+            case ThresholdState::LAST_CHANCE: {
                 // We need to count
                 const CBlockIndex* pindexCount = pindexPrev;
                 int count = 0;
@@ -80,6 +77,10 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 }
                 if (count >= nThreshold) {
                     stateNext = (pindexPrev->GetMedianTimePast() < min_lock_in_time ? ThresholdState::DELAYED : ThresholdState::LOCKED_IN);
+                } else if (state == ThresholdState::LAST_CHANCE) {
+                    stateNext = ThresholdState::FAILED;
+                } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                    stateNext = ThresholdState::LAST_CHANCE;
                 }
                 break;
             }

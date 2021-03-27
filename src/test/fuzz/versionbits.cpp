@@ -244,8 +244,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(state == exp_state);
         assert(since == exp_since);
 
-        // GetStateStatistics may crash when state is not STARTED
-        if (state != ThresholdState::STARTED) continue;
+        // GetStateStatistics may crash early, so only use it when it's sensible
+        if (state != ThresholdState::STARTED && state != ThresholdState::LAST_CHANCE) continue;
 
         // check that after mining this block stats change as expected
         const BIP9Stats stats = checker.GetStateStatisticsFor(current_block);
@@ -257,7 +257,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         last_stats = stats;
     }
 
-    if (exp_state == ThresholdState::STARTED) {
+    if (exp_state == ThresholdState::STARTED || exp_state == ThresholdState::LAST_CHANCE) {
         // double check that stats.possible is sane
         if (blocks_sig >= threshold - 1) assert(last_stats.possible);
     }
@@ -299,8 +299,13 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(current_block->GetMedianTimePast() < checker.m_end);
         break;
     case ThresholdState::STARTED:
+    case ThresholdState::LAST_CHANCE:
+        if (state == ThresholdState::STARTED) {
+            assert(current_block->GetMedianTimePast() < checker.m_end);
+        } else {
+            assert(checker.m_end <= current_block->GetMedianTimePast());
+        }
         assert(current_block->GetMedianTimePast() >= checker.m_begin);
-        assert(current_block->GetMedianTimePast() < checker.m_end);
         if (exp_state == ThresholdState::STARTED) {
             assert(blocks_sig < threshold);
         } else {
@@ -316,7 +321,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         }
         if (exp_state == ThresholdState::STARTED) {
             assert(blocks_sig >= threshold);
-            assert(current_block->GetMedianTimePast() < checker.m_end);
+        } else if (exp_state == ThresholdState::LAST_CHANCE) {
+            assert(blocks_sig >= threshold);
         } else {
             assert(exp_state == ThresholdState::DELAYED);
         }
@@ -326,7 +332,11 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         break;
     case ThresholdState::FAILED:
         assert(never_active_test || current_block->GetMedianTimePast() >= checker.m_end);
-        assert(exp_state != ThresholdState::LOCKED_IN && exp_state != ThresholdState::ACTIVE);
+        if (exp_state == ThresholdState::LAST_CHANCE) {
+            assert(blocks_sig < threshold);
+        } else {
+            assert(exp_state == ThresholdState::FAILED);
+        }
         break;
     default:
         assert(false);
