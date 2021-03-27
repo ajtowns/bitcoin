@@ -162,13 +162,12 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     } else {
         if (fuzzed_data_provider.ConsumeBool()) {
             start_time = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-            timeout = Consensus::BIP9Deployment::NO_TIMEOUT;
             always_active_test = true;
         } else {
-            start_time = 1199145601; // January 1, 2008
-            timeout = 1230767999;    // December 31, 2008
+            start_time = Consensus::BIP9Deployment::NEVER_ACTIVE;
             never_active_test = true;
         }
+        timeout = Consensus::BIP9Deployment::NO_TIMEOUT;
     }
     const int64_t min_lock_in_time = fuzzed_data_provider.ConsumeBool() ? block_start_time + fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, (period * (max_periods - 3)) * interval) : 0;
 
@@ -326,7 +325,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(exp_state == ThresholdState::ACTIVE || exp_state == ThresholdState::LOCKED_IN);
         break;
     case ThresholdState::FAILED:
-        assert(current_block->GetMedianTimePast() >= checker.m_end);
+        assert(never_active_test || current_block->GetMedianTimePast() >= checker.m_end);
         assert(exp_state != ThresholdState::LOCKED_IN && exp_state != ThresholdState::ACTIVE);
         break;
     default:
@@ -343,21 +342,15 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(state == ThresholdState::ACTIVE);
         assert(exp_state == ThresholdState::ACTIVE);
         assert(since == 0);
+    // "never active" does too
+    } else if (never_active_test) {
+        assert(state == ThresholdState::FAILED);
+        assert(exp_state == ThresholdState::FAILED);
+        assert(since == 0);
     } else {
         // except for always active, the initial state is always DEFINED
         assert(since > 0 || state == ThresholdState::DEFINED);
         assert(exp_since > 0 || exp_state == ThresholdState::DEFINED);
-    }
-
-    // "never active" does too
-    if (never_active_test) {
-        assert(state == ThresholdState::FAILED);
-        assert(since == period);
-        if (exp_since == 0) {
-            assert(exp_state == ThresholdState::DEFINED);
-        } else {
-            assert(exp_state == ThresholdState::FAILED);
-        }
     }
 }
 } // namespace
