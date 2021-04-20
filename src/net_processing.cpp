@@ -243,7 +243,7 @@ public:
     void InitializeNode(CNode* pnode) override;
     void FinalizeNode(const CNode& node) override;
     bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) override;
-    bool SendMessages(CNode* pto) override EXCLUSIVE_LOCKS_REQUIRED(pto->cs_sendProcessing);
+    bool SendMessages(CNode* pto) override;
 
     /** Implement PeerManager */
     void CheckForStaleTipAndEvictPeers() override;
