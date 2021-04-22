@@ -317,7 +317,7 @@ private:
      *                                  reconsidered.
      * @return                          True if there are still orphans in this peer's work set
      */
-    bool ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(cs_main, m_mutex_message_handling);
+    bool ProcessOrphanTx(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(m_mutex_message_handling);
 
     /** Process a single headers message from a peer. */
     void ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
@@ -2083,8 +2083,8 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
 
 bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
 {
-    AssertLockHeld(cs_main);
     AssertLockHeld(m_mutex_message_handling);
+    LOCK(cs_main);
 
     CTransactionRef porphanTx = nullptr;
     bool more = false;
@@ -3107,9 +3107,6 @@ void PeerManagerImpl::_ProcessMessage(CNode& pfrom, const std::string& msg_type,
             for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
                 AddToCompactExtraTransactions(removedTx);
             }
-
-            // Recursively process any orphan transactions that depended on this one
-            ProcessOrphanTx(*peer);
         }
         else if (state.GetResult() == TxValidationResult::TX_MISSING_INPUTS)
         {
@@ -3884,10 +3881,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
         }
     }
 
-    {
-        LOCK(cs_main);
-        if (ProcessOrphanTx(*peer)) return true;
-    }
+    if (ProcessOrphanTx(*peer)) return true;
 
     if (pfrom->fDisconnect)
         return false;
