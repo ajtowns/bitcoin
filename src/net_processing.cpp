@@ -2087,14 +2087,11 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
 
     CTransactionRef porphanTx = nullptr;
 
-    if (!m_orphanage.GetTxToReconsider(peer.m_id, porphanTx)) return false;
+    if (!(porphanTx = m_orphanage.GetTxToReconsider(peer.m_id))) return false;
 
     LOCK(cs_main); // only lock cs_main if there's work to do
 
-    bool first = true;
-    while (first || m_orphanage.GetTxToReconsider(peer.m_id, porphanTx)) {
-        first = false;
-
+    do {
         if (!Assume(porphanTx)) break;
 
         const uint256& orphanHash = porphanTx->GetHash();
@@ -2157,7 +2154,7 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
             m_mempool.check(m_chainman.ActiveChainstate());
             return true;
         }
-    }
+    } while ((porphanTx = m_orphanage.GetTxToReconsider(peer.m_id)));
 
     m_mempool.check(m_chainman.ActiveChainstate());
     return false;

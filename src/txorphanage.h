@@ -27,12 +27,9 @@ public:
     bool HaveTx(const GenTxid& gtxid) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     /** Get an orphan transaction for a peer to work on
-     *  Returns false and sets more to false if there are no transactions
-     *  to work on. Otherwise returns true, and populates its arguments with
-     *  the tx and whether there are more orphans for this
-     *  peer to work on after this tx.
+     *  Returns nullptr if there are no transactions to work on.
      */
-    bool GetTxToReconsider(NodeId peer, CTransactionRef& ref) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    CTransactionRef GetTxToReconsider(NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     /** Erase an orphan by txid */
     int EraseTx(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) { LOCK(m_mutex); return _EraseTx(txid); }
