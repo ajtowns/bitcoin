@@ -165,7 +165,7 @@ bool TxOrphanage::HaveTx(const GenTxid& gtxid) const
     }
 }
 
-bool TxOrphanage::GetTxToReconsider(NodeId peer, CTransactionRef& ref, bool& more)
+bool TxOrphanage::GetTxToReconsider(NodeId peer, CTransactionRef& ref)
 {
     LOCK(m_mutex);
 
@@ -176,12 +176,10 @@ bool TxOrphanage::GetTxToReconsider(NodeId peer, CTransactionRef& ref, bool& mor
 
         const auto orphan_it = m_orphans.find(txid);
         if (orphan_it != m_orphans.end()) {
-            more = (work_it != m_peer_work_set.end() && work_it->first == peer);
             ref = orphan_it->second.tx;
             return true;
         }
     }
-    more = false;
     return false;
 }
 

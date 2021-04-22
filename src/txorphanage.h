@@ -32,7 +32,7 @@ public:
      *  the tx and whether there are more orphans for this
      *  peer to work on after this tx.
      */
-    bool GetTxToReconsider(NodeId peer, CTransactionRef& ref, bool& more) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    bool GetTxToReconsider(NodeId peer, CTransactionRef& ref) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     /** Erase an orphan by txid */
     int EraseTx(const uint256& txid) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) { LOCK(m_mutex); return _EraseTx(txid); }

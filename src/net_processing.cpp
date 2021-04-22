@@ -246,7 +246,7 @@ public:
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override;
     bool IgnoresIncomingTxs() override { return m_ignore_incoming_txs; }
     void SendPings() override;
-    void RelayTransaction(const uint256& txid, const uint256& wtxid) override;
+    void RelayTransaction(const uint256& txid, const uint256& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(cs_main);
     void SetBestHeight(int height) override { m_best_height = height; };
     void Misbehaving(const NodeId pnode, const int howmuch, const std::string& message) override;
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv,
@@ -2084,12 +2084,17 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
 bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
 {
     AssertLockHeld(m_mutex_message_handling);
-    LOCK(cs_main);
 
     CTransactionRef porphanTx = nullptr;
-    bool more = false;
 
-    while (m_orphanage.GetTxToReconsider(peer.m_id, porphanTx, more)) {
+    if (!m_orphanage.GetTxToReconsider(peer.m_id, porphanTx)) return false;
+
+    LOCK(cs_main); // only lock cs_main if there's work to do
+
+    bool first = true;
+    while (first || m_orphanage.GetTxToReconsider(peer.m_id, porphanTx)) {
+        first = false;
+
         if (!Assume(porphanTx)) break;
 
         const uint256& orphanHash = porphanTx->GetHash();
@@ -2104,7 +2109,8 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
             for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
                 AddToCompactExtraTransactions(removedTx);
             }
-            break;
+            m_mempool.check(m_chainman.ActiveChainstate());
+            return true;
         } else if (state.GetResult() != TxValidationResult::TX_MISSING_INPUTS) {
             if (state.IsInvalid()) {
                 LogPrint(BCLog::MEMPOOL, "   invalid orphan tx %s from peer=%d. %s\n",
@@ -2148,13 +2154,13 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
                 }
             }
             m_orphanage.EraseTx(orphanHash);
-            break;
+            m_mempool.check(m_chainman.ActiveChainstate());
+            return true;
         }
     }
 
     m_mempool.check(m_chainman.ActiveChainstate());
-
-    return more;
+    return false;
 }
 
 bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& peer,
