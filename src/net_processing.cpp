@@ -505,7 +505,7 @@ private:
     /** Orphan/conflicted/etc transactions that are kept for compact block reconstruction.
      *  The last -blockreconstructionextratxn/DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN of
      *  these are kept in a ring buffer */
-    std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact GUARDED_BY(m_mutex_message_handling);
+    std::vector<std::pair<uint256, CTransactionRef>> vExtraTxnForCompact; // GUARDED_BY(m_mutex_message_handling);
     /** Offset into vExtraTxnForCompact to insert the next tx */
     size_t vExtraTxnForCompactIt GUARDED_BY(m_mutex_message_handling) = 0;
 
