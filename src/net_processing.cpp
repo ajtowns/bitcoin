@@ -253,6 +253,8 @@ public:
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, CDataStream& vRecv,
                         const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) override LOCKS_EXCLUDED(m_mutex_message_handling);
 
+    int NumExtraTxns() override;
+
 private:
     /** Message handling mutex.
      *  Message processing is single-threaded, so anything only accessed
@@ -4770,4 +4772,9 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         }
     } // release cs_main
     return true;
+}
+
+int PeerManagerImpl::NumExtraTxns()
+{
+    return vExtraTxnForCompact.size();
 }
