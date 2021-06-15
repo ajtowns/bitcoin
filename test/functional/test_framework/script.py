@@ -762,7 +762,7 @@ def TaprootSignatureHash(txTo, spent_utxos, hash_type, input_index = 0, scriptpa
     ss += struct.pack("<i", txTo.nVersion)
     ss += struct.pack("<I", txTo.nLockTime)
 
-    if in_type != SIGHASH_ANYONECANPAY:
+    if in_type != SIGHASH_ANYONECANPAY and in_type != SIGHASH_ANYPREVOUT and in_type != SIGHASH_ANYPREVOUTANYSCRIPT:
         ss += sha256(b"".join(i.prevout.serialize() for i in txTo.vin))
         ss += sha256(b"".join(struct.pack("<q", u.nValue) for u in spent_utxos))
         ss += sha256(b"".join(ser_string(u.scriptPubKey) for u in spent_utxos))
