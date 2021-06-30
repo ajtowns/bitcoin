@@ -785,7 +785,6 @@ def TaprootSignatureHash(txTo, spent_utxos, hash_type, input_index = 0, scriptpa
         ss += ser_string(spk)
         ss += struct.pack("<I", txTo.vin[input_index].nSequence)
     elif in_type == SIGHASH_ANYPREVOUTANYSCRIPT:
-        ss += struct.pack("<q", spent_utxos[input_index].nValue)
         ss += struct.pack("<I", txTo.vin[input_index].nSequence) 
     else:
         ss += struct.pack("<I", input_index)
