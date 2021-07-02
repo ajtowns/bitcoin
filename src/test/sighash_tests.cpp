@@ -562,7 +562,7 @@ BOOST_AUTO_TEST_CASE(sighash_anyprevout_taproot)
                 if (tx.vin[nIn].nSequence != tx_mut_sequence.vin[nIn].nSequence) {
                     BOOST_CHECK(shts_apoas != shts_mut_sequence_apoas);
                 }
-                BOOST_CHECK(shts_apoas != shts_mut_spent_value_apoas);
+                BOOST_CHECK(shts_apoas == shts_mut_spent_value_apoas);
                 BOOST_CHECK(shts_apoas != shts_mut_sequence_apoas);
             }
         }
