@@ -541,6 +541,8 @@ public:
     /** Global cache for versionbits deployment status */
     VersionBitsCache versionbitscache;
 
+    std::array<ThresholdConditionCache, VERSIONBITS_NUM_BITS> warningcache GUARDED_BY(cs_main);
+
     ~BlockManager() {
         Unload();
     }
