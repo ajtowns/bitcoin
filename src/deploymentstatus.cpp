@@ -7,8 +7,6 @@
 #include <consensus/params.h>
 #include <versionbits.h>
 
-VersionBitsCache g_versionbitscache;
-
 /* Basic sanity checking for BuriedDeployment/DeploymentPos enums and
  * ValidDeployment check */
 

@@ -28,6 +28,7 @@
 #include <util/check.h>
 #include <util/hasher.h>
 #include <util/translation.h>
+#include <versionbits.h>
 
 #include <atomic>
 #include <map>
@@ -536,6 +537,9 @@ public:
 
     //! Check whether the block associated with this index entry is pruned or not.
     bool IsBlockPruned(const CBlockIndex* pblockindex);
+
+    /** Global cache for versionbits deployment status */
+    VersionBitsCache versionbitscache;
 
     ~BlockManager() {
         Unload();

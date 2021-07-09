@@ -51,6 +51,8 @@ struct BIP9Stats {
     bool possible;
 };
 
+class VersionBitsCache;
+
 /**
  * Abstract class that implements BIP9-style threshold logic, and caches results.
  */
