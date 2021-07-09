@@ -8,6 +8,7 @@
 #include <fs.h>
 #include <protocol.h> // For CMessageHeader::MessageStartChars
 #include <txdb.h>
+#include <versionbits.h>
 
 #include <atomic>
 #include <cstdint>
@@ -158,6 +159,8 @@ public:
 
     //! Check whether the block associated with this index entry is pruned or not.
     bool IsBlockPruned(const CBlockIndex* pblockindex);
+
+    std::array<ThresholdConditionCache, VERSIONBITS_NUM_BITS> warningcache GUARDED_BY(cs_main);
 
     ~BlockManager()
     {
