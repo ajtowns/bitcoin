@@ -70,9 +70,6 @@ BOOST_AUTO_TEST_CASE(validation_chainstate_resize_caches)
         // The view cache should be empty since we had to destruct to downsize.
         BOOST_CHECK(!c1.CoinsTip().HaveCoinInCache(outpoint));
     }
-
-    // Avoid triggering the address sanitizer.
-    WITH_LOCK(::cs_main, manager.Unload());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
