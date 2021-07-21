@@ -499,13 +499,11 @@ void RPCHelpMan::SetupDeprecatedRPC(const ArgsManager& args)
 {
     const std::vector<std::string> enabled_methods = args.GetArgs("-deprecatedrpc");
 
-    /*
     for (const auto& method : enabled_methods) {
-        if (method == "foo") {
-            deprecated_rpc[DeprecatedRPC::FOO] = true;
+        if (method == "walletprocesspsbt") {
+            deprecated_rpc[DeprecatedRPC::WALLETPROCESSPSBT] = true;
         }
     }
-    */
 }
 
 RPCHelpMan::RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples)

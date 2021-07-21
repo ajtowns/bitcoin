@@ -396,7 +396,7 @@ public:
     const std::string m_name;
 
     static void SetupDeprecatedRPC(const ArgsManager& args);
-    enum DeprecatedRPC : size_t { NUM_DEPRECATED_RPC };
+    enum DeprecatedRPC : size_t { WALLETPROCESSPSBT, NUM_DEPRECATED_RPC };
     static bool EnabledDeprecatedRPC(DeprecatedRPC code) { return deprecated_rpc[code]; }
 
 private:
