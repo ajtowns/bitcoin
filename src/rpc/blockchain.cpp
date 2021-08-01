@@ -14,7 +14,6 @@
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <deploymentinfo.h>
-#include <deploymentstatus.h>
 #include <hash.h>
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
@@ -1347,26 +1346,27 @@ static RPCHelpMan verifychain()
     };
 }
 
-static void SoftForkDescPushBack(const CBlockIndex* active_chain_tip, UniValue& softforks, const Consensus::Params& params, Consensus::BuriedDeployment dep)
+static void SoftForkDescPushBack(const CBlockIndex* active_chain_tip, UniValue& softforks, BlockManager& blockman, const Consensus::Params& params, Consensus::BuriedDeployment dep)
 {
     // For buried deployments.
 
-    if (!DeploymentEnabled(params, dep)) return;
+    if (!blockman.DeploymentEnabled(params, dep)) return;
 
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "buried");
     // getblockchaininfo reports the softfork as active from when the chain height is
     // one below the activation height
-    rv.pushKV("active", DeploymentActiveAfter(active_chain_tip, params, dep));
+    rv.pushKV("active", blockman.DeploymentActiveAfter(active_chain_tip, params, dep));
     rv.pushKV("height", params.DeploymentHeight(dep));
     softforks.pushKV(DeploymentName(dep), rv);
 }
 
-static void SoftForkDescPushBack(const CBlockIndex* active_chain_tip, UniValue& softforks, const Consensus::Params& consensusParams, Consensus::DeploymentPos id, VersionBitsCache& versionbitscache)
+static void SoftForkDescPushBack(const CBlockIndex* active_chain_tip, UniValue& softforks, BlockManager& blockman, const Consensus::Params& consensusParams, Consensus::DeploymentPos id)
 {
     // For BIP9 deployments.
 
-    if (!DeploymentEnabled(consensusParams, id)) return;
+    if (!blockman.DeploymentEnabled(consensusParams, id)) return;
+    VersionBitsCache& versionbitscache = blockman.versionbitscache;
 
     UniValue bip9(UniValue::VOBJ);
     const ThresholdState thresholdState = versionbitscache.State(active_chain_tip, consensusParams, id);
@@ -1506,14 +1506,13 @@ RPCHelpMan getblockchaininfo()
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
     UniValue softforks(UniValue::VOBJ);
-    VersionBitsCache& versionbitscache = chainman.m_blockman.versionbitscache;
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_HEIGHTINCB);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_DERSIG);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_CLTV);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_CSV);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_SEGWIT);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_TESTDUMMY, versionbitscache);
-    SoftForkDescPushBack(tip, softforks, consensusParams, Consensus::DEPLOYMENT_TAPROOT, versionbitscache);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_HEIGHTINCB);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_DERSIG);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_CLTV);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_CSV);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_SEGWIT);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_TESTDUMMY);
+    SoftForkDescPushBack(tip, softforks, chainman.m_blockman, consensusParams, Consensus::DEPLOYMENT_TAPROOT);
     obj.pushKV("softforks", softforks);
 
     obj.pushKV("warnings", GetWarnings(false).original);

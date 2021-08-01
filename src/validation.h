@@ -31,6 +31,7 @@
 #include <versionbits.h>
 
 #include <atomic>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -346,12 +347,6 @@ bool TestBlockValidity(BlockValidationState& state,
                        bool fCheckPOW = true,
                        bool fCheckMerkleRoot = true) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-/** Update uncommitted block structures (currently: only the witness reserved value). This is safe for submitted blocks. */
-void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
-
-/** Produce the necessary coinbase commitment for a block (modifies the hash, don't call for mined blocks). */
-std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
-
 /** RAII wrapper for VerifyDB: Verify consistency of the block and coin databases */
 class CVerifyDB {
 public:
@@ -541,8 +536,53 @@ public:
     //! Check whether the block associated with this index entry is pruned or not.
     bool IsBlockPruned(const CBlockIndex* pblockindex);
 
+    /** Update uncommitted block structures (currently: only the witness reserved value). This is safe for submitted blocks. */
+    void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
+
+    /** Produce the necessary coinbase commitment for a block (modifies the hash, don't call for mined blocks). */
+    std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
+
     /** Global cache for versionbits deployment status */
     VersionBitsCache versionbitscache;
+
+    /** Determine if a deployment is active for the next block */
+    inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::BuriedDeployment dep)
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= params.DeploymentHeight(dep);
+    }
+
+    inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos dep)
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return ThresholdState::ACTIVE == versionbitscache.State(pindexPrev, params, dep);
+    }
+
+    /** Determine if a deployment is active for this block */
+    inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, Consensus::BuriedDeployment dep)
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return index.nHeight >= params.DeploymentHeight(dep);
+    }
+
+    inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, Consensus::DeploymentPos dep)
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return DeploymentActiveAfter(index.pprev, params, dep);
+    }
+
+    /** Determine if a deployment is enabled (can ever be active) */
+    inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::BuriedDeployment dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return params.DeploymentHeight(dep) != std::numeric_limits<int>::max();
+    }
+
+    inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::DeploymentPos dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return params.vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+    }
 
     std::array<ThresholdConditionCache, VERSIONBITS_NUM_BITS> warningcache GUARDED_BY(cs_main);
 

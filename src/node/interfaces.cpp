@@ -6,7 +6,6 @@
 #include <banman.h>
 #include <chain.h>
 #include <chainparams.h>
-#include <deploymentstatus.h>
 #include <external_signer.h>
 #include <init.h>
 #include <interfaces/chain.h>
@@ -693,7 +692,7 @@ public:
     {
         LOCK(::cs_main);
         const CBlockIndex* tip = Assert(m_node.chainman)->ActiveChain().Tip();
-        return DeploymentActiveAfter(tip, Params().GetConsensus(), Consensus::DEPLOYMENT_TAPROOT, m_node.chainman->m_blockman.versionbitscache);
+        return m_node.chainman->m_blockman.DeploymentActiveAfter(tip, Params().GetConsensus(), Consensus::DEPLOYMENT_TAPROOT);
     }
     NodeContext& m_node;
 };
