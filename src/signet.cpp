@@ -120,6 +120,21 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
     return SignetTxs{tx_to_spend, tx_spending};
 }
 
+bool CheckSignetBlockHeader(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state)
+{
+    if (block.GetHash() == consensusParams.hashGenesisBlock) {
+        // genesis block is always valid
+        return true;
+    }
+
+    // do this last -- if the signature is bad still want to hard reject
+    if (!consensusParams.signet_accept_reorg && (block.nVersion & REORGABLE_BLOCK_VERSIONBIT) == REORGABLE_BLOCK_VERSIONBIT) {
+        return state.Invalid(BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE, "signet-reorg-block", "signet block will be reorged, ignoring");
+    }
+
+    return true;
+}
+
 // Signet block solution checker
 bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state)
 {
@@ -147,5 +162,8 @@ bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& cons
         LogPrint(BCLog::VALIDATION, "CheckSignetBlockSolution: Errors in block (block solution invalid)\n");
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block solution invalid");
     }
+
+    if (!CheckSignetBlockHeader(block, consensusParams, state)) return false;
+
     return true;
 }

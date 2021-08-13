@@ -114,6 +114,7 @@ struct Params {
      */
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
+    bool signet_accept_reorg{true};
 
     int DeploymentHeight(BuriedDeployment dep) const
     {

@@ -13,10 +13,15 @@
 
 class BlockValidationState;
 
+constexpr int32_t REORGABLE_BLOCK_VERSIONBIT = 0x08000000l;
+constexpr bool DEFAULT_SIGNET_ACCEPT_REORG = true;
+
 /**
  * Extract signature and check whether a block has a valid solution
  */
 bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state);
+
+bool CheckSignetBlockHeader(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state);
 
 /**
  * Generate the signet tx corresponding to the given block
