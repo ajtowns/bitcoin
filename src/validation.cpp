@@ -2938,8 +2938,8 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
         return false;
 
     // Signet only: check block solution
-    if (consensusParams.signet_blocks && fCheckPOW && !CheckSignetBlockSolution(block, consensusParams)) {
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block signature validation failure");
+    if (consensusParams.signet_blocks && fCheckPOW && !CheckSignetBlockSolution(block, consensusParams, state)) {
+        return false;
     }
 
     // Check the merkle root.

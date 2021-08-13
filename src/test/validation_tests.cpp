@@ -71,7 +71,11 @@ BOOST_AUTO_TEST_CASE(signet_parse_tests)
 
     // empty block is invalid
     BOOST_CHECK(!SignetTxs::Create(block, challenge));
-    BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsInvalid() && state.GetResult() == BlockValidationResult::BLOCK_CONSENSUS);
+    }
 
     // no witness commitment
     CMutableTransaction cb;
@@ -79,7 +83,11 @@ BOOST_AUTO_TEST_CASE(signet_parse_tests)
     block.vtx.push_back(MakeTransactionRef(cb));
     block.vtx.push_back(MakeTransactionRef(cb)); // Add dummy tx to exercise merkle root code
     BOOST_CHECK(!SignetTxs::Create(block, challenge));
-    BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsInvalid() && state.GetResult() == BlockValidationResult::BLOCK_CONSENSUS);
+    }
 
     // no header is treated valid
     std::vector<uint8_t> witness_commitment_section_141{0xaa, 0x21, 0xa9, 0xed};
@@ -89,14 +97,22 @@ BOOST_AUTO_TEST_CASE(signet_parse_tests)
     cb.vout.at(0).scriptPubKey = CScript{} << OP_RETURN << witness_commitment_section_141;
     block.vtx.at(0) = MakeTransactionRef(cb);
     BOOST_CHECK(SignetTxs::Create(block, challenge));
-    BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsValid());
+    }
 
     // no data after header, valid
     std::vector<uint8_t> witness_commitment_section_325{0xec, 0xc7, 0xda, 0xa2};
     cb.vout.at(0).scriptPubKey = CScript{} << OP_RETURN << witness_commitment_section_141 << witness_commitment_section_325;
     block.vtx.at(0) = MakeTransactionRef(cb);
     BOOST_CHECK(SignetTxs::Create(block, challenge));
-    BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsValid());
+    }
 
     // Premature end of data, invalid
     witness_commitment_section_325.push_back(0x01);
@@ -104,21 +120,33 @@ BOOST_AUTO_TEST_CASE(signet_parse_tests)
     cb.vout.at(0).scriptPubKey = CScript{} << OP_RETURN << witness_commitment_section_141 << witness_commitment_section_325;
     block.vtx.at(0) = MakeTransactionRef(cb);
     BOOST_CHECK(!SignetTxs::Create(block, challenge));
-    BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsInvalid() && state.GetResult() == BlockValidationResult::BLOCK_CONSENSUS);
+    }
 
     // has data, valid
     witness_commitment_section_325.push_back(0x00);
     cb.vout.at(0).scriptPubKey = CScript{} << OP_RETURN << witness_commitment_section_141 << witness_commitment_section_325;
     block.vtx.at(0) = MakeTransactionRef(cb);
     BOOST_CHECK(SignetTxs::Create(block, challenge));
-    BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsValid());
+    }
 
     // Extraneous data, invalid
     witness_commitment_section_325.push_back(0x00);
     cb.vout.at(0).scriptPubKey = CScript{} << OP_RETURN << witness_commitment_section_141 << witness_commitment_section_325;
     block.vtx.at(0) = MakeTransactionRef(cb);
     BOOST_CHECK(!SignetTxs::Create(block, challenge));
-    BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus()));
+    {
+        BlockValidationState state;
+        BOOST_CHECK(!CheckSignetBlockSolution(block, signet_params->GetConsensus(), state));
+        BOOST_CHECK(state.IsInvalid() && state.GetResult() == BlockValidationResult::BLOCK_CONSENSUS);
+    }
 }
 
 //! Test retrieval of valid assumeutxo values.

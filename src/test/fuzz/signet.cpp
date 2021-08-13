@@ -23,11 +23,12 @@ void initialize_signet()
 
 FUZZ_TARGET_INIT(signet, initialize_signet)
 {
+    BlockValidationState state;
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
     const std::optional<CBlock> block = ConsumeDeserializable<CBlock>(fuzzed_data_provider);
     if (!block) {
         return;
     }
-    (void)CheckSignetBlockSolution(*block, Params().GetConsensus());
+    (void)CheckSignetBlockSolution(*block, Params().GetConsensus(), state);
     (void)SignetTxs::Create(*block, ConsumeScript(fuzzed_data_provider));
 }

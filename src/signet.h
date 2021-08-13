@@ -11,10 +11,12 @@
 
 #include <optional>
 
+class BlockValidationState;
+
 /**
  * Extract signature and check whether a block has a valid solution
  */
-bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams);
+bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state);
 
 /**
  * Generate the signet tx corresponding to the given block

@@ -121,7 +121,7 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
 }
 
 // Signet block solution checker
-bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams)
+bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& consensusParams, BlockValidationState& state)
 {
     if (block.GetHash() == consensusParams.hashGenesisBlock) {
         // genesis block solution is always valid
@@ -133,7 +133,7 @@ bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& cons
 
     if (!signet_txs) {
         LogPrint(BCLog::VALIDATION, "CheckSignetBlockSolution: Errors in block (block solution parse failure)\n");
-        return false;
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block solution parse failure");
     }
 
     const CScript& scriptSig = signet_txs->m_to_sign.vin[0].scriptSig;
@@ -145,7 +145,7 @@ bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& cons
 
     if (!VerifyScript(scriptSig, signet_txs->m_to_spend.vout[0].scriptPubKey, &witness, BLOCK_SCRIPT_VERIFY_FLAGS, sigcheck)) {
         LogPrint(BCLog::VALIDATION, "CheckSignetBlockSolution: Errors in block (block solution invalid)\n");
-        return false;
+        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block solution invalid");
     }
     return true;
 }
