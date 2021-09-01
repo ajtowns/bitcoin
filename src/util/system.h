@@ -164,6 +164,8 @@ public:
         ALLOW_INT = 0x02,
         ALLOW_STRING = 0x04,
         ALLOW_ANY = ALLOW_BOOL | ALLOW_INT | ALLOW_STRING,
+        DISALLOW_NEGATION = 0x20, //! disallow -nofoo syntax
+
         DEBUG_ONLY = 0x100,
         /* Some options would cause cross-contamination if values for
          * mainnet were used while running on regtest/testnet (or vice-versa).
