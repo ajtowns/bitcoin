@@ -234,9 +234,8 @@ static bool InterpretKey(std::string& section, std::string& key)
  * that debug log output is not sent to any file at all).
  */
 
-static util::SettingsValue InterpretOption(std::string& section, std::string& key, const std::string& value)
+static util::SettingsValue InterpretValue(std::string& key, const std::string& value, bool negated)
 {
-    bool negated = !InterpretKey(section, key);
     if (negated) {
         // Double negatives like -nofoo=0 are supported (but discouraged)
         if (!InterpretBool(value)) {
@@ -380,17 +379,18 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
         // Transform -foo to foo
         key.erase(0, 1);
         std::string section;
-        util::SettingsValue value = InterpretOption(section, key, val);
+        bool negated = !InterpretKey(section, key);
         std::optional<unsigned int> flags = GetArgFlags('-' + key);
 
         // Unknown command line options and command line options with dot
-        // characters (which are returned from InterpretOption with nonempty
+        // characters (which are returned from InterpretKey with nonempty
         // section strings) are not valid.
         if (!flags || !section.empty()) {
             error = strprintf("Invalid parameter %s", argv[i]);
             return false;
         }
 
+        util::SettingsValue value = InterpretValue(key, val, negated);
         if (!CheckValid(key, value, *flags, error)) return false;
 
         m_settings.command_line_options[key].push_back(value);
@@ -578,7 +578,7 @@ bool ArgsManager::ReadSettingsFile(std::vector<std::string>* errors)
     for (const auto& setting : m_settings.rw_settings) {
         std::string section;
         std::string key = setting.first;
-        (void)InterpretOption(section, key, /* value */ {}); // Split setting key into section and argname
+        (void)InterpretKey(section, key); // Split setting key into section and argname
         if (!GetArgFlags('-' + key)) {
             LogPrintf("Ignoring unknown rw_settings value %s\n", setting.first);
         }
@@ -900,9 +900,10 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
     for (const std::pair<std::string, std::string>& option : options) {
         std::string section;
         std::string key = option.first;
-        util::SettingsValue value = InterpretOption(section, key, option.second);
+        bool negated = !InterpretKey(section, key);
         std::optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
+            util::SettingsValue value = InterpretValue(key, option.second, negated);
             if (!CheckValid(key, value, *flags, error)) {
                 return false;
             }
