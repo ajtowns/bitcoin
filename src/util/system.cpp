@@ -185,6 +185,36 @@ static std::string SettingName(const std::string& arg)
 }
 
 /**
+ * Split up setting key string, removing "section." and "no" prefixes.
+ *
+ * @param[out]     section  output argument set to section name if key contains "."
+ *
+ * @param[in,out]  key      input/output key argument with "section." and "no"
+ *                          prefixes stripped
+ *
+ * @return false if key was negated, true otherwise
+ *
+ * @note Where an option was negated can be later checked using the
+ * IsArgNegated() method. One use case for this is to have a way to disable
+ * options that are not normally boolean (e.g. using -nodebuglogfile to request
+ * that debug log output is not sent to any file at all).
+ */
+static bool InterpretKey(std::string& section, std::string& key)
+{
+    // Split section name from key name for keys like "testnet.foo" or "regtest.bar"
+    size_t option_index = key.find('.');
+    if (option_index != std::string::npos) {
+        section = key.substr(0, option_index);
+        key.erase(0, option_index + 1);
+    }
+    if (key.substr(0, 2) == "no") {
+        key.erase(0, 2);
+        return false;
+    }
+    return true;
+}
+
+/**
  * Interpret -nofoo as if the user supplied -foo=0.
  *
  * This method also tracks when the -no form was supplied, and if so,
@@ -206,14 +236,8 @@ static std::string SettingName(const std::string& arg)
 
 static util::SettingsValue InterpretOption(std::string& section, std::string& key, const std::string& value)
 {
-    // Split section name from key name for keys like "testnet.foo" or "regtest.bar"
-    size_t option_index = key.find('.');
-    if (option_index != std::string::npos) {
-        section = key.substr(0, option_index);
-        key.erase(0, option_index + 1);
-    }
-    if (key.substr(0, 2) == "no") {
-        key.erase(0, 2);
+    bool negated = !InterpretKey(section, key);
+    if (negated) {
         // Double negatives like -nofoo=0 are supported (but discouraged)
         if (!InterpretBool(value)) {
             LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, value);
