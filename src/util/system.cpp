@@ -234,9 +234,14 @@ static bool InterpretKey(std::string& section, std::string& key)
  * that debug log output is not sent to any file at all).
  */
 
-static util::SettingsValue InterpretValue(std::string& key, const std::string& value, bool negated)
+static std::optional<util::SettingsValue> InterpretValue(std::string& key, const std::string& value, bool negated, unsigned int flags, std::string& error)
 {
     if (negated) {
+        if ((flags & ArgsManager::DISALLOW_NEGATION)) {
+            error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
+            return std::nullopt;
+        }
+
         // Double negatives like -nofoo=0 are supported (but discouraged)
         if (!InterpretBool(value)) {
             LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, value);
@@ -245,24 +250,6 @@ static util::SettingsValue InterpretValue(std::string& key, const std::string& v
         return false;
     }
     return value;
-}
-
-/**
- * Check settings value validity according to flags.
- *
- * TODO: Add more meaningful error checks here in the future
- * See "here's how the flags are meant to behave" in
- * https://github.com/bitcoin/bitcoin/pull/16097#issuecomment-514627823
- */
-static bool CheckValid(const std::string& key, const util::SettingsValue& val, unsigned int flags, std::string& error)
-{
-    if ((flags & ArgsManager::DISALLOW_NEGATION)) {
-        if (val.isBool()) {
-            error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
-            return false;
-        }
-    }
-    return true;
 }
 
 namespace {
@@ -390,10 +377,10 @@ bool ArgsManager::ParseParameters(int argc, const char* const argv[], std::strin
             return false;
         }
 
-        util::SettingsValue value = InterpretValue(key, val, negated);
-        if (!CheckValid(key, value, *flags, error)) return false;
+        std::optional<util::SettingsValue> value = InterpretValue(key, val, negated, *flags, error);
+        if (!value) return false;
 
-        m_settings.command_line_options[key].push_back(value);
+        m_settings.command_line_options[key].push_back(*value);
     }
 
     // we do not allow -includeconf from command line, only -noincludeconf
@@ -903,11 +890,11 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
         bool negated = !InterpretKey(section, key);
         std::optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
-            util::SettingsValue value = InterpretValue(key, option.second, negated);
-            if (!CheckValid(key, value, *flags, error)) {
+            std::optional<util::SettingsValue> value = InterpretValue(key, option.second, negated, *flags, error);
+            if (!value) {
                 return false;
             }
-            m_settings.ro_config[section][key].push_back(value);
+            m_settings.ro_config[section][key].push_back(*value);
         } else {
             if (ignore_invalid_keys) {
                 LogPrintf("Ignoring unknown configuration value %s\n", option.first);
