@@ -158,8 +158,11 @@ struct SectionInfo
 class ArgsManager
 {
 public:
+    /**
+     * Flags controlling how config and command line arguments are validated and
+     * interpreted.
+     */
     enum Flags : uint32_t {
-        // Boolean options can accept negation syntax -noOPTION or -noOPTION=1
         ALLOW_ANY = 0x01,    //!< disable validation
         // ALLOW_BOOL = 0x02,   //!< unimplemented, draft implementation in #16545
         // ALLOW_INT = 0x04,    //!< unimplemented, draft implementation in #16545

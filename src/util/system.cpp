@@ -71,6 +71,7 @@
 #endif
 
 #include <boost/algorithm/string/replace.hpp>
+#include <optional>
 #include <thread>
 #include <typeinfo>
 #include <univalue.h>
@@ -215,33 +216,29 @@ static bool InterpretKey(std::string& section, std::string& key)
 }
 
 /**
- * Interpret -nofoo as if the user supplied -foo=0.
+ * Interpret settings value based on registered flags.
  *
- * This method also tracks when the -no form was supplied, and if so,
- * checks whether there was a double-negative (-nofoo=0 -> -foo=1).
+ * @param[in]   key      name of settings key, only used for error messages
+ * @param[in]   value    string value of setting to be parsed
+ * @param[in]   negated  whether to treat setting as negated
+ * @param[in]   flags    ArgsManager registered argument flags
+ * @param[out]  error    Error description if settings value is not valid
  *
- * If there was not a double negative, it removes the "no" from the key
- * and returns false.
- *
- * If there was a double negative, it removes "no" from the key, and
- * returns true.
- *
- * If there was no "no", it returns the string value untouched.
- *
- * Where an option was negated can be later checked using the
- * IsArgNegated() method. One use case for this is to have a way to disable
- * options that are not normally boolean (e.g. using -nodebuglogfile to request
- * that debug log output is not sent to any file at all).
+ * @return parsed settings value if it is valid, otherwise nullopt accompanied
+ * by a descriptive error string
  */
-
-static std::optional<util::SettingsValue> InterpretValue(std::string& key, const std::string& value, bool negated, unsigned int flags, std::string& error)
+static std::optional<util::SettingsValue> InterpretValue(const std::string& key,
+    const std::string& value,
+    bool negated,
+    unsigned int flags,
+    std::string& error)
 {
+    // Return negated settings as false values.
     if (negated) {
-        if ((flags & ArgsManager::DISALLOW_NEGATION)) {
+        if (flags & ArgsManager::DISALLOW_NEGATION) {
             error = strprintf("Negating of -%s is meaningless and therefore forbidden", key);
             return std::nullopt;
         }
-
         // Double negatives like -nofoo=0 are supported (but discouraged)
         if (!InterpretBool(value)) {
             LogPrintf("Warning: parsed potentially confusing double-negative -%s=%s\n", key, value);
@@ -891,9 +888,7 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
         std::optional<unsigned int> flags = GetArgFlags('-' + key);
         if (flags) {
             std::optional<util::SettingsValue> value = InterpretValue(key, option.second, negated, *flags, error);
-            if (!value) {
-                return false;
-            }
+            if (!value) return false;
             m_settings.ro_config[section][key].push_back(*value);
         } else {
             if (ignore_invalid_keys) {
