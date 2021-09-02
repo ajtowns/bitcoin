@@ -1082,6 +1082,13 @@ void PeerManagerImpl::FindNextBlocksToDownload(NodeId nodeid, unsigned int count
 
 } // namespace
 
+void RegisterNetProcessingArgs(ArgsManager& argsman)
+{
+    argsman.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-maxorphantx=<n>", strprintf("Keep at most <n> unconnectable transactions in memory (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-capturemessages", "Capture all P2P messages to disk", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
+}
+
 void PeerManagerImpl::PushNodeVersion(CNode& pnode, int64_t nTime)
 {
     // Note that pnode->GetLocalServices() is a reflection of the local

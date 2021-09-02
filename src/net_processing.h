@@ -78,4 +78,6 @@ public:
                                 const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) = 0;
 };
 
+void RegisterNetProcessingArgs(ArgsManager& argsman);
+
 #endif // BITCOIN_NET_PROCESSING_H
