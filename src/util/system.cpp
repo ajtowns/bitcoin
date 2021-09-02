@@ -674,6 +674,23 @@ bool SettingToBool(const util::SettingsValue& value, bool fDefault)
     return SettingToBool(value).value_or(fDefault);
 }
 
+template<>
+bool ArgsManager::Get<bool>(const std::string& arg, const bool& def) const { return GetBoolArg(arg, def); }
+template<>
+int64_t ArgsManager::Get<int64_t>(const std::string& arg, const int64_t& def) const { return GetIntArg(arg, def); }
+
+template<>
+std::string ArgsManager::Get<std::string>(const std::string& arg, const std::string& def) const { return GetArg(arg, def); }
+template<>
+std::vector<std::string> ArgsManager::Get<std::vector<std::string>>(const std::string& arg, const std::vector<std::string>& def) const
+{
+    if (IsArgSet(arg)) {
+        return GetArgs(arg);
+    } else {
+        return def;
+    }
+}
+
 bool ArgsManager::SoftSetArg(const std::string& strArg, const std::string& strValue)
 {
     LOCK(cs_args);
@@ -728,6 +745,22 @@ void ArgsManager::AddArg(const std::string& name, const std::string& help, unsig
         m_network_only_args.emplace(arg_name);
     }
 }
+
+template<typename T>
+void ArgsManager::AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat)
+{
+    AddArg(name, help, flags, cat);
+}
+
+template
+void ArgsManager::AddArg<bool>(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+template
+void ArgsManager::AddArg<int64_t>(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+template
+void ArgsManager::AddArg<std::string>(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+template
+void ArgsManager::AddArg<std::vector<std::string>>(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+
 
 void ArgsManager::AddHiddenArgs(const std::vector<std::string>& names)
 {

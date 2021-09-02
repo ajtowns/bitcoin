@@ -354,6 +354,9 @@ protected:
      */
     fs::path GetPathArg(std::string arg, const fs::path& default_value = {}) const;
 
+    template<typename T>
+    T Get(const std::string& arg, const T& def) const;
+
     /**
      * Return integer argument or default value
      *
@@ -405,6 +408,9 @@ protected:
     /**
      * Add argument
      */
+    void AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+
+    template<typename T>
     void AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
 
     /**
@@ -501,6 +507,75 @@ private:
 };
 
 extern ArgsManager gArgs;
+
+template<typename REG>
+class SettingsRegister
+{
+public:
+    using STRUCT = typename REG::T;
+
+    static inline void Register(ArgsManager& args)
+    {
+        auto l = [&](const auto& sd) {
+            args.AddArg<decltype(sd.def)>(sd.name+sd.params, sd.desc, sd.flags, sd.cat);
+        };
+        (REG::template Register<_Do>)(l);
+    }
+
+    static inline STRUCT Get(const ArgsManager& args)
+    {
+        STRUCT f;
+        auto l = [&](const auto& sd) {
+            sd.cvt(f.*(sd.field), args.Get<decltype(sd.def)>(sd.name, sd.def));
+        };
+        (REG::template Register<_Do>)(l);
+        return f;
+    }
+
+private:
+    template<typename FieldType, typename ArgType=FieldType>
+    struct SettingDefn
+    {
+        void (&cvt)(FieldType&, const ArgType&);
+        FieldType STRUCT::* field;
+        std::string name;
+        std::string params; // "=blah" or ""
+        std::string desc;
+        unsigned int flags;
+        OptionsCategory cat;
+        ArgType def{};
+    };
+
+    class _Do
+    {
+    private:
+        template<typename Op>
+        static inline void Do(Op& op) { }
+
+        template<typename T>
+        static inline void no_conversion(T& dst, const T& src) { dst = src; }
+
+    public:
+        template<typename T, typename... Ts>
+        static inline SettingDefn<T> Defn(T STRUCT::* field, const std::string& name, Ts... ts)
+        {
+            return { no_conversion<T>, field, name, ts... };
+        }
+
+        template<typename FT, typename AT, typename... Ts>
+        static inline SettingDefn<FT,AT> Defn(FT STRUCT::* field, void(&cvt)(FT&,const AT&), const std::string& name, Ts... ts)
+        {
+            return { cvt, field, name, ts... };
+        }
+
+        template<typename Op, typename FT, typename AT, typename... Ts>
+        static inline void Do(Op& op, const SettingDefn<FT, AT>& sd, Ts... ts)
+        {
+            op(sd);
+            Do(op, ts...);
+        }
+    };
+};
 
 /**
  * @return true if help has been requested via a command-line arg
