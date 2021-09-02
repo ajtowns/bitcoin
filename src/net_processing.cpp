@@ -292,15 +292,20 @@ struct NetSettings {
     int64_t blockreconstructionextratxn;
     int64_t maxorphantx;
     bool capturemessages;
+
+    template<typename C, typename... Args>
+    static inline void F(Args&... args) {
+        return C::Do(args...,
+            C::Defn( &NetSettings::blockreconstructionextratxn, "-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS, DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN ),
+            C::Defn( &NetSettings::maxorphantx, "-maxorphantx=<n>", strprintf("Keep at most <n> unconnectable transactions in memory (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS, DEFAULT_MAX_ORPHAN_TRANSACTIONS ),
+            C::Defn( &NetSettings::capturemessages, "-capturemessages", "Capture all P2P messages to disk", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST, false )
+        );
+    }
 };
 
 NetSettings GetNetSettings(const ArgsManager& args)
 {
-    NetSettings ns;
-    ns.blockreconstructionextratxn = args.GetIntArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
-    ns.maxorphantx = args.GetIntArg("-maxorphantx", DEFAULT_MAX_ORPHAN_TRANSACTIONS);
-    ns.capturemessages = args.GetBoolArg("-capturemessages", false);
-    return ns;
+    return SettingsRegister<NetSettings>::Get(args);
 }
 
 class PeerManagerImpl final : public PeerManager
@@ -1100,11 +1105,9 @@ void PeerManagerImpl::FindNextBlocksToDownload(NodeId nodeid, unsigned int count
 
 } // namespace
 
-void RegisterNetProcessingArgs(ArgsManager& argsman)
+void RegisterNetProcessingArgs(ArgsManager& args)
 {
-    argsman.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-maxorphantx=<n>", strprintf("Keep at most <n> unconnectable transactions in memory (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-capturemessages", "Capture all P2P messages to disk", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
+    SettingsRegister<NetSettings>::Register(args);
 }
 
 void PeerManagerImpl::PushNodeVersion(CNode& pnode, int64_t nTime)
