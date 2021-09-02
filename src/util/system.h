@@ -326,6 +326,9 @@ protected:
      */
     std::string GetArg(const std::string& strArg, const std::string& strDefault) const;
 
+    template<typename T>
+    T Get(const std::string& arg, const T& def) const;
+
     /**
      * Return integer argument or default value
      *
@@ -375,6 +378,9 @@ protected:
     /**
      * Add argument
      */
+    void AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+
+    template<typename T>
     void AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
 
     /**
@@ -464,6 +470,63 @@ private:
 };
 
 extern ArgsManager gArgs;
+
+template<typename F>
+class SettingsRegister
+{
+public:
+    template<typename T>
+    struct SettingDefn
+    {
+        T F::* field;
+        std::string name;
+        std::string desc;
+        unsigned int flags;
+        OptionsCategory cat;
+        T def;
+    };
+
+    static inline void Register(ArgsManager& args) { F::template F<_Register>(args); }
+    static inline F Get(const ArgsManager& args) {
+        F f;
+        F::template F<_Get>(args, f);
+        return f;
+    }
+
+private:
+    class _Register
+    {
+    private:
+        static inline void Do(ArgsManager& args) { }
+
+    public:
+        template<typename T, typename... Ts>
+        static inline SettingDefn<T> Defn(T F::* field, Ts... ts) { return { field, ts... }; }
+
+        template<typename T, typename... Ts>
+        static inline void Do(ArgsManager& args, const SettingDefn<T>& s, Ts... ts) {
+            args.AddArg<T>(s.name, s.desc, s.flags, s.cat);
+            Do(args, ts...);
+        }
+    };
+
+    class _Get
+    {
+    private:
+        static inline void Do(const ArgsManager& args, F& f) { }
+
+    public:
+        template<typename T, typename... Ts>
+        static inline SettingDefn<T> Defn(T F::* field, Ts... ts) { return { field, ts... }; }
+
+        template<typename T, typename... Ts>
+        static inline void Do(const ArgsManager& args, F& f, const SettingDefn<T>& s, Ts... ts) {
+            f.*(s.field) = args.Get<T>(s.name, s.def);
+            Do(args, f, ts...);
+        }
+
+    };
+};
 
 /**
  * @return true if help has been requested via a command-line arg
