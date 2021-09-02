@@ -288,12 +288,28 @@ struct Peer {
 
 using PeerRef = std::shared_ptr<Peer>;
 
+struct NetSettings {
+    int64_t blockreconstructionextratxn;
+    int64_t maxorphantx;
+    bool capturemessages;
+};
+
+NetSettings GetNetSettings(const ArgsManager& args)
+{
+    NetSettings ns;
+    ns.blockreconstructionextratxn = args.GetIntArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
+    ns.maxorphantx = args.GetIntArg("-maxorphantx", DEFAULT_MAX_ORPHAN_TRANSACTIONS);
+    ns.capturemessages = args.GetBoolArg("-capturemessages", false);
+    return ns;
+}
+
 class PeerManagerImpl final : public PeerManager
 {
 public:
     PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, CAddrMan& addrman,
                     BanMan* banman, ChainstateManager& chainman,
-                    CTxMemPool& pool, bool ignore_incoming_txs);
+                    CTxMemPool& pool, bool ignore_incoming_txs,
+                    const ArgsManager& args);
 
     /** Overridden from CValidationInterface. */
     void BlockConnected(const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override;
@@ -321,6 +337,8 @@ public:
                         const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) override;
 
 private:
+    const NetSettings m_settings;
+
     void _RelayTransaction(const uint256& txid, const uint256& wtxid)
         EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
@@ -1307,7 +1325,7 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
 
 void PeerManagerImpl::AddToCompactExtraTransactions(const CTransactionRef& tx)
 {
-    size_t max_extra_txn = gArgs.GetIntArg("-blockreconstructionextratxn", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN);
+    size_t max_extra_txn = m_settings.blockreconstructionextratxn;
     if (max_extra_txn <= 0)
         return;
     if (!vExtraTxnForCompact.size())
@@ -1428,15 +1446,17 @@ bool PeerManagerImpl::BlockRequestAllowed(const CBlockIndex* pindex)
 
 std::unique_ptr<PeerManager> PeerManager::make(const CChainParams& chainparams, CConnman& connman, CAddrMan& addrman,
                                                BanMan* banman, ChainstateManager& chainman,
-                                               CTxMemPool& pool, bool ignore_incoming_txs)
+                                               CTxMemPool& pool, bool ignore_incoming_txs, const ArgsManager& args)
 {
-    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, chainman, pool, ignore_incoming_txs);
+    return std::make_unique<PeerManagerImpl>(chainparams, connman, addrman, banman, chainman, pool, ignore_incoming_txs, args);
 }
 
 PeerManagerImpl::PeerManagerImpl(const CChainParams& chainparams, CConnman& connman, CAddrMan& addrman,
                                  BanMan* banman, ChainstateManager& chainman,
-                                 CTxMemPool& pool, bool ignore_incoming_txs)
-    : m_chainparams(chainparams),
+                                 CTxMemPool& pool, bool ignore_incoming_txs,
+                                 const ArgsManager& args)
+    : m_settings{GetNetSettings(args)},
+      m_chainparams(chainparams),
       m_connman(connman),
       m_addrman(addrman),
       m_banman(banman),
@@ -3322,7 +3342,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 m_txrequest.ForgetTxHash(tx.GetWitnessHash());
 
                 // DoS prevention: do not allow m_orphanage to grow unbounded (see CVE-2012-3789)
-                unsigned int nMaxOrphanTx = (unsigned int)std::max((int64_t)0, gArgs.GetIntArg("-maxorphantx", DEFAULT_MAX_ORPHAN_TRANSACTIONS));
+                unsigned int nMaxOrphanTx = (unsigned int)std::max((int64_t)0, m_settings.maxorphantx);
                 unsigned int nEvicted = m_orphanage.LimitOrphans(nMaxOrphanTx);
                 if (nEvicted > 0) {
                     LogPrint(BCLog::MEMPOOL, "orphanage overflow, removed %u tx\n", nEvicted);
@@ -4100,7 +4120,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
         msg.m_recv.data()
     );
 
-    if (gArgs.GetBoolArg("-capturemessages", false)) {
+    if (m_settings.capturemessages) {
         CaptureMessage(pfrom->addr, msg.m_command, MakeUCharSpan(msg.m_recv), /* incoming */ true);
     }
 
