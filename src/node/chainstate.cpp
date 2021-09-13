@@ -28,11 +28,8 @@ std::optional<ChainstateLoadingError> LoadChainstate(bool fReset,
     };
 
     LOCK(cs_main);
-    chainman.InitializeChainstate(mempool);
-    chainman.m_total_coinstip_cache = nCoinCacheUsage;
-    chainman.m_total_coinsdb_cache = nCoinDBCache;
 
-    UnloadBlockIndex(mempool, chainman);
+    chainman.InitializeChainstate(mempool);
 
     auto& pblocktree{chainman.m_blockman.m_block_tree_db};
     // new CBlockTreeDB tries to delete the existing file, which
