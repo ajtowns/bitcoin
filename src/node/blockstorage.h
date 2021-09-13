@@ -93,7 +93,7 @@ private:
     void FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight, int chain_tip_height, int prune_height, bool is_ibd);
 
     RecursiveMutex cs_LastBlockFile;
-    std::vector<CBlockFileInfo> m_blockfile_info;
+    std::vector<CBlockFileInfo> m_blockfile_info GUARDED_BY(cs_LastBlockFile);
     int m_last_blockfile GUARDED_BY(cs_LastBlockFile) = 0;
     /** Global flag to indicate we should check to see if there are
      *  block/undo files that should be deleted.  Set on startup

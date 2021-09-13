@@ -332,9 +332,9 @@ void BlockManager::Unload()
 
     m_block_index.clear();
 
-    m_blockfile_info.clear();
     {
         LOCK(cs_LastBlockFile);
+        m_blockfile_info.clear();
         m_last_blockfile = 0;
     }
     m_dirty_blockindex.clear();
@@ -555,6 +555,7 @@ bool UndoReadFromDisk(CBlockUndo& blockundo, const CBlockIndex* pindex)
 
 void BlockManager::FlushUndoFile(int block_file, bool finalize)
 {
+    LOCK(cs_LastBlockFile);
     FlatFilePos undo_pos_old(block_file, m_blockfile_info[block_file].nUndoSize);
     if (!UndoFileSeq().Flush(undo_pos_old, finalize)) {
         AbortNode("Flushing undo file to disk failed. This is likely the result of an I/O error.");
@@ -736,8 +737,11 @@ bool BlockManager::WriteUndoDataForBlock(const CBlockUndo& blockundo, BlockValid
         // in the block file info as below; note that this does not catch the case where the undo writes are keeping up
         // with the block writes (usually when a synced up node is getting newly mined blocks) -- this case is caught in
         // the FindBlockPos function
-        if (_pos.nFile < WITH_LOCK(cs_LastBlockFile, return m_last_blockfile) && static_cast<uint32_t>(pindex->nHeight) == m_blockfile_info[_pos.nFile].nHeightLast) {
-            FlushUndoFile(_pos.nFile, true);
+        {
+            LOCK(cs_LastBlockFile);
+            if (_pos.nFile < m_last_blockfile && static_cast<uint32_t>(pindex->nHeight) == m_blockfile_info[_pos.nFile].nHeightLast) {
+                FlushUndoFile(_pos.nFile, true);
+            }
         }
 
         // update nUndoPos in block index
