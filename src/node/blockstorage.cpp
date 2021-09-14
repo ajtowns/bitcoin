@@ -78,7 +78,7 @@ CBlockIndex* BlockManager::AddToBlockIndex(const CBlockHeader& block, Chainstate
 void BlockManager::PruneOneBlockFile(const int fileNumber)
 {
     AssertLockHeld(cs_main);
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     for (auto& entry : m_block_index) {
         CBlockIndex* pindex = &entry.second;
@@ -113,7 +113,7 @@ void BlockManager::FindFilesToPruneManual(std::set<int>& setFilesToPrune, int nM
 {
     assert(fPruneMode && nManualPruneHeight > 0);
 
-    LOCK2(cs_main, cs_LastBlockFile);
+    LOCK2(cs_main, cs_blockfiles);
     if (chain_tip_height < 0) {
         return;
     }
@@ -134,7 +134,7 @@ void BlockManager::FindFilesToPruneManual(std::set<int>& setFilesToPrune, int nM
 
 void BlockManager::FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight, int chain_tip_height, int prune_height, bool is_ibd)
 {
-    LOCK2(cs_main, cs_LastBlockFile);
+    LOCK2(cs_main, cs_blockfiles);
     if (chain_tip_height < 0 || nPruneTarget == 0) {
         return;
     }
@@ -326,7 +326,7 @@ bool BlockManager::LoadBlockIndex(
 
 bool BlockManager::WriteBlockIndexDB()
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     std::vector<std::pair<int, const CBlockFileInfo*>> vFiles;
     vFiles.reserve(m_dirty_fileinfo.size());
@@ -348,7 +348,7 @@ bool BlockManager::WriteBlockIndexDB()
 
 bool BlockManager::LoadBlockIndexDB(ChainstateManager& chainman)
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     if (!LoadBlockIndex(::Params().GetConsensus(), chainman)) {
         return false;
@@ -470,7 +470,7 @@ std::string CBlockFileInfo::ToString() const
 
 CBlockFileInfo* BlockManager::GetBlockFileInfo(size_t n)
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     return &m_blockfile_info.at(n);
 }
@@ -538,7 +538,7 @@ bool UndoReadFromDisk(CBlockUndo& blockundo, const CBlockIndex* pindex)
 
 void BlockManager::FlushUndoFile(int block_file, bool finalize)
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
     FlatFilePos undo_pos_old(block_file, m_blockfile_info[block_file].nUndoSize);
     if (!UndoFileSeq().Flush(undo_pos_old, finalize)) {
         AbortNode("Flushing undo file to disk failed. This is likely the result of an I/O error.");
@@ -547,7 +547,7 @@ void BlockManager::FlushUndoFile(int block_file, bool finalize)
 
 void BlockManager::FlushBlockFile(bool fFinalize, bool finalize_undo)
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
     FlatFilePos block_pos_old(m_last_blockfile, m_blockfile_info[m_last_blockfile].nSize);
     if (!BlockFileSeq().Flush(block_pos_old, fFinalize)) {
         AbortNode("Flushing block file to disk failed. This is likely the result of an I/O error.");
@@ -559,7 +559,7 @@ void BlockManager::FlushBlockFile(bool fFinalize, bool finalize_undo)
 
 uint64_t BlockManager::CalculateCurrentUsage()
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     uint64_t retval = 0;
     for (const CBlockFileInfo& file : m_blockfile_info) {
@@ -606,7 +606,7 @@ fs::path GetBlockPosFilename(const FlatFilePos& pos)
 
 bool BlockManager::FindBlockPos(FlatFilePos& pos, unsigned int nAddSize, unsigned int nHeight, CChain& active_chain, uint64_t nTime, bool fKnown)
 {
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     unsigned int nFile = fKnown ? pos.nFile : m_last_blockfile;
     if (m_blockfile_info.size() <= nFile) {
@@ -663,7 +663,7 @@ bool BlockManager::FindUndoPos(BlockValidationState& state, int nFile, FlatFileP
 {
     pos.nFile = nFile;
 
-    LOCK(cs_LastBlockFile);
+    LOCK(cs_blockfiles);
 
     pos.nPos = m_blockfile_info[nFile].nUndoSize;
     m_blockfile_info[nFile].nUndoSize += nAddSize;
@@ -721,7 +721,7 @@ bool BlockManager::WriteUndoDataForBlock(const CBlockUndo& blockundo, BlockValid
         // with the block writes (usually when a synced up node is getting newly mined blocks) -- this case is caught in
         // the FindBlockPos function
         {
-            LOCK(cs_LastBlockFile);
+            LOCK(cs_blockfiles);
             if (_pos.nFile < m_last_blockfile && static_cast<uint32_t>(pindex->nHeight) == m_blockfile_info[_pos.nFile].nHeightLast) {
                 FlushUndoFile(_pos.nFile, true);
             }

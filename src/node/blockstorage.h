@@ -95,14 +95,14 @@ private:
      */
     void FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight, int chain_tip_height, int prune_height, bool is_ibd);
 
-    RecursiveMutex cs_LastBlockFile;
-    std::vector<CBlockFileInfo> m_blockfile_info GUARDED_BY(cs_LastBlockFile);
-    int m_last_blockfile GUARDED_BY(cs_LastBlockFile) = 0;
+    RecursiveMutex cs_blockfiles;
+    std::vector<CBlockFileInfo> m_blockfile_info GUARDED_BY(cs_blockfiles);
+    int m_last_blockfile GUARDED_BY(cs_blockfiles) = 0;
     /** Global flag to indicate we should check to see if there are
      *  block/undo files that should be deleted.  Set on startup
      *  or if we allocate more file space when we're in prune mode
      */
-    bool m_check_for_pruning GUARDED_BY(cs_LastBlockFile) = false;
+    bool m_check_for_pruning GUARDED_BY(cs_blockfiles) = false;
 
     /** Dirty block index entries. */
     std::set<CBlockIndex*> m_dirty_blockindex;

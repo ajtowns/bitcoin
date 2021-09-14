@@ -2201,7 +2201,7 @@ bool CChainState::FlushStateToDisk(
         bool fDoFullFlush = false;
 
         CoinsCacheSizeState cache_state = GetCoinsCacheSizeState();
-        LOCK(m_blockman.cs_LastBlockFile);
+        LOCK(m_blockman.cs_blockfiles);
         if (fPruneMode && (m_blockman.m_check_for_pruning || nManualPruneHeight > 0) && !fReindex) {
             // make sure we don't prune above the blockfilterindexes bestblocks
             // pruning is height-based
@@ -2324,7 +2324,7 @@ void CChainState::PruneAndFlush()
 {
     BlockValidationState state;
     {
-        LOCK(m_blockman.cs_LastBlockFile);
+        LOCK(m_blockman.cs_blockfiles);
         m_blockman.m_check_for_pruning = true;
     }
     if (!this->FlushStateToDisk(state, FlushStateMode::NONE)) {
