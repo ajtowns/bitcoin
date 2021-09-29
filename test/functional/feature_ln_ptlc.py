@@ -101,6 +101,78 @@ def keystr(k):
         k = k.get_pubkey()
     return hexlify(k.get_bytes()).decode('utf8')
 
+###### stuff
+
+def partial_schnorr_sign(partialkey, pubkey, msg, partialnonce, pubnonce):
+    assert len(partialkey) == 32
+    assert len(pubkey) == 32
+    assert len(msg) == 32
+    assert len(partialnonce) == 32
+    assert len(pubnonce) == 32
+
+    sec = int.from_bytes(partialkey, 'big')
+    if sec == 0 or sec >= SECP256K1_ORDER:
+        return None
+
+    nonce = int.from_bytes(privnonce, 'big')
+    if nonce == 0 or nonce >= SECP256K1_ORDER:
+        return None
+
+    P = SECP256K1.lift_x(pubkey)
+    if P is None or not SECP256K1.has_even_y(P):
+        return None
+    R = SECP256K1.lift_x(pubnonce)
+    if R is None or not SECP256K1.has_even_y(R):
+        return None
+
+    e = int.from_bytes(TaggedHash("BIP0340/challenge", pubnonce + pubkey + msg), 'big') % SECP256K1_ORDER
+    return R[0].to_bytes(32, 'big') + ((nonce + e * sec) % SECP256K1_ORDER).to_bytes(32, 'big')
+
+def partial_schnorr_verify(partialkey, pubkey, msg, partialnonce, pubnonce):
+    assert len(partialkey) == 32
+    assert len(pubkey) == 32
+    assert len(msg) == 32
+    assert len(partialnonce) == 32
+
+# pubkeys: musig(alice, bob)
+#     `-- accepts 1+ pubkeys
+#     `-- does musig calcs if >1 pubkey
+#     `-- does bip32 paths
+#     `-- spits out the multiplier to sign with
+#     `-- spits out addresses
+
+# musig2signing:
+#     `-- calculates the musig2 nonce
+#     `-- accepts nonce offsets for adaptor sigs
+#     `-- does partial sigs
+#     `-- recovers privatekey given known nonce secret
+#     `-- validates partial sigs
+# (maybe musig2 nonce calc gets split out too)
+
+# revocable secrets
+#     `-- generate at two levels
+#     `-- validate consistency at both levels
+#     `-- generated deterministic secrets for own nonces as well
+
+# taproot
+#     `-- take a musig and a path for ipk
+#     `-- be able to get back to the musig for "tweaking" the privkey
+#     `-- also add script paths
+#     `-- sign for the script paths, basically specifying the path and
+#         the key and the various flags manually?
+
+# create funding tx
+#   - set i=funding round, pay to P/0/i
+#   - whatever
+
+# create balance tx
+#   - spens funding tx, two balances
+
+# create inflight tx
+#   - whose balance is it spending
+#   - their balance, counterparty balance
+#   - htlcs, ptlcs
+
 ###### test
 
 alice = MakeECKey(b'a'*32)
