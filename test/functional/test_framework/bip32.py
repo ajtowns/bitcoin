@@ -172,7 +172,7 @@ class BIP32:
             child.key.valid = self.key.valid and self.key.secret > 0
             child.key.compressed = self.key.compressed
 
-        return child
+        return child, tweak
 
 def bip32_tests():
     from binascii import unhexlify
@@ -262,9 +262,9 @@ def bip32_tests():
             assert priv == b.serialize()
             assert BIP32(b'').deserialize(pub).serialize() == pub
             assert BIP32(b'').deserialize(priv).serialize() == priv
-            c = b.derive(i)
+            c, t = b.derive(i)
             if i < 2**31:
-                assert b.neuter().derive(i).serialize() == c.neuter().serialize()
+                assert b.neuter().derive(i)[0].serialize() == c.neuter().serialize()
             b = c
 
     for inv in invalid:
