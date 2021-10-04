@@ -141,7 +141,15 @@ class BIP32:
     def fingerprint(self):
         return int.from_bytes(hash160(self.neuter().key.get_bytes())[:4], 'big')
 
-    def derive(self, i):
+    def derive(self, *path):
+        c = self
+        tweak = 0
+        for i in path:
+            c, t = c.derive_one(i)
+            tweak = (tweak + t) % SECP256K1_ORDER
+        return c, tweak
+
+    def derive_one(self, i):
         assert i == int(i) and 0 <= i < 2**32
 
         child = BIP32(self)

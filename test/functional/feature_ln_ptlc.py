@@ -35,6 +35,7 @@ from test_framework.script import (
     OP_2DUP,
     OP_CHECKMULTISIG,
     OP_CHECKMULTISIGVERIFY,
+    OP_CHECKSEQUENCEVERIFY,
     OP_CHECKSIG,
     OP_CHECKSIGADD,
     OP_CHECKSIGVERIFY,
@@ -71,7 +72,7 @@ from test_framework.script_util import (
 )
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_raises_rpc_error, assert_equal
-from test_framework.key import generate_privkey, compute_xonly_pubkey, sign_schnorr, tweak_add_privkey, ECKey, ECPubKey
+from test_framework.key import generate_privkey, compute_xonly_pubkey, sign_schnorr, tweak_add_privkey, ECKey, ECPubKey, SECP256K1_ORDER, SECP256K1_G, SECP256K1
 from test_framework.bip32 import BIP32, bip32_tests
 from test_framework.address import (
     hash160,
@@ -85,6 +86,7 @@ import random
 from binascii import hexlify, unhexlify
 from typing import Tuple
 from dataclasses import dataclass
+import struct
 
 ###### key functions
 
@@ -228,7 +230,7 @@ class MuSig:
 
         # P = sum(mul*(key + tweak*G))
         #   = sum(mul*key) + sum(mul*tweak)*G
-        pts = [k.neutuer().key.p for k in keys]
+        pts = [k.neuter().key.p for k in keys]
         mt = sum(m*t for m, t in zip(mul, tweak))
         p = SECP256K1.mul([(p, m) for m, p in zip(mul, pts)] + [(SECP256K1_G, mt)])
 
@@ -258,13 +260,13 @@ class MuSigBase:
                 k, t = k.derive(p)
                 tweak = (tweak + t) % SECP256K1_ORDER
             d_tweak.append(tweak)
-            d_keys.append(keys)
+            d_keys.append(k)
 
         basehash = hashlib.sha256(b"".join([k.neuter().key.get_bytes() for k in d_keys]))
         d_mul = []
         for i, k in enumerate(d_keys):
             h = basehash.copy()
-            h.update(i)
+            h.update(struct.pack("<L", i))
             n = int.from_bytes(h.digest(), 'big') % SECP256K1_ORDER
             d_mul.append(n)
 
@@ -277,21 +279,40 @@ class ChannelSecrets:
         self.balance_secret = RevocableSecret(hashlib.sha256(seed + b"rec"))
 
 @dataclass
-class ChannelState:
-    f: int
-    n: int
+class ChannelParams:
+    musigbase: MuSigBase
+    delay: int
+    # secrets? my secrets, their secrets?
+    # maybe keep that separate and deal with updating?
+    # this is so complicated
+
+@dataclass
+class ChannelBalance:
+    params: ChannelParams
+    f: int  # funding version
+    n: int  # balance version
     bal: Tuple[int, int]
-    fund: COutPoint
+    funding: COutPoint
 
-    def build_tx(self, musigbase):
-        DUMMY_P2WPKH_SCRIPT = CScript([b'a' * 21])
+    # these should probably be post_init?
+    def balance_output(self, who):
+        assert who == 0 or who == 1
+        k = self.params.musigbase.keys[who].neuter().derive(1, self.n)[0].key.get_bytes()
+        assert len(k) == 33
+        scr = CScript([k[1:], OP_CHECKSIGVERIFY, self.params.delay, OP_CHECKSEQUENCEVERIFY])
+        ipk = self.params.musigbase.derive(1,self.n,who).pubkey.get_bytes()
+        assert len(ipk) == 33
+        return taproot_construct(ipk[1:], [("csv", scr)])
 
+    def build_tx(self):
         tx = CTransaction()
-        tx.vin = [CTxIn(funding, nSequence=0)]
+        tx.vin = [CTxIn(self.funding, nSequence=0)]
         tx.vout = [
-            CTxOut(bal[0], DUMMY_P2WPKH_SCRIPT),
-            CTxOut(bal[1], DUMMY_P2WPKH_SCRIPT),
+            CTxOut(self.bal[0], self.balance_output(0).scriptPubKey),
+            CTxOut(self.bal[1], self.balance_output(1).scriptPubKey),
         ]
+        tx.nLockTime = 0
+        return tx
 
 class Channel:
     def __init__(self, mykey, theirkey):
@@ -320,9 +341,6 @@ class Channel:
 #    unilateral close
 #    punish
 
-        
-
-
 # musig2signing:
 #     `-- calculates the musig2 nonce
 #     `-- accepts nonce offsets for adaptor sigs
@@ -346,8 +364,6 @@ bob = MakeECKey(b'b'*32)
 alice = BIP32(b"alice", public=False)
 bob = BIP32(b"bob", public=False)
 
-
-
 class LNPTLCTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
@@ -363,6 +379,14 @@ class LNPTLCTest(BitcoinTestFramework):
         msg = b"m" * 32
         sig = sign_schnorr(bxonly, msg)
         self.log.info("sig %s" % (hexlify(sig).decode('utf8')))
+
+        cp = ChannelParams(MuSigBase(alice, bob), delay=144)
+        f1 = COutPoint(100000, 3)
+        bal =  ChannelBalance(cp, 0, 1, (5000, 5000), f1)
+
+        tx = bal.build_tx()
+        print(tx)
+        print(tx.serialize().hex())
 
 if __name__ == '__main__':
     LNPTLCTest().main()
