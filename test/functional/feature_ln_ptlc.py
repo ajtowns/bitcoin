@@ -72,8 +72,9 @@ from test_framework.script_util import (
 )
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_raises_rpc_error, assert_equal
-from test_framework.key import generate_privkey, compute_xonly_pubkey, sign_schnorr, tweak_add_privkey, ECKey, ECPubKey, SECP256K1_ORDER, SECP256K1_G, SECP256K1
+from test_framework.key import generate_privkey, compute_xonly_pubkey, sign_schnorr, tweak_add_privkey, ECKey, ECPubKey, SECP256K1_ORDER, SECP256K1_G, SECP256K1, TaggedHash, verify_schnorr
 from test_framework.bip32 import BIP32, bip32_tests
+from test_framework.musig import MuSigBase, MuSig2
 from test_framework.address import (
     hash160,
 )
@@ -84,85 +85,11 @@ import hashlib
 import os
 import random
 from binascii import hexlify, unhexlify
-from typing import Tuple
-from dataclasses import dataclass
+from typing import Tuple, Optional, List
+from dataclasses import dataclass, field
 import struct
 
-###### key functions
-
-def MakeECKey(secret):
-    k = ECKey()
-    k.set(secret, compressed=True)
-    return k
-
-def MakeECPubKey(b):
-    k = ECPubKey()
-    k.set(b)
-    return k
-
-def keystr(k):
-    if isinstance(k, ECKey):
-        k = k.get_pubkey()
-    return hexlify(k.get_bytes()).decode('utf8')
-
 ###### stuff
-
-def partial_schnorr_sign(partialkey, pubkey, msg, partialnonce, pubnonce):
-    assert len(partialkey) == 32
-    assert len(pubkey) == 32
-    assert len(msg) == 32
-    assert len(partialnonce) == 32
-    assert len(pubnonce) == 32
-
-    # note that these points may not have even y
-    sec = int.from_bytes(partialkey, 'big')
-    if sec == 0 or sec >= SECP256K1_ORDER:
-        return None
-    nonce = int.from_bytes(privnonce, 'big')
-    if nonce == 0 or nonce >= SECP256K1_ORDER:
-        return None
-
-    # these points do have even y though
-    P = SECP256K1.lift_x(pubkey)
-    if P is None:
-        return None
-    R = SECP256K1.lift_x(pubnonce)
-    if R is None:
-        return None
-
-    e = int.from_bytes(TaggedHash("BIP0340/challenge", pubnonce + pubkey + msg), 'big') % SECP256K1_ORDER
-    return ((nonce + e * sec) % SECP256K1_ORDER).to_bytes(32, 'big')
-
-def partial_schnorr_verify(partialkey, pubkey, msg, partialnonce, pubnonce, sig_s):
-    assert len(partialkey) == 33
-    assert len(pubkey) == 32
-    assert len(msg) == 32
-    assert len(partialnonce) == 33
-    assert len(sig_s) == 32
-
-    # these points are fully specified
-    Pa = ECPubKey()
-    Pa.set(partialkey)
-    assert Pa.is_valid and Pa.compressed
-    Ra = ECPubKey()
-    Ra.set(partialnonce)
-    assert Ra.is_valid and Ra.compressed
-
-    # these points must have even y
-    P = SECP256K1.lift_x(pubkey)
-    if P is None:
-        return None
-    R = SECP256K1.lift_x(pubnonce)
-    if R is None:
-        return None
-
-    s = int.from_bytes(sig_s, 'big')
-    if s >= SECP256K1_ORDER:
-        return False
-
-    e = int.from_bytes(TaggedHash("BIP0340/challenge", pubnonce + pubkey + msg), 'big') % SECP256K1_ORDER
-    Ra_calc = SECP256K1.mul([(SECP256K1_G, s), (Pa, SECP256K1_ORDER - e)])
-    return SECP256K1.affine(Ra.key) == SECP256K1.affine(Ra_calc)
 
 class RevocableSecret:
     max_ceiling = 10000
@@ -222,56 +149,6 @@ class DeterministicNonce:
             d = hashlib.sha256(d + struct.patck("<L", p)).digest()
         return d
 
-class MuSig:
-    def __init__(self, keys, mul, tweak):
-        self.keys = keys
-        self.mul = mul
-        self.tweak = tweak
-
-        # P = sum(mul*(key + tweak*G))
-        #   = sum(mul*key) + sum(mul*tweak)*G
-        pts = [k.neuter().key.p for k in keys]
-        mt = sum(m*t for m, t in zip(mul, tweak))
-        p = SECP256K1.mul([(p, m) for m, p in zip(mul, pts)] + [(SECP256K1_G, mt)])
-
-        if not SECP256K1.has_even_y(p):
-            # negate everything
-            p = SECP256K1.negate(p)
-            self.mul = [(SECP256K1_ORDER - n) for n in self.mul]
-
-        k = ECPubKey()
-        k.p = p
-        k.valid = True
-        k.compressed = True
-        self.pubkey = k
-
-class MuSigBase:
-    def __init__(self, *keys):
-        assert len(keys) >= 1
-        assert all(isinstance(k, BIP32) for k in keys)
-        self.keys = keys
-
-    def derive(self, *path):
-        d_tweak = []
-        d_keys = []
-        for k in self.keys:
-            tweak = 0
-            for p in path:
-                k, t = k.derive(p)
-                tweak = (tweak + t) % SECP256K1_ORDER
-            d_tweak.append(tweak)
-            d_keys.append(k)
-
-        basehash = hashlib.sha256(b"".join([k.neuter().key.get_bytes() for k in d_keys]))
-        d_mul = []
-        for i, k in enumerate(d_keys):
-            h = basehash.copy()
-            h.update(struct.pack("<L", i))
-            n = int.from_bytes(h.digest(), 'big') % SECP256K1_ORDER
-            d_mul.append(n)
-
-        return MuSig(d_keys, d_mul, d_tweak)
-
 @dataclass
 class ChannelSecrets:
     def __init__(self, seed):
@@ -282,6 +159,8 @@ class ChannelSecrets:
 class ChannelParams:
     musigbase: MuSigBase
     delay: int
+    obscured_cn: int = 0xC011EC7AB1E5
+    fees: int = 1000
     # secrets? my secrets, their secrets?
     # maybe keep that separate and deal with updating?
     # this is so complicated
@@ -294,7 +173,13 @@ class ChannelBalance:
     bal: Tuple[int, int]
     funding: COutPoint
 
-    # these should probably be post_init?
+    def funding_address(self):
+        fk = self.params.musigbase.derive(0, self.f).pubkey.get_bytes()
+        return taproot_construct(fk[1:], None)
+
+    def funding_txout(self):
+        return CTxOut(sum(self.bal), self.funding_address().scriptPubKey)
+
     def balance_output(self, who):
         assert who == 0 or who == 1
         k = self.params.musigbase.keys[who].neuter().derive(1, self.n)[0].key.get_bytes()
@@ -305,26 +190,28 @@ class ChannelBalance:
         return taproot_construct(ipk[1:], [("csv", scr)])
 
     def build_tx(self):
+        obs_n = (self.n ^ (self.params.obscured_cn)) & 0xFFFFFFFFFFFF
+        nseq = 0x80000000 | ((obs_n & 0xFFFFFF000000) >> 24)
+        nlck = 0x20000000 | (obs_n & 0x000000FFFFFF)
+
         tx = CTransaction()
-        tx.vin = [CTxIn(self.funding, nSequence=0)]
+        tx.nLockTime = nlck
+        tx.vin = [CTxIn(self.funding, nSequence=nseq)]
         tx.vout = [
-            CTxOut(self.bal[0], self.balance_output(0).scriptPubKey),
-            CTxOut(self.bal[1], self.balance_output(1).scriptPubKey),
+            CTxOut(self.bal[0] - self.params.fees//2, self.balance_output(0).scriptPubKey),
+            CTxOut(self.bal[1] - self.params.fees//2, self.balance_output(1).scriptPubKey),
         ]
-        tx.nLockTime = 0
+        tx.wit.vtxinwit = [CTxInWitness()]
         return tx
 
-class Channel:
-    def __init__(self, mykey, theirkey):
-        if mykey.neuter().key.get_bytes()[1:] < theirkey.neuter().key.get_bytes()[1:]:
-            i, keys = 0, [mykey, theirkey]
-        else:
-            i, keys = 1, [theirkey, mykey]
-        self.musigbase = MuSigBase(*keys)
-        self.idx = i
+    def build_msg(self):
+        return TaprootSignatureHash(self.build_tx(), [self.funding_txout()], 0, input_index = 0, scriptpath = False, annex = None)
 
-        self.secrets = ChannelSecrets(b"channel" + bytes(i))
-        self.state = ChannelState(0, [0,0])
+@dataclass
+class ChannelInflight:
+    balance: ChannelBalance
+    side: int
+    bal: Tuple[int, int]
 
 
 # make it work with just balance updates first, then add the p/htlcs
@@ -358,10 +245,7 @@ class Channel:
 
 ###### test
 
-alice = MakeECKey(b'a'*32)
-bob = MakeECKey(b'b'*32)
-
-alice = BIP32(b"alice", public=False)
+alice = BIP32(b"alice2", public=False)
 bob = BIP32(b"bob", public=False)
 
 class LNPTLCTest(BitcoinTestFramework):
@@ -372,21 +256,72 @@ class LNPTLCTest(BitcoinTestFramework):
     def run_test(self):
         bip32_tests()
 
-        self.log.info("Hello... %s %s" % (keystr(alice.key), keystr(bob.key)))
+        self.log.info("Alice: %s" % (alice.serialize()))
+        self.log.info("Bob: %s" % (bob.serialize()))
 
-        bxonly = bob.neuter().key.get_bytes()[1:]
-        assert len(bxonly) == 32
-        msg = b"m" * 32
-        sig = sign_schnorr(bxonly, msg)
-        self.log.info("sig %s" % (hexlify(sig).decode('utf8')))
+        # funding tx
+        f_level = 0
+        f_outp = COutPoint(int("2821b06cc43229974f833c9eb0e4c85a586cee5c645eb8507e51ea7f5caf4547", 16), 0)
 
         cp = ChannelParams(MuSigBase(alice, bob), delay=144)
-        f1 = COutPoint(100000, 3)
-        bal =  ChannelBalance(cp, 0, 1, (5000, 5000), f1)
+        bal =  ChannelBalance(params=cp, f=f_level, n=1, bal=(2500, 2500), funding=f_outp)
 
-        tx = bal.build_tx()
-        print(tx)
-        print(tx.serialize().hex())
+        f_addr = bal.funding_address()
+        pubkeytweak = (f_addr.negflag, int.from_bytes(f_addr.tweak, 'big'))
+        musig = cp.musigbase.derive(0, bal.f)
+
+        self.log.info("Funding tx outpoint: %s" % (f_outp))
+        self.log.info("Funding tx should pay to: %s" % (bal.funding_txout()))
+        self.log.info("Funding tx should pay to: %s" % (hexlify(musig.pubkey.get_bytes())))
+
+        msg = bal.build_msg()
+
+        m2a = MuSig2(musig, msg, pubkeytweak=pubkeytweak)
+        m2b = MuSig2(musig, msg, pubkeytweak=pubkeytweak)
+
+        m2a.set_secret_seed(0, b"alice_secret")
+
+        m2b.set_nonce(0, *m2a.noncepairs[0])
+        m2b.set_secret_seed(1, b"bob_secret")
+        m2b.calc_b_r()
+
+        m2a.set_nonce(1, *m2b.noncepairs[1])
+        m2a.calc_b_r()
+
+        assert m2a.b == m2b.b
+        assert m2a.r == m2b.r
+
+        m2a.calc_partial(0)
+        m2b.calc_partial(1)
+
+        m2a.set_partial(1, m2b.partial[1])
+        m2a.partial[1] = m2b.partial[1]
+        # XXX verify partial sig
+
+        sig = m2a.calc_sig()
+        p = f_addr.scriptPubKey[-32:]
+
+        assert verify_schnorr(p, sig, msg)
+        self.log.info("Successfully verified with key %s" % (hexlify(p),))
+
+        tx = bal.build_tx()  # matches msg = bal.build_msg() above
+        tx.wit.vtxinwit[0].scriptWitness.stack = [sig]
+        self.log.info("Balance tx: %s" % (tx.serialize().hex()))
+
+        # make these functions?
+        #   - funding address
+        #   - generate balance(params, fundinginfo, n, [bal, bal], fees)
+        #     - half sign balance [w/ det]
+        #     - complete balance sig [w/ revoc]
+        #     - recover secret from revoked balance sig [via det]
+        #     - sign via csv delay
+        #   - generate inflight
+        #     - with ptlcs/htlcs
+        #     - claim via revocation of 1st secret (old balance)
+        #     - claim via revocation of 2nd secret (old inflight)
+        #     - claim via timeout
+        #     - claim via hash/point preimage
+        #     - recover hash/point preimage
 
 if __name__ == '__main__':
     LNPTLCTest().main()
