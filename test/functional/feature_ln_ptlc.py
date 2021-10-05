@@ -91,69 +91,52 @@ import struct
 
 ###### stuff
 
+@dataclass
 class RevocableSecret:
-    max_ceiling = 10000
-    def __init__(self, seed, ceiling=None):
-        if ceiling is None:
-            ceiling = self.max_ceiling
-        assert 0 <= ceiling <= self.max_ceiling
-        assert isinstance(seed, bytes) and len(seed) == 32
-        self.seed = seed
-        self.ceiling = ceiling
+    seed: bytes
+    ceiling: int = 10000
+    subceiling: int = 1000
 
-    def get(self, level):
+    def __post_init__():
+        assert 0 <= self.ceiling <= 10000
+        assert 0 <= self.subceiling <= 10000
+        assert isinstance(seed, bytes) and len(seed) == 32
+
+    def get(self, level, *sublevels):
         assert level < self.ceiling
         d = self.seed
         for _ in range(self.ceiling - self.level):
             d = hashlib.sha256(d).digest()
+
+        for sl in sublevels:
+            d = hashlib.sha256(b"sublevel/" + d).digest()
+            for _ in range(self.subceiling - sl):
+                d = hashlib.sha256(d).digest()
+
         return d
 
     def __eq__(self, other):
         m = min(self.ceiling, other.ceiling)
         return self.get(m) == other.get(m)
 
-class RevocableSecret2:
-    def __init__(self, i, j, seed1, seed2):
-        self.top = RevocableSecret(seed1, i)
-        self.sec = RevocableSecret(seed2, j)
-
-    def _secseeder(self, i):
-        return RevocableSecret(self.top.get(i))
-
-    def get(self, i, j=None):
-        if j is None:
-            return self.top.get(i)
-        elif i == self.top.ceiling:
-            return self.sec.get(j)
-        else:
-            return _secseeder(i).get(j)
-
-    def __eq__(self, other):
-        if self.top != other.top:
-            return False
-
-        if self.top.ceiling == other.top.ceiling:
-            return self.sec == other.sec
-        elif self.top.ceiling < other.top.ceiling:
-            return self.sec == other._secseeder(self.top.ceiling)
-        else:
-            return self._secseeder(other.top.ceiling) == other.sec
-
-class DeterministicNonce:
-    def __init__(self, seed):
-        self.seed = hashlib.sha256(d).digest()
-
-    def nonce(self, *path):
-        d = self.seed
-        for p in path:
-            d = hashlib.sha256(d + struct.patck("<L", p)).digest()
-        return d
-
 @dataclass
-class ChannelSecrets:
-    def __init__(self, seed):
-        self.deterministic_secret = DeterministicNonce(seed + b"det")
-        self.balance_secret = RevocableSecret(hashlib.sha256(seed + b"rec"))
+class MySecrets:
+    seed: bytes
+    rev: RevocableSecret = field(init=False)
+
+    def __post_init__(self):
+        self.rev = RevocableSecret(hashlib.sha256(self.seed + b"revoke").digest())
+
+    def rev_nonce(self, *path):
+        """revocable nonce, if you know i, you know i/* and i-1"""
+        return self.rev.get(*path)
+
+    def det_nonce(self, *path):
+        """deterministic nonce, based on seed and path"""
+        d = hashlib.sha256(seed + b"revoke").digest()
+        for p in path:
+            d = hashlib.sha256(d + struct.pack("<Q", p)).digest()
+        return d
 
 @dataclass
 class ChannelParams:
@@ -166,19 +149,28 @@ class ChannelParams:
     # this is so complicated
 
 @dataclass
-class ChannelBalance:
+class FundingTx:
     params: ChannelParams
     f: int  # funding version
-    n: int  # balance version
-    bal: Tuple[int, int]
-    funding: COutPoint
+    op: COutPoint # funding tx outpoint (txid, vout)
+    value: int  # value (satoshis)
 
-    def funding_address(self):
+    def address(self):
         fk = self.params.musigbase.derive(0, self.f).pubkey.get_bytes()
         return taproot_construct(fk[1:], None)
 
-    def funding_txout(self):
-        return CTxOut(sum(self.bal), self.funding_address().scriptPubKey)
+    def txout(self):
+        return CTxOut(self.value, self.address().scriptPubKey)
+
+@dataclass
+class BalanceTx:
+    params: ChannelParams
+    funding: FundingTx
+    n: int  # balance version
+    bal: Tuple[int, int]
+
+    def __post_init__(self):
+        assert self.funding.value == sum(self.bal)
 
     def balance_output(self, who):
         assert who == 0 or who == 1
@@ -196,7 +188,7 @@ class ChannelBalance:
 
         tx = CTransaction()
         tx.nLockTime = nlck
-        tx.vin = [CTxIn(self.funding, nSequence=nseq)]
+        tx.vin = [CTxIn(self.funding.op, nSequence=nseq)]
         tx.vout = [
             CTxOut(self.bal[0] - self.params.fees//2, self.balance_output(0).scriptPubKey),
             CTxOut(self.bal[1] - self.params.fees//2, self.balance_output(1).scriptPubKey),
@@ -205,11 +197,12 @@ class ChannelBalance:
         return tx
 
     def build_msg(self):
-        return TaprootSignatureHash(self.build_tx(), [self.funding_txout()], 0, input_index = 0, scriptpath = False, annex = None)
+        return TaprootSignatureHash(self.build_tx(), [self.funding.txout()], 0, input_index = 0, scriptpath = False, annex = None)
 
 @dataclass
-class ChannelInflight:
-    balance: ChannelBalance
+class InflightTx:
+    params: ChannelParams
+    balance: BalanceTx
     side: int
     bal: Tuple[int, int]
 
@@ -228,21 +221,6 @@ class ChannelInflight:
 #    unilateral close
 #    punish
 
-# musig2signing:
-#     `-- calculates the musig2 nonce
-#     `-- accepts nonce offsets for adaptor sigs
-#     `-- does partial sigs
-#     `-- recovers privatekey given known nonce secret
-#     `-- validates partial sigs
-# (maybe musig2 nonce calc gets split out too)
-
-# taproot
-#     `-- take a musig and a path for ipk
-#     `-- be able to get back to the musig for "tweaking" the privkey
-#     `-- also add script paths
-#     `-- sign for the script paths, basically specifying the path and
-#         the key and the various flags manually?
-
 ###### test
 
 alice = BIP32(b"alice2", public=False)
@@ -259,19 +237,20 @@ class LNPTLCTest(BitcoinTestFramework):
         self.log.info("Alice: %s" % (alice.serialize()))
         self.log.info("Bob: %s" % (bob.serialize()))
 
-        # funding tx
-        f_level = 0
-        f_outp = COutPoint(int("2821b06cc43229974f833c9eb0e4c85a586cee5c645eb8507e51ea7f5caf4547", 16), 0)
-
         cp = ChannelParams(MuSigBase(alice, bob), delay=144)
-        bal =  ChannelBalance(params=cp, f=f_level, n=1, bal=(2500, 2500), funding=f_outp)
 
-        f_addr = bal.funding_address()
+        fund = FundingTx(params=cp, f=0,
+                         op=COutPoint(int("2821b06cc43229974f833c9eb0e4c85a586cee5c645eb8507e51ea7f5caf4547", 16), 0),
+                         value=5000)
+
+        bal =  BalanceTx(params=cp, funding=fund, n=1, bal=(2500, 2500))
+
+        f_addr = fund.address()
         pubkeytweak = (f_addr.negflag, int.from_bytes(f_addr.tweak, 'big'))
-        musig = cp.musigbase.derive(0, bal.f)
+        musig = cp.musigbase.derive(0, fund.f)
 
-        self.log.info("Funding tx outpoint: %s" % (f_outp))
-        self.log.info("Funding tx should pay to: %s" % (bal.funding_txout()))
+        self.log.info("Funding tx outpoint: %s" % (fund.op))
+        self.log.info("Funding tx should pay to: %s" % (bal.funding.txout()))
         self.log.info("Funding tx should pay to: %s" % (hexlify(musig.pubkey.get_bytes())))
 
         msg = bal.build_msg()

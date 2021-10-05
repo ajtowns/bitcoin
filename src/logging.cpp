@@ -118,7 +118,7 @@ bool BCLog::Logger::DisableCategory(const std::string& str)
 
 bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
 {
-    return (m_categories.load(std::memory_order_relaxed) & category) != 0;
+    return category != BCLog::LOCK && (m_categories.load(std::memory_order_relaxed) & category) != 0;
 }
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const
