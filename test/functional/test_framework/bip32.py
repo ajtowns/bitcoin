@@ -1,11 +1,8 @@
-# Copyright (c) 2019-2020 Pieter Wuille
+# Copyright (c) 2021 Anthony Towns
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test-only secp256k1 elliptic curve implementation
+"""Test-only bip32 implementation"""
 
-WARNING: This code is slow, uses bad randomness, does not properly protect
-keys, and is trivially vulnerable to side channel attacks. Do not use for
-anything but tests."""
 import csv
 import hashlib
 import hmac
