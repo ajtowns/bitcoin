@@ -144,6 +144,7 @@ class BalanceTx:
 
     def __post_init__(self):
         assert self.funding.value == sum(self.bal)
+        assert all(b > self.params.fees//2 for b in self.bal)
 
     def balance_output(self, who):
         assert who == 0 or who == 1
@@ -172,26 +173,46 @@ class BalanceTx:
     def build_msg(self):
         return TaprootSignatureHash(self.build_tx(), [self.funding.txout()], 0, input_index = 0, scriptpath = False, annex = None)
 
-    def half_sign(self, index, secret, nonce):
+    def half_sign(self, who, secret, nonce):
         musig = self.params.musigbase.derive(0, self.funding.f)
         m2 = MuSig2(musig, self.build_msg(), pubkeytweak=self.funding.pubkeytweak())
-        m2.set_secret(index, *secret)
-        m2.set_nonce(1-index, *nonce)
+        m2.set_secret(who, *secret)
+        m2.set_nonce(1-who, *nonce)
         m2.calc_b_r()
-        m2.calc_partial(index)
+        m2.calc_partial(who)
         return m2.partial[1]
 
-    def complete_sign(self, index, secret, nonce, partial_sig):
+    def complete_sign(self, who, secret, nonce, partial_sig):
         musig = self.params.musigbase.derive(0, self.funding.f)
         m2 = MuSig2(musig, self.build_msg(), pubkeytweak=self.funding.pubkeytweak())
-        m2.set_secret(index, *secret)
-        m2.set_nonce(1-index, *nonce)
+        m2.set_secret(who, *secret)
+        m2.set_nonce(1-who, *nonce)
         m2.calc_b_r()
-        m2.set_partial(1-index, partial_sig)
-        m2.calc_partial(index)
+        m2.set_partial(1-who, partial_sig)
+        m2.calc_partial(who)
         sig = m2.calc_sig()
         tx = self.build_tx()
         tx.wit.vtxinwit[0].scriptWitness.stack = [sig]
+        return tx
+
+    def spend_balance_via_csv(self, who, destspk):
+        btx = self.build_tx()
+        btx.rehash()
+        tx = CTransaction()
+        tx.nVersion = 2
+        tx.vin = [CTxIn(COutPoint(btx.sha256, who), nSequence=self.params.delay)]
+        tx.vout = [CTxOut(self.bal[1] - self.params.fees, destspk)]
+        tx.wit.vtxinwit = [CTxInWitness()]
+
+        tli = self.balance_output(who)
+        csv = tli.leaves["csv"]
+        controlblock = bytes([csv.version + tli.negflag]) + tli.internal_pubkey + csv.merklebranch
+
+        msg = TaprootSignatureHash(tx, [btx.vout[who]], 0, input_index = 0, scriptpath = True, script = csv.script, annex = None)
+
+        k = self.params.musigbase.keys[who].derive(1, self.n)[0].key.get_bytes()
+        sig = sign_schnorr(k, msg)
+        tx.wit.vtxinwit[0].scriptWitness.stack = [sig, csv.script, controlblock]
         return tx
 
 @dataclass
@@ -235,23 +256,33 @@ class LNPTLCTest(BitcoinTestFramework):
         alice_sec = SecretPair(b"alicehorsebatterystaple")
         bob_sec = SecretPair(b"bobhorsebatterystaple")
 
-        cp_pub = ChannelParams(MuSigBase(alice_pub, bob_pub), delay=144)
+        cp_pub = ChannelParams(MuSigBase(alice_pub, bob_pub), delay=1)
         fund = FundingTx(params=cp_pub,
                          f=0,
                          op=COutPoint(int("2821b06cc43229974f833c9eb0e4c85a586cee5c645eb8507e51ea7f5caf4547", 16), 0),
                          value=5000)
 
         # half sign balance by B
-        cp_b = ChannelParams(MuSigBase(alice_pub, bob), delay=144)
+        cp_b = ChannelParams(MuSigBase(alice_pub, bob), delay=1)
         bal_b =  BalanceTx(params=cp_b, funding=fund, n=1, bal=(2500, 2500))
         bob_partial = bal_b.half_sign(1, bob_sec.sec(), alice_sec.nonce())
 
         # complete balance by A
-        cp_a = ChannelParams(MuSigBase(alice, bob_pub), delay=144)
+        cp_a = ChannelParams(MuSigBase(alice, bob_pub), delay=1)
         bal_a =  BalanceTx(params=cp_a, funding=fund, n=1, bal=(2500, 2500))
         tx = bal_a.complete_sign(0, alice_sec.sec(), bob_sec.nonce(), bob_partial)
 
         self.log.info("Balance tx: %s" % (tx.serialize().hex()))
+
+        bal_a.spend_balance_via_csv(0, unhexlify("0014fd760b2b6bc2ec78a4f44c1f34b87399eb364903"))
+
+        # spend balance by A
+        tx_a = bal_a.spend_balance_via_csv(0, unhexlify("0014fd760b2b6bc2ec78a4f44c1f34b87399eb364903"))
+        self.log.info("Claim A's bal: %s" % (tx_a.serialize().hex()))
+
+        # spend balance by B
+        tx_b = bal_b.spend_balance_via_csv(1, unhexlify("0014fd760b2b6bc2ec78a4f44c1f34b87399eb364903"))
+        self.log.info("Claim B's bal: %s" % (tx_b.serialize().hex()))
 
         # make these functions?
         #   - funding address
