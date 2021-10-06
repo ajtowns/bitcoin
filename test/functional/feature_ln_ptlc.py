@@ -74,7 +74,7 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_raises_rpc_error, assert_equal
 from test_framework.key import generate_privkey, compute_xonly_pubkey, sign_schnorr, tweak_add_privkey, ECKey, ECPubKey, SECP256K1_ORDER, SECP256K1_G, SECP256K1, TaggedHash, verify_schnorr
 from test_framework.bip32 import BIP32, bip32_tests
-from test_framework.musig import MuSigBase, MuSig2
+from test_framework.musig import MuSigBase, MuSig2, MakeECKey
 from test_framework.address import (
     hash160,
 )
@@ -92,51 +92,20 @@ import struct
 ###### stuff
 
 @dataclass
-class RevocableSecret:
-    seed: bytes
-    ceiling: int = 10000
-    subceiling: int = 1000
+class SecretPair:
+    r1: bytes
+    r2: bytes
 
-    def __post_init__():
-        assert 0 <= self.ceiling <= 10000
-        assert 0 <= self.subceiling <= 10000
-        assert isinstance(seed, bytes) and len(seed) == 32
+    def __init__(self, seed):
+        h = hashlib.sha256(seed).digest()
+        self.r1 = hashlib.sha256(h + bytes([0])).digest()
+        self.r2 = hashlib.sha256(h + bytes([1])).digest()
 
-    def get(self, level, *sublevels):
-        assert level < self.ceiling
-        d = self.seed
-        for _ in range(self.ceiling - self.level):
-            d = hashlib.sha256(d).digest()
+    def sec(self):
+        return self.r1, self.r2
 
-        for sl in sublevels:
-            d = hashlib.sha256(b"sublevel/" + d).digest()
-            for _ in range(self.subceiling - sl):
-                d = hashlib.sha256(d).digest()
-
-        return d
-
-    def __eq__(self, other):
-        m = min(self.ceiling, other.ceiling)
-        return self.get(m) == other.get(m)
-
-@dataclass
-class MySecrets:
-    seed: bytes
-    rev: RevocableSecret = field(init=False)
-
-    def __post_init__(self):
-        self.rev = RevocableSecret(hashlib.sha256(self.seed + b"revoke").digest())
-
-    def rev_nonce(self, *path):
-        """revocable nonce, if you know i, you know i/* and i-1"""
-        return self.rev.get(*path)
-
-    def det_nonce(self, *path):
-        """deterministic nonce, based on seed and path"""
-        d = hashlib.sha256(seed + b"revoke").digest()
-        for p in path:
-            d = hashlib.sha256(d + struct.pack("<Q", p)).digest()
-        return d
+    def nonce(self):
+        return MakeECKey(self.r1).get_pubkey(), MakeECKey(self.r2).get_pubkey()
 
 @dataclass
 class ChannelParams:
@@ -161,6 +130,10 @@ class FundingTx:
 
     def txout(self):
         return CTxOut(self.value, self.address().scriptPubKey)
+
+    def pubkeytweak(self):
+        addr = self.address()
+        return (addr.negflag, int.from_bytes(addr.tweak, 'big'))
 
 @dataclass
 class BalanceTx:
@@ -199,6 +172,28 @@ class BalanceTx:
     def build_msg(self):
         return TaprootSignatureHash(self.build_tx(), [self.funding.txout()], 0, input_index = 0, scriptpath = False, annex = None)
 
+    def half_sign(self, index, secret, nonce):
+        musig = self.params.musigbase.derive(0, self.funding.f)
+        m2 = MuSig2(musig, self.build_msg(), pubkeytweak=self.funding.pubkeytweak())
+        m2.set_secret(index, *secret)
+        m2.set_nonce(1-index, *nonce)
+        m2.calc_b_r()
+        m2.calc_partial(index)
+        return m2.partial[1]
+
+    def complete_sign(self, index, secret, nonce, partial_sig):
+        musig = self.params.musigbase.derive(0, self.funding.f)
+        m2 = MuSig2(musig, self.build_msg(), pubkeytweak=self.funding.pubkeytweak())
+        m2.set_secret(index, *secret)
+        m2.set_nonce(1-index, *nonce)
+        m2.calc_b_r()
+        m2.set_partial(1-index, partial_sig)
+        m2.calc_partial(index)
+        sig = m2.calc_sig()
+        tx = self.build_tx()
+        tx.wit.vtxinwit[0].scriptWitness.stack = [sig]
+        return tx
+
 @dataclass
 class InflightTx:
     params: ChannelParams
@@ -223,9 +218,6 @@ class InflightTx:
 
 ###### test
 
-alice = BIP32(b"alice2", public=False)
-bob = BIP32(b"bob", public=False)
-
 class LNPTLCTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
@@ -234,64 +226,36 @@ class LNPTLCTest(BitcoinTestFramework):
     def run_test(self):
         bip32_tests()
 
-        self.log.info("Alice: %s" % (alice.serialize()))
-        self.log.info("Bob: %s" % (bob.serialize()))
+        alice = BIP32(b"alice2", public=False)
+        bob = BIP32(b"bob", public=False)
 
-        cp = ChannelParams(MuSigBase(alice, bob), delay=144)
+        alice_pub = alice.neuter()
+        bob_pub = bob.neuter()
 
-        fund = FundingTx(params=cp, f=0,
+        alice_sec = SecretPair(b"alicehorsebatterystaple")
+        bob_sec = SecretPair(b"bobhorsebatterystaple")
+
+        cp_pub = ChannelParams(MuSigBase(alice_pub, bob_pub), delay=144)
+        fund = FundingTx(params=cp_pub,
+                         f=0,
                          op=COutPoint(int("2821b06cc43229974f833c9eb0e4c85a586cee5c645eb8507e51ea7f5caf4547", 16), 0),
                          value=5000)
 
-        bal =  BalanceTx(params=cp, funding=fund, n=1, bal=(2500, 2500))
+        # half sign balance by B
+        cp_b = ChannelParams(MuSigBase(alice_pub, bob), delay=144)
+        bal_b =  BalanceTx(params=cp_b, funding=fund, n=1, bal=(2500, 2500))
+        bob_partial = bal_b.half_sign(1, bob_sec.sec(), alice_sec.nonce())
 
-        f_addr = fund.address()
-        pubkeytweak = (f_addr.negflag, int.from_bytes(f_addr.tweak, 'big'))
-        musig = cp.musigbase.derive(0, fund.f)
+        # complete balance by A
+        cp_a = ChannelParams(MuSigBase(alice, bob_pub), delay=144)
+        bal_a =  BalanceTx(params=cp_a, funding=fund, n=1, bal=(2500, 2500))
+        tx = bal_a.complete_sign(0, alice_sec.sec(), bob_sec.nonce(), bob_partial)
 
-        self.log.info("Funding tx outpoint: %s" % (fund.op))
-        self.log.info("Funding tx should pay to: %s" % (bal.funding.txout()))
-        self.log.info("Funding tx should pay to: %s" % (hexlify(musig.pubkey.get_bytes())))
-
-        msg = bal.build_msg()
-
-        m2a = MuSig2(musig, msg, pubkeytweak=pubkeytweak)
-        m2b = MuSig2(musig, msg, pubkeytweak=pubkeytweak)
-
-        m2a.set_secret_seed(0, b"alice_secret")
-
-        m2b.set_nonce(0, *m2a.noncepairs[0])
-        m2b.set_secret_seed(1, b"bob_secret")
-        m2b.calc_b_r()
-
-        m2a.set_nonce(1, *m2b.noncepairs[1])
-        m2a.calc_b_r()
-
-        assert m2a.b == m2b.b
-        assert m2a.r == m2b.r
-
-        m2a.calc_partial(0)
-        m2b.calc_partial(1)
-
-        m2a.set_partial(1, m2b.partial[1])
-        m2a.partial[1] = m2b.partial[1]
-        # XXX verify partial sig
-
-        sig = m2a.calc_sig()
-        p = f_addr.scriptPubKey[-32:]
-
-        assert verify_schnorr(p, sig, msg)
-        self.log.info("Successfully verified with key %s" % (hexlify(p),))
-
-        tx = bal.build_tx()  # matches msg = bal.build_msg() above
-        tx.wit.vtxinwit[0].scriptWitness.stack = [sig]
         self.log.info("Balance tx: %s" % (tx.serialize().hex()))
 
         # make these functions?
         #   - funding address
         #   - generate balance(params, fundinginfo, n, [bal, bal], fees)
-        #     - half sign balance [w/ det]
-        #     - complete balance sig [w/ revoc]
         #     - recover secret from revoked balance sig [via det]
         #     - sign via csv delay
         #   - generate inflight

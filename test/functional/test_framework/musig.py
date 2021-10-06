@@ -230,12 +230,6 @@ class MuSig2:
         self.noncepairs += [None] * (n - len(self.noncepairs))
         self.partial += [None] * (n - len(self.partial))
 
-    def set_secret_seed(self, i, seed):
-        h = hashlib.sha256(seed).digest()
-        r1 = hashlib.sha256(h + struct.pack("<L", 0)).digest()
-        r2 = hashlib.sha256(h + struct.pack("<L", 1)).digest()
-        self.set_secret(i, r1, r2)
-
     def set_secret(self, i, r1, r2):
         assert 0 <= i < len(self.musig.keys)
         self.secretpairs[i] = (r1, r2)
