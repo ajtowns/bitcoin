@@ -248,10 +248,17 @@ class MuSig2:
 
     def calc_b_r(self):
         assert all(i is not None for i in self.noncepairs)
+        assert self.msg is not None
+        assert len(self.msg) == 32
+        pk = self.musig.pubkey.get_bytes()
+        assert len(pk) == 33
+
         hasher = hashlib.sha256()
+        hasher.update(pk)
         for r1, r2 in self.noncepairs:
             hasher.update(r1.get_bytes())
             hasher.update(r2.get_bytes())
+        hasher.update(self.msg)
         self.b = int.from_bytes(hasher.digest(), 'big') % SECP256K1_ORDER
         pt_r = ECPubKey()
         pt_r.p = SECP256K1.mul(
