@@ -800,7 +800,9 @@ private:
     //! by the background validation chainstate.
     bool m_snapshot_validated{false};
 
+    /** Most-work invalid block that we've seen so far (used to check for large invalid chains). */
     CBlockIndex* m_best_invalid;
+
     friend bool BlockManager::LoadBlockIndex(const Consensus::Params&, ChainstateManager&);
 
     //! Internal helper for ActivateSnapshot().
