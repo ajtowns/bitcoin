@@ -352,7 +352,7 @@ private:
      *
      * @return Returns true if the peer was punished (probably disconnected)
      */
-    bool MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state,
+    bool MaybePunishNodeForBlock(NodeId nodeid, const uint256& hash, const BlockValidationState& state,
                                  bool via_compact_block, const std::string& message = "");
 
     /**
@@ -538,6 +538,7 @@ private:
     void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<const CBlockIndex*>& vBlocks, NodeId& nodeStaller) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
     std::map<uint256, std::pair<NodeId, std::list<QueuedBlock>::iterator> > mapBlocksInFlight GUARDED_BY(cs_main);
+    std::set<uint256> m_garbage_blocks GUARDED_BY(cs_main); // blocks we've downloaded and decided are invalid, but aren't cached as invalid by validation/blockstorage
 
     /** When our tip was last updated. */
     std::atomic<int64_t> m_last_tip_update{0};
@@ -1058,6 +1059,10 @@ void PeerManagerImpl::FindNextBlocksToDownload(NodeId nodeid, unsigned int count
                 // We consider the chain that this peer is on invalid.
                 return;
             }
+            if (m_garbage_blocks.count(pindex->GetBlockHash()) != 0) {
+                // We consider the chain that this peer is on invalid.
+                return;
+            }
             if (!State(nodeid)->fHaveWitness && DeploymentActiveAt(*pindex, consensusParams, Consensus::DEPLOYMENT_SEGWIT)) {
                 // We wouldn't download this block or its descendants from this peer.
                 return;
@@ -1340,7 +1345,7 @@ void PeerManagerImpl::Misbehaving(const NodeId pnode, const int howmuch, const s
              pnode, score_before, score_now, warning, message_prefixed);
 }
 
-bool PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state,
+bool PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, const uint256& hash, const BlockValidationState& state,
                                               bool via_compact_block, const std::string& message)
 {
     switch (state.GetResult()) {
@@ -1381,6 +1386,10 @@ bool PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, const BlockValidati
         Misbehaving(nodeid, 10, message);
         return true;
     case BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE:
+        if (WITH_LOCK(cs_main, return m_garbage_blocks.insert(hash).second)) {
+            LogPrintf("%s: added garbage block %s\n", __func__, hash.ToString());
+        }
+        break;
     case BlockValidationResult::BLOCK_TIME_FUTURE:
         break;
     }
@@ -1612,7 +1621,7 @@ void PeerManagerImpl::BlockChecked(const CBlock& block, const BlockValidationSta
     if (state.IsInvalid() &&
         it != mapBlockSource.end() &&
         State(it->second.first)) {
-            MaybePunishNodeForBlock(/*nodeid=*/ it->second.first, state, /*via_compact_block=*/ !it->second.second);
+            MaybePunishNodeForBlock(/*nodeid=*/ it->second.first, hash, state, /*via_compact_block=*/ !it->second.second);
     }
     // Check that:
     // 1. The block is valid
@@ -2051,6 +2060,9 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
         LOCK(cs_main);
         CNodeState *nodestate = State(pfrom.GetId());
 
+        if (m_garbage_blocks.count(headers[0].hashPrevBlock) != 0) return;
+        if (m_garbage_blocks.count(headers[0].GetHash()) != 0) return;
+
         // If this looks like it could be a block announcement (nCount <
         // MAX_BLOCKS_TO_ANNOUNCE), use special logic for handling headers that
         // don't connect:
@@ -2080,6 +2092,7 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
 
         uint256 hashLastBlock;
         for (const CBlockHeader& header : headers) {
+            if (m_garbage_blocks.count(header.GetHash()) != 0) break;
             if (!hashLastBlock.IsNull() && header.hashPrevBlock != hashLastBlock) {
                 Misbehaving(pfrom.GetId(), 20, "non-continuous headers sequence");
                 return;
@@ -2095,9 +2108,10 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
     }
 
     BlockValidationState state;
-    if (!m_chainman.ProcessNewBlockHeaders(headers, state, m_chainparams, &pindexLast)) {
+    const CBlockHeader* failheader;
+    if (!m_chainman.ProcessNewBlockHeaders(headers, state, m_chainparams, &pindexLast, &failheader)) {
         if (state.IsInvalid()) {
-            MaybePunishNodeForBlock(pfrom.GetId(), state, via_compact_block, "invalid header received");
+            MaybePunishNodeForBlock(pfrom.GetId(), failheader->GetHash(), state, via_compact_block, "invalid header received");
             return;
         }
     }
@@ -2139,7 +2153,11 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, const Peer& peer,
             while (pindexWalk && !m_chainman.ActiveChain().Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                         !IsBlockRequested(pindexWalk->GetBlockHash()) &&
-                        (!DeploymentActiveAt(*pindexWalk, m_chainparams.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) || State(pfrom.GetId())->fHaveWitness)) {
+                        (!DeploymentActiveAt(*pindexWalk, m_chainparams.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT) || State(pfrom.GetId())->fHaveWitness))
+                {
+                    // Tried this block since last restart and rejected it
+                    if (m_garbage_blocks.count(pindexWalk->GetBlockHash()) != 0) break;
+
                     // We don't have this block, and it's not yet in flight.
                     vToFetch.push_back(pindexWalk);
                 }
@@ -2977,7 +2995,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             }
         }
 
-        if (best_block != nullptr) {
+        if (best_block != nullptr && !m_garbage_blocks.count(*best_block)) {
             m_connman.PushMessage(&pfrom, msgMaker.Make(NetMsgType::GETHEADERS, m_chainman.ActiveChain().GetLocator(pindexBestHeader), *best_block));
             LogPrint(BCLog::NET, "getheaders (%d) %s to peer=%d\n", pindexBestHeader->nHeight, best_block->ToString(), pfrom.GetId());
         }
@@ -3437,7 +3455,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         BlockValidationState state;
         if (!m_chainman.ProcessNewBlockHeaders({cmpctblock.header}, state, m_chainparams, &pindex)) {
             if (state.IsInvalid()) {
-                MaybePunishNodeForBlock(pfrom.GetId(), state, /*via_compact_block*/ true, "invalid header via cmpctblock");
+                MaybePunishNodeForBlock(pfrom.GetId(), cmpctblock.header.GetHash(), state, /*via_compact_block*/ true, "invalid header via cmpctblock");
                 return;
             }
         }
