@@ -11,6 +11,7 @@
 #include <consensus/params.h>
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
+#include <deploymentstatus.h>
 #include <init.h>
 #include <interfaces/chain.h>
 #include <net.h>
@@ -80,6 +81,7 @@ BasicTestingSetup::BasicTestingSetup(const std::string& chainName, const std::ve
       m_args{}
 {
     m_node.args = &gArgs;
+    g_versionbitscache.Clear();
     const std::vector<const char*> arguments = Cat(
         {
             "dummy",

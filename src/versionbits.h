@@ -97,6 +97,7 @@ public:
      */
     int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
+    /** Reset cache; needed if consensus params are changed */
     void Clear();
 };
 

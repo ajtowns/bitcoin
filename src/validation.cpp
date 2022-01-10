@@ -3971,7 +3971,6 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     LOCK(cs_main);
     chainman.Unload();
     if (mempool) mempool->clear();
-    g_versionbitscache.Clear();
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
         warningcache[b].clear();
     }
