@@ -13,6 +13,7 @@
 #include <arith_uint256.h>
 #include <attributes.h>
 #include <chain.h>
+#include <chainparams.h>
 #include <consensus/amount.h>
 #include <fs.h>
 #include <node/blockstorage.h>
@@ -833,6 +834,8 @@ private:
 
     CBlockIndex* m_best_invalid GUARDED_BY(::cs_main){nullptr};
 
+    const CChainParams& m_chainparams;
+
     //! Internal helper for ActivateSnapshot().
     [[nodiscard]] bool PopulateAndValidateSnapshot(
         CChainState& snapshot_chainstate,
@@ -851,6 +854,11 @@ private:
     friend CChainState;
 
 public:
+    explicit ChainstateManager(const CChainParams& chainparams) : m_chainparams{chainparams} { }
+
+    const CChainParams& GetParams() const { return m_chainparams; }
+    const Consensus::Params& GetConsensus() const { return m_chainparams.GetConsensus(); }
+
     std::thread m_load_block;
     //! A single BlockManager instance is shared across each constructed
     //! chainstate to avoid duplicating block metadata.
