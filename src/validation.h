@@ -807,6 +807,8 @@ private:
     CBlockIndex* m_best_invalid;
     friend bool node::BlockManager::LoadBlockIndex(const Consensus::Params&, ChainstateManager&);
 
+    const CChainParams& m_chainparams;
+
     //! Internal helper for ActivateSnapshot().
     [[nodiscard]] bool PopulateAndValidateSnapshot(
         CChainState& snapshot_chainstate,
@@ -825,6 +827,8 @@ private:
     friend CChainState;
 
 public:
+    ChainstateManager(const CChainParams& chainparams) : m_chainparams{chainparams} { }
+
     std::thread m_load_block;
     //! A single BlockManager instance is shared across each constructed
     //! chainstate to avoid duplicating block metadata.
