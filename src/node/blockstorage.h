@@ -93,7 +93,7 @@ private:
      */
     void FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight, int chain_tip_height, int prune_height, bool is_ibd);
 
-    RecursiveMutex cs_LastBlockFile;
+    mutable RecursiveMutex cs_LastBlockFile;
     std::vector<CBlockFileInfo> m_blockfile_info;
     int m_last_blockfile = 0;
     /** Global flag to indicate we should check to see if there are
@@ -151,10 +151,10 @@ public:
     FlatFilePos SaveBlockToDisk(const CBlock& block, int nHeight, CChain& active_chain, const CChainParams& chainparams, const FlatFilePos* dbp);
 
     /** Calculate the amount of disk space the block & undo files currently use */
-    uint64_t CalculateCurrentUsage();
+    uint64_t CalculateCurrentUsage() const;
 
     //! Returns last CBlockIndex* that is a checkpoint
-    CBlockIndex* GetLastCheckpoint(const CCheckpointData& data) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    CBlockIndex* GetLastCheckpoint(const CCheckpointData& data) const EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
     ~BlockManager()
     {

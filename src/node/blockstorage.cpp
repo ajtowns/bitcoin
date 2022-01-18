@@ -413,7 +413,7 @@ bool BlockManager::LoadBlockIndexDB(ChainstateManager& chainman)
     return true;
 }
 
-CBlockIndex* BlockManager::GetLastCheckpoint(const CCheckpointData& data)
+CBlockIndex* BlockManager::GetLastCheckpoint(const CCheckpointData& data) const
 {
     const MapCheckpoints& checkpoints = data.mapCheckpoints;
 
@@ -563,7 +563,7 @@ void BlockManager::FlushBlockFile(bool fFinalize, bool finalize_undo)
     if (!fFinalize || finalize_undo) FlushUndoFile(m_last_blockfile, finalize_undo);
 }
 
-uint64_t BlockManager::CalculateCurrentUsage()
+uint64_t BlockManager::CalculateCurrentUsage() const
 {
     LOCK(cs_LastBlockFile);
 
