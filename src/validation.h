@@ -28,8 +28,10 @@
 #include <util/check.h>
 #include <util/hasher.h>
 #include <util/translation.h>
+#include <versionbits.h>
 
 #include <atomic>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -971,6 +973,48 @@ public:
 
     /** Produce the necessary coinbase commitment for a block (modifies the hash, don't call for mined blocks). */
     std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev) const;
+
+    /** Global cache for versionbits deployment status */
+    mutable VersionBitsCache m_versionbitscache;
+
+    /** Determine if a deployment is active for the next block */
+    inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, Consensus::BuriedDeployment dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= GetConsensus().DeploymentHeight(dep);
+    }
+
+    inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, Consensus::DeploymentPos dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return ThresholdState::ACTIVE == m_versionbitscache.State(pindexPrev, GetConsensus(), dep);
+    }
+
+    /** Determine if a deployment is active for this block */
+    inline bool DeploymentActiveAt(const CBlockIndex& index, Consensus::BuriedDeployment dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return index.nHeight >= GetConsensus().DeploymentHeight(dep);
+    }
+
+    inline bool DeploymentActiveAt(const CBlockIndex& index, Consensus::DeploymentPos dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return DeploymentActiveAfter(index.pprev, dep);
+    }
+
+    /** Determine if a deployment is enabled (can ever be active) */
+    inline bool DeploymentEnabled(Consensus::BuriedDeployment dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return GetConsensus().DeploymentHeight(dep) != std::numeric_limits<int>::max();
+    }
+
+    inline bool DeploymentEnabled(Consensus::DeploymentPos dep) const
+    {
+        assert(Consensus::ValidDeployment(dep));
+        return GetConsensus().vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+    }
 
     ~ChainstateManager() {
         LOCK(::cs_main);
