@@ -30,7 +30,19 @@
 
 const std::function<std::string(const char*)> G_TRANSLATION_FUN = nullptr;
 
-int main(int argc, char* argv[])
+namespace {
+class BitcoinChainstate {
+private:
+    CScheduler scheduler{}; // SETUP: Scheduling and Background Signals
+    ChainstateManager chainman; // SETUP: Chainstate
+public:
+    BitcoinChainstate() { }
+    ~BitcoinChainstate();
+    int main(int argc, char* argv[]);
+};
+}
+
+int BitcoinChainstate::main(int argc, char* argv[])
 {
     // SETUP: Argument parsing and handling
     if (argc != 2) {
@@ -42,10 +54,10 @@ int main(int argc, char* argv[])
             << "           BREAK IN FUTURE VERSIONS. DO NOT USE ON YOUR ACTUAL DATADIR." << std::endl;
         return 1;
     }
+
     std::filesystem::path abs_datadir = std::filesystem::absolute(argv[1]);
     std::filesystem::create_directories(abs_datadir);
     gArgs.ForceSetArg("-datadir", abs_datadir.string());
-
 
     // SETUP: Misc Globals
     SelectParams(CBaseChainParams::MAIN);
@@ -60,8 +72,6 @@ int main(int argc, char* argv[])
     InitScriptExecutionCache();
 
 
-    // SETUP: Scheduling and Background Signals
-    CScheduler scheduler{};
     // Start the lightweight task scheduler thread
     scheduler.m_service_thread = std::thread(util::TraceThread, "scheduler", [&] { scheduler.serviceQueue(); });
 
@@ -71,8 +81,6 @@ int main(int argc, char* argv[])
     GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
 
 
-    // SETUP: Chainstate
-    ChainstateManager chainman;
 
     auto rv = node::LoadChainstate(false,
                                    std::ref(chainman),
@@ -88,7 +96,7 @@ int main(int argc, char* argv[])
                                    []() { return false; });
     if (rv.has_value()) {
         std::cerr << "Failed to load Chain state from your datadir." << std::endl;
-        goto epilogue;
+        return 1;
     } else {
         auto maybe_verify_error = node::VerifyLoadedChainstate(std::ref(chainman),
                                                                false,
@@ -99,7 +107,7 @@ int main(int argc, char* argv[])
                                                                /*get_unix_time_seconds=*/static_cast<int64_t (*)()>(GetTime));
         if (maybe_verify_error.has_value()) {
             std::cerr << "Failed to verify loaded Chain state from your datadir." << std::endl;
-            goto epilogue;
+            return 1;
         }
     }
 
@@ -107,7 +115,7 @@ int main(int argc, char* argv[])
         BlockValidationState state;
         if (!chainstate->ActivateBestChain(state, nullptr)) {
             std::cerr << "Failed to connect best block (" << state.ToString() << ")" << std::endl;
-            goto epilogue;
+            return 1;
         }
     }
 
@@ -237,7 +245,11 @@ int main(int argc, char* argv[])
         }
     }
 
-epilogue:
+    return 0;
+}
+
+BitcoinChainstate::~BitcoinChainstate()
+{
     // Without this precise shutdown sequence, there will be a lot of nullptr
     // dereferencing and UB.
     scheduler.stop();
@@ -259,4 +271,10 @@ epilogue:
     UnloadBlockIndex(nullptr, chainman);
 
     init::UnsetGlobals();
+}
+
+int main(int argc, char* argv[])
+{
+    BitcoinChainstate btccs;
+    return btccs.main(argc, argv);
 }
