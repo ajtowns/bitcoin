@@ -6,6 +6,7 @@
 #define BITCOIN_DEPLOYMENTSTATUS_H
 
 #include <chain.h>
+#include <validation.h>
 #include <versionbits.h>
 
 #include <limits>
@@ -50,6 +51,26 @@ inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::Deploy
 {
     assert(Consensus::ValidDeployment(dep));
     return params.vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+}
+
+
+/** Temporary helpers for access via ChainstateManager */
+template<typename DEP>
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman, DEP dep)
+{
+    return DeploymentActiveAfter(pindexPrev, chainman.GetConsensus(), dep);
+}
+
+template<typename DEP>
+inline bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chainman, DEP dep)
+{
+    return DeploymentActiveAt(index, chainman.GetConsensus(), dep);
+}
+
+template<typename DEP>
+inline bool DeploymentEnabled(const ChainstateManager& chainman, DEP dep)
+{
+    return DeploymentEnabled(chainman.GetConsensus(), dep);
 }
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H
