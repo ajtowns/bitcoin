@@ -415,7 +415,8 @@ std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& a
 class CRegTestParams : public CChainParams
 {
 public:
-    explicit CRegTestParams(const ArgsManager& args) {
+    explicit CRegTestParams(const RegTestOptions& opts)
+    {
         strNetworkID =  CBaseChainParams::REGTEST;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
@@ -453,11 +454,33 @@ public:
         pchMessageStart[2] = 0xb5;
         pchMessageStart[3] = 0xda;
         nDefaultPort = 18444;
-        nPruneAfterHeight = args.GetBoolArg("-fastprune", false) ? 100 : 1000;
+        nPruneAfterHeight = opts.prune_after_height;
         m_assumed_blockchain_size = 0;
         m_assumed_chain_state_size = 0;
 
-        UpdateActivationParametersFromArgs(args);
+        for (const auto& [name, height] : opts.activation_heights) {
+            switch (name) {
+            case Activations::SEGWIT:
+                consensus.SegwitHeight = int{height};
+                break;
+            case Activations::BIP34:
+                consensus.BIP34Height = int{height};
+                break;
+            case Activations::DERSIG:
+                consensus.BIP66Height = int{height};
+                break;
+            case Activations::CLTV:
+                consensus.BIP65Height = int{height};
+                break;
+            case Activations::CSV:
+                consensus.CSVHeight = int{height};
+                break;
+            }
+        }
+
+        for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {
+            UpdateVersionBitsParameters(deployment_pos, version_bits_params.start_time, version_bits_params.timeout, version_bits_params.min_activation_height);
+        }
 
         genesis = CreateGenesisBlock(1296688602, 2, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
@@ -514,66 +537,89 @@ public:
         consensus.vDeployments[d].nTimeout = nTimeout;
         consensus.vDeployments[d].min_activation_height = min_activation_height;
     }
-    void UpdateActivationParametersFromArgs(const ArgsManager& args);
 };
 
-static void MaybeUpdateHeights(const ArgsManager& args, Consensus::Params& consensus)
+static std::unique_ptr<const CChainParams> globalChainParams;
+
+const CChainParams &Params() {
+    assert(globalChainParams);
+    return *globalChainParams;
+}
+
+std::optional<Activations> name4namestr(const std::string& name_str) {
+    if (name_str == "segwit") {
+        return Activations::SEGWIT;
+    } else if (name_str == "bip34") {
+        return Activations::BIP34;
+    } else if (name_str == "dersig") {
+        return Activations::DERSIG;
+    } else if (name_str == "cltv") {
+        return Activations::CLTV;
+    } else if (name_str == "csv") {
+        return Activations::CSV;
+    }
+    return std::nullopt;
+}
+
+
+std::unique_ptr<const CChainParams> CreateRegTestChainParams(const RegTestOptions& options)
 {
-    for (const std::string& arg : args.GetArgs("-testactivationheight")) {
+    return std::make_unique<CRegTestParams>(options);
+}
+
+std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& args)
+{
+    std::unordered_map<Activations, int> activation_heights;
+
+    for (const std::string& arg : args.GetArgs("-testactivationheight"))
+    {
         const auto found{arg.find('@')};
         if (found == std::string::npos) {
             throw std::runtime_error(strprintf("Invalid format (%s) for -testactivationheight=name@height.", arg));
         }
-        const auto name{arg.substr(0, found)};
+
+        const auto name_str{arg.substr(0, found)};
+        std::optional<Activations> maybe_name{name4namestr(name_str)};
+        if (!maybe_name.has_value()) {
+            throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
+        }
+
         const auto value{arg.substr(found + 1)};
         int32_t height;
         if (!ParseInt32(value, &height) || height < 0 || height >= std::numeric_limits<int>::max()) {
             throw std::runtime_error(strprintf("Invalid height value (%s) for -testactivationheight=name@height.", arg));
         }
-        if (name == "segwit") {
-            consensus.SegwitHeight = int{height};
-        } else if (name == "bip34") {
-            consensus.BIP34Height = int{height};
-        } else if (name == "dersig") {
-            consensus.BIP66Height = int{height};
-        } else if (name == "cltv") {
-            consensus.BIP65Height = int{height};
-        } else if (name == "csv") {
-            consensus.CSVHeight = int{height};
-        } else {
-            throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
-        }
+
+        activation_heights.insert_or_assign(*maybe_name, height);
     }
-}
 
-void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
-{
-    MaybeUpdateHeights(args, consensus);
-
-    if (!args.IsArgSet("-vbparams")) return;
+    std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters;
 
     for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
         std::vector<std::string> vDeploymentParams = SplitString(strDeployment, ':');
         if (vDeploymentParams.size() < 3 || 4 < vDeploymentParams.size()) {
             throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end[:min_activation_height]");
         }
-        int64_t nStartTime, nTimeout;
-        int min_activation_height = 0;
-        if (!ParseInt64(vDeploymentParams[1], &nStartTime)) {
+        VersionBitsParameters vbparams{};
+        if (!ParseInt64(vDeploymentParams[1], &vbparams.start_time)) {
             throw std::runtime_error(strprintf("Invalid nStartTime (%s)", vDeploymentParams[1]));
         }
-        if (!ParseInt64(vDeploymentParams[2], &nTimeout)) {
+        if (!ParseInt64(vDeploymentParams[2], &vbparams.timeout)) {
             throw std::runtime_error(strprintf("Invalid nTimeout (%s)", vDeploymentParams[2]));
         }
-        if (vDeploymentParams.size() >= 4 && !ParseInt32(vDeploymentParams[3], &min_activation_height)) {
-            throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
+        if (vDeploymentParams.size() >= 4) {
+            if (!ParseInt32(vDeploymentParams[3], &vbparams.min_activation_height)) {
+                throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
+            }
+        } else {
+            vbparams.min_activation_height = 0;
         }
+
         bool found = false;
-        for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+        for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
             if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
-                UpdateVersionBitsParameters(Consensus::DeploymentPos(j), nStartTime, nTimeout, min_activation_height);
+                version_bits_parameters.insert_or_assign(Consensus::DeploymentPos(j), vbparams);
                 found = true;
-                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], nStartTime, nTimeout, min_activation_height);
                 break;
             }
         }
@@ -581,13 +627,9 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
             throw std::runtime_error(strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
         }
     }
-}
 
-static std::unique_ptr<const CChainParams> globalChainParams;
-
-const CChainParams &Params() {
-    assert(globalChainParams);
-    return *globalChainParams;
+    uint64_t prune_after_height = args.GetBoolArg("-fastprune", false) ? 100 : 1000;
+    return CreateRegTestChainParams(RegTestOptions{version_bits_parameters, activation_heights, prune_after_height});
 }
 
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
@@ -599,7 +641,7 @@ std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, c
     } else if (chain == CBaseChainParams::SIGNET) {
         return CreateSignetChainParams(args);
     } else if (chain == CBaseChainParams::REGTEST) {
-        return std::unique_ptr<CChainParams>(new CRegTestParams(args));
+        return CreateRegTestChainParams(args);
     }
     throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }

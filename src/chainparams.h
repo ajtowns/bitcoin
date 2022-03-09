@@ -8,9 +8,11 @@
 
 #include <chainparamsbase.h>
 #include <consensus/params.h>
+#include <cstdint>
 #include <netaddress.h>
 #include <primitives/block.h>
 #include <protocol.h>
+#include <unordered_map>
 #include <util/hash_type.h>
 
 #include <memory>
@@ -171,6 +173,45 @@ std::unique_ptr<const CChainParams> CreateSignetChainParams(const SigNetOptions&
  * @throws a std::runtime_error if multiple signet challenges are passed in through the args.
  */
 std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& args);
+
+/**
+ * VersionBitsParameters holds activation parameters
+ */
+struct VersionBitsParameters {
+    int64_t start_time;
+    int64_t timeout;
+    int min_activation_height;
+};
+
+enum class Activations {
+    SEGWIT,
+    BIP34,
+    DERSIG,
+    CLTV,
+    CSV,
+};
+
+/**
+ * RegTestOptions holds configurations for creating a regtest CChainParams.
+ */
+struct RegTestOptions {
+    std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters{};
+    std::unordered_map<Activations, int> activation_heights{};
+    uint64_t prune_after_height{1000};
+};
+
+/**
+ * Creates and returns a std::unique_ptr<CChainParams> for regtest.
+ * @return std::unique_ptr<const CChainParams>.
+ */
+std::unique_ptr<const CChainParams> CreateRegTestChainParams(const RegTestOptions& options = RegTestOptions{});
+
+/**
+ * Creates and returns a std::unique_ptr<CChainParams> for regtest.
+ * @return std::unique_ptr<const CChainParams>
+ * @throws a std::runtime_error if the -testactivationheight or -vbparams is set, but malformed.
+ */
+std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& args);
 
 /**
  * Creates and returns a std::unique_ptr<CChainParams> of the chosen chain.
