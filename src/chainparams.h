@@ -147,6 +147,32 @@ protected:
 };
 
 /**
+ * SigNetOptions holds configurations for creating a signet CChainParams.
+ */
+struct SigNetOptions {
+    const std::vector<uint8_t> challenge;
+    std::vector<std::string> seeds;
+};
+
+/**
+ * Return SigNetOptions filled with default values.
+ */
+SigNetOptions GetDefaultSignetOptions();
+
+/**
+ * Creates and returns a std::unique_ptr<CChainParams> for signet.
+ * @returns std::unique_ptr<const CChainParams>.
+ */
+std::unique_ptr<const CChainParams> CreateSignetChainParams(const SigNetOptions& options = GetDefaultSignetOptions());
+
+/**
+ * Creates and returns a std::unique_ptr<CChainParams> for signet.
+ * @returns std::unique_ptr<const CChainParams>.
+ * @throws a std::runtime_error if multiple signet challenges are passed in through the args.
+ */
+std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& args);
+
+/**
  * Creates and returns a std::unique_ptr<CChainParams> of the chosen chain.
  * @returns a CChainParams* of the chosen chain.
  * @throws a std::runtime_error if the chain is not supported.
