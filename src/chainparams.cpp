@@ -624,12 +624,22 @@ std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& 
     return CreateRegTestChainParams(RegTestOptions{version_bits_parameters, activation_heights, prune_after_height});
 }
 
+std::unique_ptr<const CChainParams> CreateMainChainParams()
+{
+    return std::unique_ptr<CChainParams>(new CMainParams());
+}
+
+std::unique_ptr<const CChainParams> CreateTestNetChainParams()
+{
+    return std::unique_ptr<CChainParams>(new CTestNetParams());
+}
+
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
 {
     if (chain == CBaseChainParams::MAIN) {
-        return std::unique_ptr<CChainParams>(new CMainParams());
+        return CreateMainChainParams();
     } else if (chain == CBaseChainParams::TESTNET) {
-        return std::unique_ptr<CChainParams>(new CTestNetParams());
+        return CreateTestNetChainParams();
     } else if (chain == CBaseChainParams::SIGNET) {
         return CreateSignetChainParams(args);
     } else if (chain == CBaseChainParams::REGTEST) {
