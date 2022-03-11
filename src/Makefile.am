@@ -171,6 +171,7 @@ BITCOIN_CORE_H = \
   interfaces/node.h \
   interfaces/wallet.h \
   kernel/chain.h \
+  kernel/chainparams.h \
   kernel/chainparamsbase.h \
   kernel/chainstatemanager_opts.h \
   kernel/checks.h \
@@ -631,6 +632,7 @@ libbitcoin_common_a_SOURCES = \
   deploymentinfo.cpp \
   external_signer.cpp \
   init/common.cpp \
+  kernel/chainparams.cpp \
   key.cpp \
   key_io.cpp \
   merkleblock.cpp \
@@ -877,8 +879,6 @@ libbitcoinkernel_la_SOURCES = \
   kernel/bitcoinkernel.cpp \
   arith_uint256.cpp \
   chain.cpp \
-  chainparamsbase.cpp \
-  chainparams.cpp \
   clientversion.cpp \
   coins.cpp \
   compressor.cpp \
@@ -894,6 +894,7 @@ libbitcoinkernel_la_SOURCES = \
   hash.cpp \
   kernel/chain.cpp \
   kernel/checks.cpp \
+  kernel/chainparams.cpp \
   kernel/chainparamsbase.cpp \
   kernel/coinstats.cpp \
   kernel/context.cpp \

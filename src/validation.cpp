@@ -10,7 +10,7 @@
 
 #include <arith_uint256.h>
 #include <chain.h>
-#include <chainparams.h>
+#include <kernel/chainparams.h>
 #include <checkqueue.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
