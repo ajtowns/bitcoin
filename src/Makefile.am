@@ -171,6 +171,7 @@ BITCOIN_CORE_H = \
   interfaces/node.h \
   interfaces/wallet.h \
   kernel/chain.h \
+  kernel/chainparamsbase.h \
   kernel/chainstatemanager_opts.h \
   kernel/checks.h \
   kernel/coinstats.h \
@@ -665,6 +666,7 @@ libbitcoin_util_a_SOURCES = \
   interfaces/echo.cpp \
   interfaces/handler.cpp \
   interfaces/init.cpp \
+  kernel/chainparamsbase.cpp \
   logging.cpp \
   random.cpp \
   randomenv.cpp \
@@ -892,6 +894,7 @@ libbitcoinkernel_la_SOURCES = \
   hash.cpp \
   kernel/chain.cpp \
   kernel/checks.cpp \
+  kernel/chainparamsbase.cpp \
   kernel/coinstats.cpp \
   kernel/context.cpp \
   kernel/mempool_persist.cpp \
