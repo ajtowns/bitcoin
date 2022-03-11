@@ -180,18 +180,8 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
 
 bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx)
 {
-    constexpr int flags = STANDARD_LOCKTIME_VERIFY_FLAGS;
-
     AssertLockHeld(cs_main);
     assert(active_chain_tip); // TODO: Make active_chain_tip a reference
-
-    // By convention a negative value for flags indicates that the
-    // current network-enforced consensus rules should be used. In
-    // a future soft-fork scenario that would mean checking which
-    // rules would be enforced for the next block and setting the
-    // appropriate flags. At the present time no soft-forks are
-    // scheduled, so no flags are set.
-    static_assert(flags >= 0, "buggy");
 
     // CheckFinalTx() uses active_chain_tip.Height()+1 to evaluate
     // nLockTime because when IsFinalTx() is called within
@@ -205,10 +195,8 @@ bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx)
     // less than the median time of the previous block they're contained in.
     // When the next block is created its previous block will be the current
     // chain tip, so we use that to calculate the median time passed to
-    // IsFinalTx() if LOCKTIME_MEDIAN_TIME_PAST is set.
-    const int64_t nBlockTime = (flags & LOCKTIME_MEDIAN_TIME_PAST)
-                             ? active_chain_tip->GetMedianTimePast()
-                             : GetAdjustedTime();
+    // IsFinalTx().
+    const int64_t nBlockTime = active_chain_tip->GetMedianTimePast();
 
     return IsFinalTx(tx, nBlockHeight, nBlockTime);
 }
@@ -219,8 +207,6 @@ bool CheckSequenceLocks(CBlockIndex* tip,
                         LockPoints* lp,
                         bool useExistingLockPoints)
 {
-    constexpr int flags = STANDARD_LOCKTIME_VERIFY_FLAGS;
-
     assert(tip != nullptr);
 
     CBlockIndex index;
@@ -255,7 +241,7 @@ bool CheckSequenceLocks(CBlockIndex* tip,
                 prevheights[txinIndex] = coin.nHeight;
             }
         }
-        lockPair = CalculateSequenceLocks(tx, flags, prevheights, index);
+        lockPair = CalculateSequenceLocks(tx, STANDARD_LOCKTIME_VERIFY_FLAGS, prevheights, index);
         if (lp) {
             lp->height = lockPair.first;
             lp->time = lockPair.second;
