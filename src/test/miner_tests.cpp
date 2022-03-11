@@ -410,6 +410,7 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 
     // non-final txs in mempool
     SetMockTime(m_node.chainman->ActiveChain().Tip()->GetMedianTimePast()+1);
+    const int flags{LOCKTIME_VERIFY_SEQUENCE | LOCKTIME_MEDIAN_TIME_PAST};
     // height map
     std::vector<int> prevheights;
 
@@ -433,7 +434,7 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 
     {
         CBlockIndex* active_chain_tip = m_node.chainman->ActiveChain().Tip();
-        BOOST_CHECK(SequenceLocks(CTransaction(tx), STANDARD_LOCKTIME_VERIFY_FLAGS, prevheights, CreateBlockIndex(active_chain_tip->nHeight + 2, active_chain_tip))); // Sequence locks pass on 2nd block
+        BOOST_CHECK(SequenceLocks(CTransaction(tx), flags, prevheights, CreateBlockIndex(active_chain_tip->nHeight + 2, active_chain_tip))); // Sequence locks pass on 2nd block
     }
 
     // relative time locked
@@ -450,7 +451,7 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 
     {
         CBlockIndex* active_chain_tip = m_node.chainman->ActiveChain().Tip();
-        BOOST_CHECK(SequenceLocks(CTransaction(tx), STANDARD_LOCKTIME_VERIFY_FLAGS, prevheights, CreateBlockIndex(active_chain_tip->nHeight + 1, active_chain_tip))); // Sequence locks pass 512 seconds later
+        BOOST_CHECK(SequenceLocks(CTransaction(tx), flags, prevheights, CreateBlockIndex(active_chain_tip->nHeight + 1, active_chain_tip))); // Sequence locks pass 512 seconds later
     }
 
     for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++)
