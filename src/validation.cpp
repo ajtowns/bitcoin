@@ -178,8 +178,10 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
                        std::vector<CScriptCheck>* pvChecks = nullptr)
                        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
-bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx, int flags)
+bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx)
 {
+    constexpr int flags = STANDARD_LOCKTIME_VERIFY_FLAGS;
+
     AssertLockHeld(cs_main);
     assert(active_chain_tip); // TODO: Make active_chain_tip a reference
 
@@ -189,7 +191,7 @@ bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx, i
     // rules would be enforced for the next block and setting the
     // appropriate flags. At the present time no soft-forks are
     // scheduled, so no flags are set.
-    flags = std::max(flags, 0);
+    static_assert(flags >= 0, "buggy");
 
     // CheckFinalTx() uses active_chain_tip.Height()+1 to evaluate
     // nLockTime because when IsFinalTx() is called within
@@ -214,10 +216,11 @@ bool CheckFinalTx(const CBlockIndex* active_chain_tip, const CTransaction &tx, i
 bool CheckSequenceLocks(CBlockIndex* tip,
                         const CCoinsView& coins_view,
                         const CTransaction& tx,
-                        int flags,
                         LockPoints* lp,
                         bool useExistingLockPoints)
 {
+    constexpr int flags = STANDARD_LOCKTIME_VERIFY_FLAGS;
+
     assert(tip != nullptr);
 
     CBlockIndex index;
@@ -363,7 +366,7 @@ void CChainState::MaybeUpdateMempoolForReorg(
         const CTransaction& tx = it->GetTx();
 
         // The transaction must be final.
-        if (!CheckFinalTx(m_chain.Tip(), tx, STANDARD_LOCKTIME_VERIFY_FLAGS)) return true;
+        if (!CheckFinalTx(m_chain.Tip(), tx)) return true;
         LockPoints lp = it->GetLockPoints();
         const bool validLP{TestLockPointValidity(m_chain, lp)};
         CCoinsViewMemPool view_mempool(&CoinsTip(), *m_mempool);
@@ -371,7 +374,7 @@ void CChainState::MaybeUpdateMempoolForReorg(
         // created on top of the new chain. We use useExistingLockPoints=false so that, instead of
         // using the information in lp (which might now refer to a block that no longer exists in
         // the chain), it will update lp to contain LockPoints relevant to the new chain.
-        if (!CheckSequenceLocks(m_chain.Tip(), view_mempool, tx, STANDARD_LOCKTIME_VERIFY_FLAGS, &lp, validLP)) {
+        if (!CheckSequenceLocks(m_chain.Tip(), view_mempool, tx, &lp, validLP)) {
             // If CheckSequenceLocks fails, remove the tx and don't depend on the LockPoints.
             return true;
         } else if (!validLP) {
@@ -699,7 +702,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
     // be mined yet.
-    if (!CheckFinalTx(m_active_chainstate.m_chain.Tip(), tx, STANDARD_LOCKTIME_VERIFY_FLAGS))
+    if (!CheckFinalTx(m_active_chainstate.m_chain.Tip(), tx))
         return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "non-final");
 
     if (m_pool.exists(GenTxid::Wtxid(tx.GetWitnessHash()))) {
@@ -780,7 +783,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // be mined yet.
     // Pass in m_view which has all of the relevant inputs cached. Note that, since m_view's
     // backend was removed, it no longer pulls coins from the mempool.
-    if (!CheckSequenceLocks(m_active_chainstate.m_chain.Tip(), m_view, tx, STANDARD_LOCKTIME_VERIFY_FLAGS, &lp))
+    if (!CheckSequenceLocks(m_active_chainstate.m_chain.Tip(), m_view, tx, &lp))
         return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "non-BIP68-final");
 
     // The mempool holds txs for the next block, so pass height+1 to CheckTxInputs
