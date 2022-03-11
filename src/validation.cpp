@@ -358,13 +358,12 @@ void CChainState::MaybeUpdateMempoolForReorg(
     // If true, the tx would be invalid in the next block; remove this entry and all of its descendants.
     const auto filter_final_and_mature = [this](CTxMemPool::txiter it)
         EXCLUSIVE_LOCKS_REQUIRED(m_mempool->cs, ::cs_main) {
-        constexpr int flags = STANDARD_LOCKTIME_VERIFY_FLAGS;
         AssertLockHeld(m_mempool->cs);
         AssertLockHeld(::cs_main);
         const CTransaction& tx = it->GetTx();
 
         // The transaction must be final.
-        if (!CheckFinalTx(m_chain.Tip(), tx, flags)) return true;
+        if (!CheckFinalTx(m_chain.Tip(), tx, STANDARD_LOCKTIME_VERIFY_FLAGS)) return true;
         LockPoints lp = it->GetLockPoints();
         const bool validLP{TestLockPointValidity(m_chain, lp)};
         CCoinsViewMemPool view_mempool(&CoinsTip(), *m_mempool);
@@ -372,7 +371,7 @@ void CChainState::MaybeUpdateMempoolForReorg(
         // created on top of the new chain. We use useExistingLockPoints=false so that, instead of
         // using the information in lp (which might now refer to a block that no longer exists in
         // the chain), it will update lp to contain LockPoints relevant to the new chain.
-        if (!CheckSequenceLocks(m_chain.Tip(), view_mempool, tx, flags, &lp, validLP)) {
+        if (!CheckSequenceLocks(m_chain.Tip(), view_mempool, tx, STANDARD_LOCKTIME_VERIFY_FLAGS, &lp, validLP)) {
             // If CheckSequenceLocks fails, remove the tx and don't depend on the LockPoints.
             return true;
         } else if (!validLP) {
