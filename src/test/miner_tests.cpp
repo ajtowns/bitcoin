@@ -428,8 +428,8 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     tx.nLockTime = 0;
     hash = tx.GetHash();
     m_node.mempool->addUnchecked(entry.Fee(HIGHFEE).Time(GetTime()).SpendsCoinbase(true).FromTx(tx));
-    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction(tx))); // Locktime passes
-    BOOST_CHECK(!TestSequenceLocks(CTransaction(tx))); // Sequence locks fail
+    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction{tx})); // Locktime passes
+    BOOST_CHECK(!TestSequenceLocks(CTransaction{tx})); // Sequence locks fail
 
     {
         CBlockIndex* active_chain_tip = m_node.chainman->ActiveChain().Tip();
@@ -442,8 +442,8 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     prevheights[0] = baseheight + 2;
     hash = tx.GetHash();
     m_node.mempool->addUnchecked(entry.Time(GetTime()).FromTx(tx));
-    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction(tx))); // Locktime passes
-    BOOST_CHECK(!TestSequenceLocks(CTransaction(tx))); // Sequence locks fail
+    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction{tx})); // Locktime passes
+    BOOST_CHECK(!TestSequenceLocks(CTransaction{tx})); // Sequence locks fail
 
     for (int i = 0; i < CBlockIndex::nMedianTimeSpan; i++)
         m_node.chainman->ActiveChain().Tip()->GetAncestor(m_node.chainman->ActiveChain().Tip()->nHeight - i)->nTime += 512; //Trick the MedianTimePast
@@ -463,8 +463,8 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     tx.nLockTime = m_node.chainman->ActiveChain().Tip()->nHeight + 1;
     hash = tx.GetHash();
     m_node.mempool->addUnchecked(entry.Time(GetTime()).FromTx(tx));
-    BOOST_CHECK(!CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction(tx))); // Locktime fails
-    BOOST_CHECK(TestSequenceLocks(CTransaction(tx))); // Sequence locks pass
+    BOOST_CHECK(!CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction{tx})); // Locktime fails
+    BOOST_CHECK(TestSequenceLocks(CTransaction{tx})); // Sequence locks pass
     BOOST_CHECK(IsFinalTx(CTransaction(tx), m_node.chainman->ActiveChain().Tip()->nHeight + 2, m_node.chainman->ActiveChain().Tip()->GetMedianTimePast())); // Locktime passes on 2nd block
 
     // absolute time locked
@@ -474,8 +474,8 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     prevheights[0] = baseheight + 4;
     hash = tx.GetHash();
     m_node.mempool->addUnchecked(entry.Time(GetTime()).FromTx(tx));
-    BOOST_CHECK(!CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction(tx))); // Locktime fails
-    BOOST_CHECK(TestSequenceLocks(CTransaction(tx))); // Sequence locks pass
+    BOOST_CHECK(!CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction{tx})); // Locktime fails
+    BOOST_CHECK(TestSequenceLocks(CTransaction{tx})); // Sequence locks pass
     BOOST_CHECK(IsFinalTx(CTransaction(tx), m_node.chainman->ActiveChain().Tip()->nHeight + 2, m_node.chainman->ActiveChain().Tip()->GetMedianTimePast() + 1)); // Locktime passes 1 second later
 
     // mempool-dependent transactions (not added)
@@ -483,14 +483,14 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     prevheights[0] = m_node.chainman->ActiveChain().Tip()->nHeight + 1;
     tx.nLockTime = 0;
     tx.vin[0].nSequence = 0;
-    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction(tx))); // Locktime passes
-    BOOST_CHECK(TestSequenceLocks(CTransaction(tx))); // Sequence locks pass
+    BOOST_CHECK(CheckFinalTx(m_node.chainman->ActiveChain().Tip(), CTransaction{tx})); // Locktime passes
+    BOOST_CHECK(TestSequenceLocks(CTransaction{tx})); // Sequence locks pass
     tx.vin[0].nSequence = 1;
-    BOOST_CHECK(!TestSequenceLocks(CTransaction(tx))); // Sequence locks fail
+    BOOST_CHECK(!TestSequenceLocks(CTransaction{tx})); // Sequence locks fail
     tx.vin[0].nSequence = CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG;
-    BOOST_CHECK(TestSequenceLocks(CTransaction(tx))); // Sequence locks pass
+    BOOST_CHECK(TestSequenceLocks(CTransaction{tx})); // Sequence locks pass
     tx.vin[0].nSequence = CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG | 1;
-    BOOST_CHECK(!TestSequenceLocks(CTransaction(tx))); // Sequence locks fail
+    BOOST_CHECK(!TestSequenceLocks(CTransaction{tx})); // Sequence locks fail
 
     BOOST_CHECK(pblocktemplate = AssemblerForTest(chainparams).CreateNewBlock(scriptPubKey));
 
