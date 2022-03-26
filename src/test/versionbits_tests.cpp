@@ -261,10 +261,13 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     // Clear the cache everytime
     versionbitscache.Clear();
 
-    int64_t bit = params.vDeployments[dep].bit;
-    int64_t nStartTime = params.vDeployments[dep].nStartTime;
-    int64_t nTimeout = params.vDeployments[dep].nTimeout;
-    int min_activation_height = params.vDeployments[dep].min_activation_height;
+    const int64_t bit = params.vDeployments[dep].bit;
+    const int64_t nStartTime = params.vDeployments[dep].nStartTime;
+    const int64_t nTimeout = params.vDeployments[dep].nTimeout;
+    const int min_activation_height = params.vDeployments[dep].min_activation_height;
+
+    BOOST_CHECK_EQUAL(params.vDeployments[dep].period, params.nMinerConfirmationWindow);
+    BOOST_CHECK_EQUAL(params.vDeployments[dep].threshold, params.nRuleChangeActivationThreshold);
 
     // should not be any signalling for first block
     BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(nullptr, params), VERSIONBITS_TOP_BITS);

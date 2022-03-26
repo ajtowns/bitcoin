@@ -51,6 +51,11 @@ struct BIP9Deployment {
      */
     int min_activation_height{0};
 
+    /** Number of blocks in period */
+    int period = std::numeric_limits<int>::max();
+    /** Number of signalling blocks required to achieve lock in */
+    int threshold = std::numeric_limits<int>::max();
+
     /** Constant for nTimeout very far in the future. */
     static constexpr int64_t NO_TIMEOUT = std::numeric_limits<int64_t>::max();
 
