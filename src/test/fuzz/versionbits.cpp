@@ -19,45 +19,6 @@
 #include <vector>
 
 namespace {
-class TestConditionChecker : public AbstractThresholdConditionChecker
-{
-private:
-    mutable ThresholdConditionCache m_cache;
-
-public:
-    const int64_t m_begin;
-    const int64_t m_end;
-    const int m_period;
-    const int m_threshold;
-    const int m_min_activation_height;
-    const int m_bit;
-
-    TestConditionChecker(int64_t begin, int64_t end, int period, int threshold, int min_activation_height, int bit)
-        : m_begin{begin}, m_end{end}, m_period{period}, m_threshold{threshold}, m_min_activation_height{min_activation_height}, m_bit{bit}
-    {
-        assert(m_period > 0);
-        assert(0 <= m_threshold && m_threshold <= m_period);
-        assert(0 <= m_bit && m_bit < 32 && m_bit < VERSIONBITS_NUM_BITS);
-        assert(0 <= m_min_activation_height);
-    }
-
-    bool Condition(const CBlockIndex* pindex) const override { return Condition(pindex->nVersion); }
-    int64_t BeginTime() const override { return m_begin; }
-    int64_t EndTime() const override { return m_end; }
-    int Period() const override { return m_period; }
-    int Threshold() const override { return m_threshold; }
-    int MinActivationHeight() const override { return m_min_activation_height; }
-
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateFor(pindexPrev, m_cache); }
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateSinceHeightFor(pindexPrev, m_cache); }
-
-    bool Condition(int32_t version) const
-    {
-        uint32_t mask = ((uint32_t)1) << m_bit;
-        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & mask) != 0);
-    }
-};
-
 /** Track blocks mined for test */
 class Blocks
 {
@@ -164,11 +125,25 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     }
     int min_activation = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * max_periods);
 
-    TestConditionChecker checker(start_time, timeout, period, threshold, min_activation, bit);
+    assert(period > 0);
+    assert(0 <= threshold && threshold <= period);
+    assert(0 <= bit && bit < 32 && bit < VERSIONBITS_NUM_BITS);
+    assert(0 <= min_activation);
+
+    Consensus::BIP9Deployment dep;
+    dep.bit = bit;
+    dep.nStartTime = start_time;
+    dep.nTimeout = timeout;
+    dep.period = period;
+    dep.threshold = threshold;
+    dep.min_activation_height = min_activation;
+
+    const ConditionLogic logic(dep);
+    VersionBitsConditionChecker checker;
 
     // Early exit if the versions don't signal sensibly for the deployment
-    if (!checker.Condition(ver_signal)) return;
-    if (checker.Condition(ver_nosignal)) return;
+    if (!logic.VersionBitIsSet(ver_signal)) return;
+    if (logic.VersionBitIsSet(ver_nosignal)) return;
     if (ver_nosignal < 0) return;
 
     // TOP_BITS should ensure version will be positive and meet min
@@ -214,8 +189,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
     // get the info for the first block of the period
     CBlockIndex* prev = blocks.tip();
-    const int exp_since = checker.GetStateSinceHeightFor(prev);
-    const ThresholdState exp_state = checker.GetStateFor(prev);
+    const int exp_since = checker.GetStateSinceHeightFor(logic, prev);
+    const ThresholdState exp_state = checker.GetStateFor(logic, prev);
 
     // get statistics from end of previous period, then reset
     BIP9Stats last_stats;
@@ -236,18 +211,18 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         CBlockIndex* current_block = blocks.mine_block(signal);
 
         // verify that signalling attempt was interpreted correctly
-        assert(checker.Condition(current_block) == signal);
+        assert(logic.Condition(current_block) == signal);
 
         // state and since don't change within the period
-        const ThresholdState state = checker.GetStateFor(current_block);
-        const int since = checker.GetStateSinceHeightFor(current_block);
+        const ThresholdState state = checker.GetStateFor(logic, current_block);
+        const int since = checker.GetStateSinceHeightFor(logic, current_block);
         assert(state == exp_state);
         assert(since == exp_since);
 
         // check that after mining this block stats change as expected
         std::vector<bool> signals;
-        const BIP9Stats stats = checker.GetStateStatisticsFor(current_block, &signals);
-        const BIP9Stats stats_no_signals = checker.GetStateStatisticsFor(current_block);
+        const BIP9Stats stats = logic.GetStateStatisticsFor(current_block, &signals);
+        const BIP9Stats stats_no_signals = logic.GetStateStatisticsFor(current_block);
         assert(stats.period == stats_no_signals.period && stats.threshold == stats_no_signals.threshold
                && stats.elapsed == stats_no_signals.elapsed && stats.count == stats_no_signals.count
                && stats.possible == stats_no_signals.possible);
@@ -274,9 +249,9 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     bool signal = (signalling_mask >> (period % 32)) & 1;
     if (signal) ++blocks_sig;
     CBlockIndex* current_block = blocks.mine_block(signal);
-    assert(checker.Condition(current_block) == signal);
+    assert(logic.Condition(current_block) == signal);
 
-    const BIP9Stats stats = checker.GetStateStatisticsFor(current_block);
+    const BIP9Stats stats = logic.GetStateStatisticsFor(current_block);
     assert(stats.period == period);
     assert(stats.threshold == threshold);
     assert(stats.elapsed == period);
@@ -284,8 +259,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     assert(stats.possible == (stats.count + period >= stats.elapsed + threshold));
 
     // More interesting is whether the state changed.
-    const ThresholdState state = checker.GetStateFor(current_block);
-    const int since = checker.GetStateSinceHeightFor(current_block);
+    const ThresholdState state = checker.GetStateFor(logic, current_block);
+    const int since = checker.GetStateSinceHeightFor(logic, current_block);
 
     // since is straightforward:
     assert(since % period == 0);
@@ -301,13 +276,13 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     case ThresholdState::DEFINED:
         assert(since == 0);
         assert(exp_state == ThresholdState::DEFINED);
-        assert(current_block->GetMedianTimePast() < checker.m_begin);
+        assert(current_block->GetMedianTimePast() < dep.nStartTime);
         break;
     case ThresholdState::STARTED:
-        assert(current_block->GetMedianTimePast() >= checker.m_begin);
+        assert(current_block->GetMedianTimePast() >= dep.nStartTime);
         if (exp_state == ThresholdState::STARTED) {
             assert(blocks_sig < threshold);
-            assert(current_block->GetMedianTimePast() < checker.m_end);
+            assert(current_block->GetMedianTimePast() < dep.nTimeout);
         } else {
             assert(exp_state == ThresholdState::DEFINED);
         }
@@ -325,7 +300,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(exp_state == ThresholdState::ACTIVE || exp_state == ThresholdState::LOCKED_IN);
         break;
     case ThresholdState::FAILED:
-        assert(never_active_test || current_block->GetMedianTimePast() >= checker.m_end);
+        assert(never_active_test || current_block->GetMedianTimePast() >= dep.nTimeout);
         if (exp_state == ThresholdState::STARTED) {
             assert(blocks_sig < threshold);
         } else {

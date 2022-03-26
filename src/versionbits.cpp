@@ -5,13 +5,13 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
+ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
 {
-    int nPeriod = Period();
-    int nThreshold = Threshold();
-    int min_activation_height = MinActivationHeight();
-    int64_t nTimeStart = BeginTime();
-    int64_t nTimeTimeout = EndTime();
+    int nPeriod = Period(logic);
+    int nThreshold = Threshold(logic);
+    int min_activation_height = MinActivationHeight(logic);
+    int64_t nTimeStart = BeginTime(logic);
+    int64_t nTimeTimeout = EndTime(logic);
 
     // Check if this deployment is always active.
     if (nTimeStart == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
@@ -30,24 +30,24 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
 
     // Walk backwards in steps of nPeriod to find a pindexPrev whose information is known
     std::vector<const CBlockIndex*> vToCompute;
-    while (cache.count(pindexPrev) == 0) {
+    while (m_cache.count(pindexPrev) == 0) {
         if (pindexPrev == nullptr) {
             // The genesis block is by definition defined.
-            cache[pindexPrev] = ThresholdState::DEFINED;
+            m_cache[pindexPrev] = ThresholdState::DEFINED;
             break;
         }
         if (pindexPrev->GetMedianTimePast() < nTimeStart) {
             // Optimization: don't recompute down further, as we know every earlier block will be before the start time
-            cache[pindexPrev] = ThresholdState::DEFINED;
+            m_cache[pindexPrev] = ThresholdState::DEFINED;
             break;
         }
         vToCompute.push_back(pindexPrev);
         pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
     }
 
-    // At this point, cache[pindexPrev] is known
-    assert(cache.count(pindexPrev));
-    ThresholdState state = cache[pindexPrev];
+    // At this point, m_cache[pindexPrev] is known
+    assert(m_cache.count(pindexPrev));
+    ThresholdState state = m_cache[pindexPrev];
 
     // Now walk forward and compute the state of descendants of pindexPrev
     while (!vToCompute.empty()) {
@@ -67,7 +67,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 const CBlockIndex* pindexCount = pindexPrev;
                 int count = 0;
                 for (int i = 0; i < nPeriod; i++) {
-                    if (Condition(pindexCount)) {
+                    if (logic.Condition(pindexCount)) {
                         count++;
                     }
                     pindexCount = pindexCount->pprev;
@@ -92,18 +92,18 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 break;
             }
         }
-        cache[pindexPrev] = state = stateNext;
+        m_cache[pindexPrev] = state = stateNext;
     }
 
     return state;
 }
 
-BIP9Stats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
+BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
 {
     BIP9Stats stats = {};
 
-    stats.period = Period();
-    stats.threshold = Threshold();
+    stats.period = dep.period;
+    stats.threshold = dep.threshold;
 
     if (pindex == nullptr) return stats;
 
@@ -136,21 +136,21 @@ BIP9Stats AbstractThresholdConditionChecker::GetStateStatisticsFor(const CBlockI
     return stats;
 }
 
-int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const
+int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
 {
-    int64_t start_time = BeginTime();
+    int64_t start_time = BeginTime(logic);
     if (start_time == Consensus::BIP9Deployment::ALWAYS_ACTIVE || start_time == Consensus::BIP9Deployment::NEVER_ACTIVE) {
         return 0;
     }
 
-    const ThresholdState initialState = GetStateFor(pindexPrev, cache);
+    const ThresholdState initialState = GetStateFor(logic, pindexPrev);
 
     // BIP 9 about state DEFINED: "The genesis block is by definition in this state for each deployment."
     if (initialState == ThresholdState::DEFINED) {
         return 0;
     }
 
-    const int nPeriod = Period();
+    const int nPeriod = Period(logic);
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     // To ease understanding of the following height calculation, it helps to remember that
@@ -162,7 +162,7 @@ int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex*
 
     const CBlockIndex* previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
 
-    while (previousPeriodParent != nullptr && GetStateFor(previousPeriodParent, cache) == initialState) {
+    while (previousPeriodParent != nullptr && GetStateFor(logic, previousPeriodParent) == initialState) {
         pindexPrev = previousPeriodParent;
         previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
     }
@@ -171,54 +171,26 @@ int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex*
     return pindexPrev->nHeight + 1;
 }
 
-namespace
-{
-/**
- * Class to implement versionbits logic.
- */
-class VersionBitsConditionChecker : public AbstractThresholdConditionChecker {
-private:
-    const Consensus::BIP9Deployment& dep;
-
-protected:
-    int64_t BeginTime() const override { return dep.nStartTime; }
-    int64_t EndTime() const override { return dep.nTimeout; }
-    int MinActivationHeight() const override { return dep.min_activation_height; }
-    int Period() const override { return dep.period; }
-    int Threshold() const override { return dep.threshold; }
-
-    bool Condition(const CBlockIndex* pindex) const override
-    {
-        return (((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (pindex->nVersion & Mask()) != 0);
-    }
-
-public:
-    explicit VersionBitsConditionChecker(const Consensus::BIP9Deployment& dep) : dep{dep} {}
-    uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
-};
-
-} // namespace
-
 ThresholdState VersionBitsCache::State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    return VersionBitsConditionChecker(params.vDeployments[pos]).GetStateFor(pindexPrev, m_caches[pos]);
+    return m_checker[pos].GetStateFor(ConditionLogic(params.vDeployments[pos]), pindexPrev);
 }
 
 BIP9Stats VersionBitsCache::Statistics(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, std::vector<bool>* signalling_blocks)
 {
-    return VersionBitsConditionChecker(params.vDeployments[pos]).GetStateStatisticsFor(pindex, signalling_blocks);
+    return ConditionLogic(params.vDeployments[pos]).GetStateStatisticsFor(pindex, signalling_blocks);
 }
 
 int VersionBitsCache::StateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    return VersionBitsConditionChecker(params.vDeployments[pos]).GetStateSinceHeightFor(pindexPrev, m_caches[pos]);
+    return m_checker[pos].GetStateSinceHeightFor(ConditionLogic(params.vDeployments[pos]), pindexPrev);
 }
 
 uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
-    return VersionBitsConditionChecker(params.vDeployments[pos]).Mask();
+    return ConditionLogic(params.vDeployments[pos]).Mask();
 }
 
 int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
@@ -228,10 +200,10 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        VersionBitsConditionChecker vbcc(params.vDeployments[pos]);
-        ThresholdState state = vbcc.GetStateFor(pindexPrev, m_caches[pos]);
+        ConditionLogic logic(params.vDeployments[pos]);
+        ThresholdState state = m_checker[pos].GetStateFor(logic, pindexPrev);
         if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
-            nVersion |= vbcc.Mask();
+            nVersion |= logic.Mask();
         }
     }
 
@@ -242,6 +214,6 @@ void VersionBitsCache::Clear()
 {
     LOCK(m_mutex);
     for (unsigned int d = 0; d < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; d++) {
-        m_caches[d].clear();
+        m_checker[d].clear();
     }
 }

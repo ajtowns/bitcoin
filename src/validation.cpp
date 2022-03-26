@@ -1829,30 +1829,32 @@ void StopScriptCheckWorkerThreads()
 /**
  * Threshold condition checker that triggers when unknown versionbits are seen on the network.
  */
-class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
+class WarningBitsConditionLogic : public ConditionLogic
 {
 private:
     const ChainstateManager& m_chainman;
-    int m_bit;
+    Consensus::BIP9Deployment m_dep;
 
 public:
-    explicit WarningBitsConditionChecker(const ChainstateManager& chainman, int bit) : m_chainman{chainman}, m_bit(bit) {}
-
-    int64_t BeginTime() const override { return 0; }
-    int64_t EndTime() const override { return std::numeric_limits<int64_t>::max(); }
-    int Period() const override { return m_chainman.GetConsensus().nMinerConfirmationWindow; }
-    int Threshold() const override { return m_chainman.GetConsensus().nRuleChangeActivationThreshold; }
+    WarningBitsConditionLogic(const ChainstateManager& chainman, int bit) : ConditionLogic{m_dep}, m_chainman{chainman}
+    {
+        m_dep.bit = bit;
+        m_dep.nStartTime = 0;
+        m_dep.nTimeout = std::numeric_limits<int64_t>::max();
+        m_dep.period = m_chainman.GetConsensus().nMinerConfirmationWindow;
+        m_dep.threshold = m_chainman.GetConsensus().nRuleChangeActivationThreshold;
+        m_dep.min_activation_height = 0;
+    }
 
     bool Condition(const CBlockIndex* pindex) const override
     {
         return pindex->nHeight >= m_chainman.GetConsensus().MinBIP9WarningHeight &&
-               ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) &&
-               ((pindex->nVersion >> m_bit) & 1) != 0 &&
-               ((m_chainman.m_versionbitscache.ComputeBlockVersion(pindex->pprev, m_chainman.GetConsensus()) >> m_bit) & 1) == 0;
+               ConditionLogic::Condition(pindex) &&
+               ((m_chainman.m_versionbitscache.ComputeBlockVersion(pindex->pprev, m_chainman.GetConsensus()) >> dep.bit) & 1) == 0;
     }
 };
 
-static ThresholdConditionCache warningcache[VERSIONBITS_NUM_BITS] GUARDED_BY(cs_main);
+static VersionBitsConditionChecker warningchecker[VERSIONBITS_NUM_BITS] GUARDED_BY(cs_main);
 
 static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const ChainstateManager& chainman)
 {
@@ -2466,8 +2468,8 @@ void CChainState::UpdateTip(const CBlockIndex* pindexNew)
     if (!this->IsInitialBlockDownload()) {
         const CBlockIndex* pindex = pindexNew;
         for (int bit = 0; bit < VERSIONBITS_NUM_BITS; bit++) {
-            WarningBitsConditionChecker checker(m_chainman, bit);
-            ThresholdState state = checker.GetStateFor(pindex, warningcache[bit]);
+            WarningBitsConditionLogic logic(m_chainman, bit);
+            ThresholdState state = warningchecker[bit].GetStateFor(logic, pindex);
             if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN) {
                 const bilingual_str warning = strprintf(_("Unknown new rules activated (versionbit %i)"), bit);
                 if (state == ThresholdState::ACTIVE) {
@@ -4057,7 +4059,7 @@ void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman)
     pindexBestHeader = nullptr;
     if (mempool) mempool->clear();
     for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
-        warningcache[b].clear();
+        warningchecker[b].clear();
     }
     fHavePruned = false;
 }

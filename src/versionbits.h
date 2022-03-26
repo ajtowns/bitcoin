@@ -32,11 +32,6 @@ enum class ThresholdState {
     FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
 };
 
-// A map that gives the state for blocks whose height is a multiple of Period().
-// The map is indexed by the block's parent, however, so all keys in the map
-// will either be nullptr or a block with (height + 1) % Period() == 0.
-typedef std::map<const CBlockIndex*, ThresholdState> ThresholdConditionCache;
-
 /** Display status of an in-progress BIP9 softfork */
 struct BIP9Stats {
     /** Length of blocks of the BIP9 signalling period */
@@ -51,28 +46,53 @@ struct BIP9Stats {
     bool possible;
 };
 
-/**
- * Abstract class that implements BIP9-style threshold logic, and caches results.
- */
-class AbstractThresholdConditionChecker {
-protected:
-    virtual bool Condition(const CBlockIndex* pindex) const =0;
-    virtual int64_t BeginTime() const =0;
-    virtual int64_t EndTime() const =0;
-    virtual int MinActivationHeight() const { return 0; }
-    virtual int Period() const =0;
-    virtual int Threshold() const =0;
-
+class ConditionLogic
+{
 public:
+    const Consensus::BIP9Deployment& dep;
+
+    explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
+
+    inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+
+    inline bool VersionBitIsSet(int32_t version) const
+    {
+        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
+    }
+
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
+
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
     BIP9Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
+};
+
+/**
+ * Class that implements BIP9-style threshold logic, and caches results.
+ */
+class VersionBitsConditionChecker
+{
+protected:
+    // A map that caches the state for blocks whose height is a multiple of Period().
+    // The map is indexed by the block's parent, however, so all keys in the map
+    // will either be nullptr or a block with (height + 1) % Period() == 0.
+    std::map<const CBlockIndex*, ThresholdState> m_cache;
+
+    int64_t BeginTime(const ConditionLogic& logic) const { return logic.dep.nStartTime; }
+    int64_t EndTime(const ConditionLogic& logic) const { return logic.dep.nTimeout; }
+    int MinActivationHeight(const ConditionLogic& logic) const { return logic.dep.min_activation_height; }
+    int Period(const ConditionLogic& logic) const { return logic.dep.period; }
+    int Threshold(const ConditionLogic& logic) const { return logic.dep.threshold; }
+
+public:
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
+    ThresholdState GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
     /** Returns the height since when the ThresholdState has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
+    int GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
+
+    void clear() { m_cache.clear(); }
 };
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
@@ -81,7 +101,7 @@ class VersionBitsCache
 {
 private:
     Mutex m_mutex;
-    ThresholdConditionCache m_caches[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(m_mutex);
+    mutable VersionBitsConditionChecker m_checker[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(m_mutex);
 
 public:
     /** Get the numerical statistics for a given deployment for the signalling period that includes pindex.
