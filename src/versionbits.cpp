@@ -5,23 +5,83 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
+std::optional<ThresholdState> ConditionLogic::SpecialState() const
 {
-    const int nPeriod{logic.dep.period};
-    const int nThreshold{logic.dep.threshold};
-    const int min_activation_height{logic.dep.min_activation_height};
-    const int64_t nTimeStart{logic.dep.nStartTime};
-    const int64_t nTimeTimeout{logic.dep.nTimeout};
-
     // Check if this deployment is always active.
-    if (nTimeStart == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
+    if (dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
         return ThresholdState::ACTIVE;
     }
 
     // Check if this deployment is never active.
-    if (nTimeStart == Consensus::BIP9Deployment::NEVER_ACTIVE) {
+    if (dep.nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
         return ThresholdState::FAILED;
     }
+
+    return std::nullopt;
+}
+
+std::optional<ThresholdState> ConditionLogic::TrivialState(const CBlockIndex* pindexPrev) const
+{
+    if (pindexPrev->GetMedianTimePast() < dep.nStartTime) {
+        return ThresholdState::DEFINED;
+    }
+
+    return std::nullopt;
+}
+
+ThresholdState ConditionLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
+{
+    const int nPeriod{dep.period};
+    const int nThreshold{dep.threshold};
+    const int min_activation_height{dep.min_activation_height};
+    const int64_t nTimeStart{dep.nStartTime};
+    const int64_t nTimeTimeout{dep.nTimeout};
+
+    switch (state) {
+        case ThresholdState::DEFINED: {
+            if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
+                return ThresholdState::STARTED;
+            }
+            break;
+        }
+        case ThresholdState::STARTED: {
+            // We need to count
+            const CBlockIndex* pindexCount = pindexPrev;
+            int count = 0;
+            for (int i = 0; i < nPeriod; i++) {
+                if (Condition(pindexCount)) {
+                    count++;
+                }
+                pindexCount = pindexCount->pprev;
+            }
+            if (count >= nThreshold) {
+                return ThresholdState::LOCKED_IN;
+            } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                return ThresholdState::FAILED;
+            }
+            break;
+        }
+        case ThresholdState::LOCKED_IN: {
+            // Progresses into ACTIVE provided activation height will have been reached.
+            if (pindexPrev->nHeight + 1 >= min_activation_height) {
+                return ThresholdState::ACTIVE;
+            }
+            break;
+        }
+        case ThresholdState::FAILED:
+        case ThresholdState::ACTIVE: {
+            // Nothing happens, these are terminal states.
+            break;
+        }
+    }
+    return state;
+}
+
+ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
+{
+    if (auto maybe_state = logic.SpecialState()) return *maybe_state;
+
+    const int nPeriod{logic.dep.period};
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     if (pindexPrev != nullptr) {
@@ -32,13 +92,12 @@ ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& lo
     std::vector<const CBlockIndex*> vToCompute;
     while (m_cache.count(pindexPrev) == 0) {
         if (pindexPrev == nullptr) {
-            // The genesis block is by definition defined.
-            m_cache[pindexPrev] = ThresholdState::DEFINED;
+            m_cache[pindexPrev] = logic.GenesisState;
             break;
         }
-        if (pindexPrev->GetMedianTimePast() < nTimeStart) {
-            // Optimization: don't recompute down further, as we know every earlier block will be before the start time
-            m_cache[pindexPrev] = ThresholdState::DEFINED;
+        if (auto maybe_state = logic.TrivialState(pindexPrev)) {
+            // Optimisation: don't recurse further, since earlier states are likely trivial too
+            m_cache[pindexPrev] = *maybe_state;
             break;
         }
         vToCompute.push_back(pindexPrev);
@@ -51,48 +110,9 @@ ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& lo
 
     // Now walk forward and compute the state of descendants of pindexPrev
     while (!vToCompute.empty()) {
-        ThresholdState stateNext = state;
         pindexPrev = vToCompute.back();
         vToCompute.pop_back();
-
-        switch (state) {
-            case ThresholdState::DEFINED: {
-                if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
-                    stateNext = ThresholdState::STARTED;
-                }
-                break;
-            }
-            case ThresholdState::STARTED: {
-                // We need to count
-                const CBlockIndex* pindexCount = pindexPrev;
-                int count = 0;
-                for (int i = 0; i < nPeriod; i++) {
-                    if (logic.Condition(pindexCount)) {
-                        count++;
-                    }
-                    pindexCount = pindexCount->pprev;
-                }
-                if (count >= nThreshold) {
-                    stateNext = ThresholdState::LOCKED_IN;
-                } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                    stateNext = ThresholdState::FAILED;
-                }
-                break;
-            }
-            case ThresholdState::LOCKED_IN: {
-                // Progresses into ACTIVE provided activation height will have been reached.
-                if (pindexPrev->nHeight + 1 >= min_activation_height) {
-                    stateNext = ThresholdState::ACTIVE;
-                }
-                break;
-            }
-            case ThresholdState::FAILED:
-            case ThresholdState::ACTIVE: {
-                // Nothing happens, these are terminal states.
-                break;
-            }
-        }
-        m_cache[pindexPrev] = state = stateNext;
+        m_cache[pindexPrev] = state = logic.NextState(state, pindexPrev);
     }
 
     return state;
@@ -138,15 +158,12 @@ BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::
 
 int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
 {
-    const int64_t start_time{logic.dep.nStartTime};
-    if (start_time == Consensus::BIP9Deployment::ALWAYS_ACTIVE || start_time == Consensus::BIP9Deployment::NEVER_ACTIVE) {
-        return 0;
-    }
+    if (logic.SpecialState()) return 0;
 
     const ThresholdState initialState = GetStateFor(logic, pindexPrev);
 
     // BIP 9 about state DEFINED: "The genesis block is by definition in this state for each deployment."
-    if (initialState == ThresholdState::DEFINED) {
+    if (initialState == logic.GenesisState) {
         return 0;
     }
 
@@ -201,8 +218,7 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
         ConditionLogic logic(params.vDeployments[pos]);
-        ThresholdState state = m_checker[pos].GetStateFor(logic, pindexPrev);
-        if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
+        if (logic.ShouldSetVersionBit(m_checker[pos].GetStateFor(logic, pindexPrev))) {
             nVersion |= logic.Mask();
         }
     }

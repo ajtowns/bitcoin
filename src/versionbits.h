@@ -9,6 +9,7 @@
 #include <sync.h>
 
 #include <map>
+#include <optional>
 
 /** What block version to use for new blocks (pre versionbits) */
 static const int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
@@ -53,7 +54,18 @@ public:
 
     explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
+    std::optional<ThresholdState> SpecialState() const;
+
+    static constexpr ThresholdState GenesisState = ThresholdState::DEFINED;
+    std::optional<ThresholdState> TrivialState(const CBlockIndex* pindexPrev) const;
+    ThresholdState NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const;
+
     inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+
+    inline bool ShouldSetVersionBit(ThresholdState state)
+    {
+        return (state == ThresholdState::STARTED) || (state == ThresholdState::LOCKED_IN);
+    }
 
     inline bool VersionBitIsSet(int32_t version) const
     {
