@@ -7,11 +7,11 @@
 
 ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
 {
-    int nPeriod = Period(logic);
-    int nThreshold = Threshold(logic);
-    int min_activation_height = MinActivationHeight(logic);
-    int64_t nTimeStart = BeginTime(logic);
-    int64_t nTimeTimeout = EndTime(logic);
+    const int nPeriod{logic.dep.period};
+    const int nThreshold{logic.dep.threshold};
+    const int min_activation_height{logic.dep.min_activation_height};
+    const int64_t nTimeStart{logic.dep.nStartTime};
+    const int64_t nTimeTimeout{logic.dep.nTimeout};
 
     // Check if this deployment is always active.
     if (nTimeStart == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
@@ -138,7 +138,7 @@ BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::
 
 int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
 {
-    int64_t start_time = BeginTime(logic);
+    const int64_t start_time{logic.dep.nStartTime};
     if (start_time == Consensus::BIP9Deployment::ALWAYS_ACTIVE || start_time == Consensus::BIP9Deployment::NEVER_ACTIVE) {
         return 0;
     }
@@ -150,7 +150,7 @@ int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& lo
         return 0;
     }
 
-    const int nPeriod = Period(logic);
+    const int nPeriod{logic.dep.period};
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     // To ease understanding of the following height calculation, it helps to remember that

@@ -79,12 +79,6 @@ protected:
     // will either be nullptr or a block with (height + 1) % Period() == 0.
     std::map<const CBlockIndex*, ThresholdState> m_cache;
 
-    int64_t BeginTime(const ConditionLogic& logic) const { return logic.dep.nStartTime; }
-    int64_t EndTime(const ConditionLogic& logic) const { return logic.dep.nTimeout; }
-    int MinActivationHeight(const ConditionLogic& logic) const { return logic.dep.min_activation_height; }
-    int Period(const ConditionLogic& logic) const { return logic.dep.period; }
-    int Threshold(const ConditionLogic& logic) const { return logic.dep.threshold; }
-
 public:
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
