@@ -49,29 +49,40 @@ struct BIP9Stats {
 
 class ConditionLogic
 {
-public:
+private:
     const Consensus::BIP9Deployment& dep;
 
+public:
     explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
+    int Period() const { return dep.period; }
+
+    /* State logic */
+
+    /** Configured to be always in the same state */
     std::optional<ThresholdState> SpecialState() const;
 
+    /* Normal transitions */
     static constexpr ThresholdState GenesisState = ThresholdState::DEFINED;
     std::optional<ThresholdState> TrivialState(const CBlockIndex* pindexPrev) const;
     ThresholdState NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const;
 
+    /** Get bit mask */
     inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
+    /** Given current state, should bit be set? */
     inline bool ShouldSetVersionBit(ThresholdState state)
     {
         return (state == ThresholdState::STARTED) || (state == ThresholdState::LOCKED_IN);
     }
 
+    /** Is the bit set? */
     inline bool VersionBitIsSet(int32_t version) const
     {
         return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
     }
 
+    /** Does this block count towards the threshold? */
     virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
 
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex

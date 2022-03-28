@@ -1850,7 +1850,7 @@ public:
     {
         return pindex->nHeight >= m_chainman.GetConsensus().MinBIP9WarningHeight &&
                ConditionLogic::Condition(pindex) &&
-               ((m_chainman.m_versionbitscache.ComputeBlockVersion(pindex->pprev, m_chainman.GetConsensus()) >> dep.bit) & 1) == 0;
+               ((m_chainman.m_versionbitscache.ComputeBlockVersion(pindex->pprev, m_chainman.GetConsensus())) & Mask()) == 0;
     }
 };
 

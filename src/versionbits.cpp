@@ -81,7 +81,7 @@ ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& lo
 {
     if (auto maybe_state = logic.SpecialState()) return *maybe_state;
 
-    const int nPeriod{logic.dep.period};
+    const int nPeriod{logic.Period()};
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     if (pindexPrev != nullptr) {
@@ -167,7 +167,7 @@ int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& lo
         return 0;
     }
 
-    const int nPeriod{logic.dep.period};
+    const int nPeriod{logic.Period()};
 
     // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
     // To ease understanding of the following height calculation, it helps to remember that
