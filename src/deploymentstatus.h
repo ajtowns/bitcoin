@@ -38,16 +38,11 @@ inline bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager
 }
 
 /** Determine if a deployment is enabled (can ever be active) */
-inline bool DeploymentEnabled(const ChainstateManager& chainman, Consensus::BuriedDeployment dep)
+template<typename T>
+inline bool DeploymentEnabled(const ChainstateManager& chainman, T dep)
 {
     assert(Consensus::ValidDeployment(dep));
-    return chainman.GetConsensus().DeploymentHeight(dep) != std::numeric_limits<int>::max();
-}
-
-inline bool DeploymentEnabled(const ChainstateManager& chainman, Consensus::DeploymentPos dep)
-{
-    assert(Consensus::ValidDeployment(dep));
-    return chainman.GetConsensus().vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+    return chainman.m_versionbitscache.GetLogic(chainman.GetConsensus(), dep).Enabled();
 }
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H

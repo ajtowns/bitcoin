@@ -193,15 +193,17 @@ private:
     using cache_array = std::array<ConditionLogic::Cache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
     mutable cache_array m_cache GUARDED_BY(m_mutex);
 
-    static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos);
-
     template<size_t I=0, typename Fn>
     static void ForEachDeployment_impl(cache_array& caches, const Consensus::Params& params, Fn&& fn)
     {
         if constexpr (I < std::tuple_size_v<cache_array>) {
-            constexpr Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(I);
-            static_assert(Consensus::ValidDeployment(pos), "invalid deployment");
-            fn(pos, GetLogic(params, pos), std::get<I>(caches));
+            constexpr Consensus::DeploymentPos POS = static_cast<Consensus::DeploymentPos>(I);
+            static_assert(Consensus::ValidDeployment(POS), "invalid deployment");
+
+            const auto logic = GetLogic(params, POS);
+            auto& cache = std::get<I>(caches);
+            fn(POS, logic, cache);
+
             ForEachDeployment_impl<I+1>(caches, params, fn);
         }
     }
@@ -210,14 +212,25 @@ private:
     static void ForEachBuriedDeployment(const Consensus::Params& params, Fn&& fn)
     {
         if constexpr (ValidDeployment(POS)) {
-            BuriedDeploymentLogic logic{params.DeploymentHeight(POS)};
-            BuriedDeploymentLogic::Cache cache;
+            const auto logic = GetLogic(params, POS);
+            BuriedDeploymentLogic::Cache cache; // dummy
             fn(POS, logic, cache);
+
             ForEachBuriedDeployment<static_cast<Consensus::BuriedDeployment>(POS+1)>(params, fn);
         }
     }
 
 public:
+    static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
+    {
+        return ConditionLogic{params.vDeployments[pos]};
+    }
+
+    static BuriedDeploymentLogic GetLogic(const Consensus::Params& params, Consensus::BuriedDeployment pos)
+    {
+        return {params.DeploymentHeight(pos)};
+    }
+
     /** Check if the deployment is active */
     bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 

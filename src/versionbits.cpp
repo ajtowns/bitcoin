@@ -193,11 +193,6 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
 
 template class ThresholdConditionChecker<ConditionLogic>;
 
-ConditionLogic VersionBitsCache::GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
-{
-    return ConditionLogic{params.vDeployments[pos]};
-}
-
 bool VersionBitsCache::IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
