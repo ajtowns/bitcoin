@@ -70,6 +70,12 @@ public:
     /** Determine if deployment is active */
     inline bool IsActive(ThresholdState state, const CBlockIndex* pindexPrev) const { return state == ThresholdState::ACTIVE; }
 
+    /** Determine if deployment is certain */
+    inline bool IsCertain(ThresholdState state) const
+    {
+        return state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN;
+    }
+
     /** Get bit mask */
     inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
