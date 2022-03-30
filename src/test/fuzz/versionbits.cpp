@@ -141,7 +141,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     dep.min_activation_height = min_activation;
 
     const ConditionLogic logic(dep);
-    VersionBitsConditionChecker checker;
+    ConditionLogic::Cache cache;
 
     // Early exit if the versions don't signal sensibly for the deployment
     if (!logic.VersionBitIsSet(ver_signal)) return;
@@ -191,8 +191,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
     // get the info for the first block of the period
     CBlockIndex* prev = blocks.tip();
-    const int exp_since = checker.GetStateSinceHeightFor(logic, prev);
-    const ThresholdState exp_state = checker.GetStateFor(logic, prev);
+    const int exp_since = logic.GetStateSinceHeightFor(cache, prev);
+    const ThresholdState exp_state = logic.GetStateFor(cache, prev);
 
     // get statistics from end of previous period, then reset
     ConditionLogic::Stats last_stats;
@@ -216,8 +216,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         assert(logic.Condition(current_block) == signal);
 
         // state and since don't change within the period
-        const ThresholdState state = checker.GetStateFor(logic, current_block);
-        const int since = checker.GetStateSinceHeightFor(logic, current_block);
+        const ThresholdState state = logic.GetStateFor(cache, current_block);
+        const int since = logic.GetStateSinceHeightFor(cache, current_block);
         assert(state == exp_state);
         assert(since == exp_since);
 
@@ -261,8 +261,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     assert(stats.possible == (stats.count + period >= stats.elapsed + threshold));
 
     // More interesting is whether the state changed.
-    const ThresholdState state = checker.GetStateFor(logic, current_block);
-    const int since = checker.GetStateSinceHeightFor(logic, current_block);
+    const ThresholdState state = logic.GetStateFor(cache, current_block);
+    const int since = logic.GetStateSinceHeightFor(cache, current_block);
 
     // since is straightforward:
     assert(since % period == 0);

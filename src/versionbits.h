@@ -20,10 +20,32 @@ static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const int32_t VERSIONBITS_NUM_BITS = 29;
 
+/**
+ * Class that implements BIP9-style threshold logic, and caches results.
+ */
+template<typename Logic>
+class ThresholdConditionChecker
+{
+public:
+    /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
+     *  Caches state from first block of period. */
+    static typename Logic::State GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+
+    /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
+    static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+
+    /** Returns the numerical statistics of an in-progress softfork in the period including pindex
+     * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
+     */
+    static typename Logic::Stats GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr);
+};
+
 class ConditionLogic
 {
 private:
     const Consensus::BIP9Deployment& dep;
+
+    using ThreshCheck = ThresholdConditionChecker<ConditionLogic>;
 
 public:
     /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
@@ -53,6 +75,10 @@ public:
         bool possible;
     };
 
+    // A map that caches the state for blocks whose height is a multiple of Period().
+    // The map is indexed by the block's parent, however, so all keys in the map
+    // will either be nullptr or a block with (height + 1) % Period() == 0.
+    using Cache = std::map<const CBlockIndex*, State>;
 
     explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
@@ -72,8 +98,12 @@ public:
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
     State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateFor(*this, cache, pindexPrev); }
+    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev); }
+
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
+    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return GetStateFor(cache, pindexPrev) == State::ACTIVE; }
 
     /** Determine if deployment is certain */
     bool IsCertain(State state) const
@@ -90,6 +120,11 @@ public:
         return (state == State::STARTED) || (state == State::LOCKED_IN);
     }
 
+    bool ShouldSetVersionBit(Cache& cache, const CBlockIndex* pindexPrev) const
+    {
+        return ShouldSetVersionBit(GetStateFor(cache, pindexPrev), pindexPrev);
+    }
+
     /** Is the bit set? */
     bool VersionBitIsSet(int32_t version) const
     {
@@ -102,68 +137,51 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
-};
-
-/**
- * Class that implements BIP9-style threshold logic, and caches results.
- */
-class VersionBitsConditionChecker
-{
-protected:
-    // A map that caches the state for blocks whose height is a multiple of Period().
-    // The map is indexed by the block's parent, however, so all keys in the map
-    // will either be nullptr or a block with (height + 1) % Period() == 0.
-    std::map<const CBlockIndex*, ConditionLogic::State> m_cache;
-
-public:
-    VersionBitsConditionChecker() = default;
-    VersionBitsConditionChecker(const VersionBitsConditionChecker&) = delete;
-    VersionBitsConditionChecker(VersionBitsConditionChecker&&) = delete;
-    VersionBitsConditionChecker& operator=(const VersionBitsConditionChecker&) = delete;
-    VersionBitsConditionChecker& operator=(VersionBitsConditionChecker&&) = delete;
-
-    /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
-     *  Caches state from first block of period. */
-    ConditionLogic::State GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
-    /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
-    int GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
+    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    {
+        Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
+        stats.period = Period();
+        stats.threshold = dep.threshold;
+        if (stats.count > 0) {
+            stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
+        }
+        return stats;
+    }
 
     /** Activation height if known */
-    std::optional<int> ActivationHeight(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
+    std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        const ConditionLogic::State state{GetStateFor(logic, pindexPrev)};
-        if (logic.IsCertain(state)) {
-            const int since = GetStateSinceHeightFor(logic, pindexPrev);
+        const State state{ThresholdConditionChecker<ConditionLogic>::GetStateFor(*this, cache, pindexPrev)};
+        if (IsCertain(state)) {
+            const int since{ThresholdConditionChecker<ConditionLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev)};
             if (state == ConditionLogic::State::ACTIVE) return since;
             if (state == ConditionLogic::State::LOCKED_IN) {
-                return std::max(since + logic.Period(), logic.Dep().min_activation_height);
+                return std::max(since + Period(), dep.min_activation_height);
             }
         }
         return std::nullopt;
     }
 
-    void clear() { m_cache.clear(); }
+    static void ClearCache(Cache& cache) { cache.clear(); }
 };
 
 class BuriedDeploymentLogic
 {
 public:
     const int m_height;
+    using State = bool;
+    using Cache = std::true_type;
+
+    static void ClearCache(const Cache& cache) { }
+
     BuriedDeploymentLogic(int height) : m_height{height} { }
+
     bool ShouldSetVersionBit(bool state, const CBlockIndex* pindexPrev) const { return false; }
     uint32_t Mask() const { return 0; }
     bool Enabled() const { return m_height != std::numeric_limits<int>::max(); }
     bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
-};
-
-struct BuriedDeploymentChecker
-{
-    bool GetStateFor(const BuriedDeploymentLogic& logic, const CBlockIndex* pindexPrev) { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= logic.m_height; }
-    std::optional<int> ActivationHeight(const BuriedDeploymentLogic& logic, const CBlockIndex* pindexPrev)
-    {
-        return logic.m_height;
-    }
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_height; }
+    std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const { return m_height; }
 };
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
@@ -172,19 +190,19 @@ class VersionBitsCache
 {
 private:
     Mutex m_mutex;
-    using checker_array = std::array<VersionBitsConditionChecker,Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
-    mutable checker_array m_checker GUARDED_BY(m_mutex);
+    using cache_array = std::array<ConditionLogic::Cache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
+    mutable cache_array m_cache GUARDED_BY(m_mutex);
 
     static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
     template<size_t I=0, typename Fn>
-    static void ForEachDeployment_impl(checker_array& checkers, const Consensus::Params& params, Fn&& fn)
+    static void ForEachDeployment_impl(cache_array& caches, const Consensus::Params& params, Fn&& fn)
     {
-        if constexpr (I < std::tuple_size_v<checker_array>) {
+        if constexpr (I < std::tuple_size_v<cache_array>) {
             constexpr Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(I);
             static_assert(Consensus::ValidDeployment(pos), "invalid deployment");
-            fn(pos, GetLogic(params, pos), std::get<I>(checkers));
-            ForEachDeployment_impl<I+1>(checkers, params, fn);
+            fn(pos, GetLogic(params, pos), std::get<I>(caches));
+            ForEachDeployment_impl<I+1>(caches, params, fn);
         }
     }
 
@@ -193,8 +211,8 @@ private:
     {
         if constexpr (ValidDeployment(POS)) {
             BuriedDeploymentLogic logic{params.DeploymentHeight(POS)};
-            BuriedDeploymentChecker checker;
-            fn(POS, logic, checker);
+            BuriedDeploymentLogic::Cache cache;
+            fn(POS, logic, cache);
             ForEachBuriedDeployment<static_cast<Consensus::BuriedDeployment>(POS+1)>(params, fn);
         }
     }
@@ -210,13 +228,13 @@ public:
     static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
     /** Iterate over all deployments, and do something
-     * Fn should be [](auto pos, const auto& logic, auto& checker) { ... }
+     * Fn should be [](auto pos, const auto& logic, auto& cache) { ... }
      */
     template<typename Fn>
     void ForEachDeployment(const Consensus::Params& params, Fn&& fn)
     {
         LOCK(m_mutex);
-        ForEachDeployment_impl(m_checker, params, fn);
+        ForEachDeployment_impl(m_cache, params, fn);
         ForEachBuriedDeployment(params, fn);
     }
 

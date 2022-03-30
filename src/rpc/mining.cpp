@@ -852,14 +852,14 @@ static RPCHelpMan getblocktemplate()
 
     UniValue vbavailable(UniValue::VOBJ);
 
-    chainman.m_versionbitscache.ForEachDeployment(consensusParams, [&](auto pos, const auto& logic, auto& checker) {
+    chainman.m_versionbitscache.ForEachDeployment(consensusParams, [&](auto pos, const auto& logic, auto& cache) {
       if constexpr(std::is_same_v<decltype(pos), Consensus::DeploymentPos>) {
         const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
         auto supported = [&]() -> bool {
             return setClientRules.find(vbinfo.name) != setClientRules.end();
         };
 
-        const auto state = checker.GetStateFor(logic, pindexPrev);
+        const auto state{logic.GetStateFor(cache, pindexPrev)};
         if (logic.IsActive(state, pindexPrev)) {
             // Add to rules only
             aRules.push_back(gbt_vb_name(pos));

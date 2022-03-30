@@ -1859,7 +1859,7 @@ private:
         }
     };
 
-    std::array<VersionBitsConditionChecker,VERSIONBITS_NUM_BITS> checker;
+    std::array<ConditionLogic::Cache,VERSIONBITS_NUM_BITS> m_cache;
 
 public:
     struct WarningStatus
@@ -1873,13 +1873,13 @@ public:
         if (bit < 0 || bit >= VERSIONBITS_NUM_BITS) return {false, false};
 
         const WarningBitsConditionLogic logic(chainman.GetConsensus(), chainman.m_versionbitscache, bit);
-        const auto state{checker[bit].GetStateFor(logic, pindex)};
+        const auto state{logic.GetStateFor(m_cache[bit], pindex)};
         return {logic.IsCertain(state), logic.IsActive(state, pindex)};
     }
 
     void Clear() {
-        for (auto& c : checker) {
-            c.clear();
+        for (auto& c : m_cache) {
+            WarningBitsConditionLogic::ClearCache(c);
         }
     }
 };

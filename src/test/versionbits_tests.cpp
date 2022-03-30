@@ -28,14 +28,14 @@ static const std::string StateName(ThresholdState state)
     return "";
 }
 
-class TestConditionChecker : public VersionBitsConditionChecker
+class TestConditionLogic : public ConditionLogic
 {
 protected:
     Consensus::BIP9Deployment m_dep;
-    ConditionLogic GetLogic() const { return ConditionLogic(m_dep); }
+    ConditionLogic::Cache m_cache;
 
 public:
-    TestConditionChecker()
+    TestConditionLogic() : ConditionLogic{m_dep}
     {
         m_dep.bit = 8;
         m_dep.nStartTime = TestTime(10000);
@@ -45,27 +45,28 @@ public:
         m_dep.min_activation_height = 0;
     }
 
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return VersionBitsConditionChecker::GetStateFor(GetLogic(), pindexPrev); }
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return VersionBitsConditionChecker::GetStateSinceHeightFor(GetLogic(), pindexPrev); }
+    void clear() { ConditionLogic::ClearCache(m_cache); }
+    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return ConditionLogic::GetStateFor(m_cache, pindexPrev); }
+    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return ConditionLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
 };
 
 
-class TestDelayedActivationConditionChecker : public TestConditionChecker
+class TestDelayedActivationConditionLogic : public TestConditionLogic
 {
 public:
-    TestDelayedActivationConditionChecker() : TestConditionChecker() { m_dep.min_activation_height = 15000; }
+    TestDelayedActivationConditionLogic() : TestConditionLogic() { m_dep.min_activation_height = 15000; }
 };
 
-class TestAlwaysActiveConditionChecker : public TestConditionChecker
+class TestAlwaysActiveConditionLogic : public TestConditionLogic
 {
 public:
-    TestAlwaysActiveConditionChecker() : TestConditionChecker() { m_dep.nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
+    TestAlwaysActiveConditionLogic() : TestConditionLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
 };
 
-class TestNeverActiveConditionChecker : public TestConditionChecker
+class TestNeverActiveConditionLogic : public TestConditionLogic
 {
 public:
-    TestNeverActiveConditionChecker() : TestConditionChecker() { m_dep.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE; }
+    TestNeverActiveConditionLogic() : TestConditionLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE; }
 };
 
 #define CHECKERS 6
@@ -75,16 +76,16 @@ class VersionBitsTester
     // A fake blockchain
     std::vector<CBlockIndex*> vpblock;
 
-    // 6 independent checkers for the same bit.
+    // 6 independent logics for the same bit.
     // The first one performs all checks, the second only 50%, the third only 25%, etc...
     // This is to test whether lack of cached information leads to the same results.
-    TestConditionChecker checker[CHECKERS];
+    TestConditionLogic logic[CHECKERS];
     // Another 6 that assume delayed activation
-    TestDelayedActivationConditionChecker checker_delayed[CHECKERS];
+    TestDelayedActivationConditionLogic logic_delayed[CHECKERS];
     // Another 6 that assume always active activation
-    TestAlwaysActiveConditionChecker checker_always[CHECKERS];
+    TestAlwaysActiveConditionLogic logic_always[CHECKERS];
     // Another 6 that assume never active activation
-    TestNeverActiveConditionChecker checker_never[CHECKERS];
+    TestNeverActiveConditionLogic logic_never[CHECKERS];
 
     // Test counter (to identify failures)
     int num{1000};
@@ -98,10 +99,10 @@ public:
             delete vpblock[i];
         }
         for (unsigned int  i = 0; i < CHECKERS; i++) {
-            checker[i].clear();
-            checker_delayed[i].clear();
-            checker_always[i].clear();
-            checker_never[i].clear();
+            logic[i].clear();
+            logic_delayed[i].clear();
+            logic_always[i].clear();
+            logic_never[i].clear();
         }
         vpblock.clear();
         return *this;
@@ -134,10 +135,10 @@ public:
         const CBlockIndex* tip = Tip();
         for (int i = 0; i < CHECKERS; i++) {
             if (InsecureRandBits(i) == 0) {
-                BOOST_CHECK_MESSAGE(checker[i].GetStateSinceHeightFor(tip) == height, strprintf("Test %i for StateSinceHeight", num));
-                BOOST_CHECK_MESSAGE(checker_delayed[i].GetStateSinceHeightFor(tip) == height_delayed, strprintf("Test %i for StateSinceHeight (delayed)", num));
-                BOOST_CHECK_MESSAGE(checker_always[i].GetStateSinceHeightFor(tip) == 0, strprintf("Test %i for StateSinceHeight (always active)", num));
-                BOOST_CHECK_MESSAGE(checker_never[i].GetStateSinceHeightFor(tip) == 0, strprintf("Test %i for StateSinceHeight (never active)", num));
+                BOOST_CHECK_MESSAGE(logic[i].GetStateSinceHeightFor(tip) == height, strprintf("Test %i for StateSinceHeight", num));
+                BOOST_CHECK_MESSAGE(logic_delayed[i].GetStateSinceHeightFor(tip) == height_delayed, strprintf("Test %i for StateSinceHeight (delayed)", num));
+                BOOST_CHECK_MESSAGE(logic_always[i].GetStateSinceHeightFor(tip) == 0, strprintf("Test %i for StateSinceHeight (always active)", num));
+                BOOST_CHECK_MESSAGE(logic_never[i].GetStateSinceHeightFor(tip) == 0, strprintf("Test %i for StateSinceHeight (never active)", num));
             }
         }
         num++;
@@ -160,10 +161,10 @@ public:
         const CBlockIndex* pindex = Tip();
         for (int i = 0; i < CHECKERS; i++) {
             if (InsecureRandBits(i) == 0) {
-                ThresholdState got = checker[i].GetStateFor(pindex);
-                ThresholdState got_delayed = checker_delayed[i].GetStateFor(pindex);
-                ThresholdState got_always = checker_always[i].GetStateFor(pindex);
-                ThresholdState got_never = checker_never[i].GetStateFor(pindex);
+                ThresholdState got = logic[i].GetStateFor(pindex);
+                ThresholdState got_delayed = logic_delayed[i].GetStateFor(pindex);
+                ThresholdState got_always = logic_always[i].GetStateFor(pindex);
+                ThresholdState got_never = logic_never[i].GetStateFor(pindex);
                 // nHeight of the next block. If vpblock is empty, the next (ie first)
                 // block should be the genesis block with nHeight == 0.
                 int height = pindex == nullptr ? 0 : pindex->nHeight + 1;
