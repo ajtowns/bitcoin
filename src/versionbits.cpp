@@ -5,6 +5,8 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
+using ThresholdState = ConditionLogic::ThresholdState;
+
 std::optional<ThresholdState> ConditionLogic::SpecialState() const
 {
     // Check if this deployment is always active.
@@ -118,9 +120,9 @@ ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& lo
     return state;
 }
 
-BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
+ConditionLogic::BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
 {
-    BIP9Stats stats = {};
+    ConditionLogic::BIP9Stats stats = {};
 
     stats.period = dep.period;
     stats.threshold = dep.threshold;

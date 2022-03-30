@@ -20,6 +20,12 @@ static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const int32_t VERSIONBITS_NUM_BITS = 29;
 
+class ConditionLogic
+{
+private:
+    const Consensus::BIP9Deployment& dep;
+
+public:
 /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
  *  State transitions happen during retarget period if conditions are met
  *  In case of reorg, transitions can go backward. Without transition, state is
@@ -47,12 +53,7 @@ struct BIP9Stats {
     bool possible;
 };
 
-class ConditionLogic
-{
-private:
-    const Consensus::BIP9Deployment& dep;
 
-public:
     explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
     const Consensus::BIP9Deployment& Dep() const { return dep; }
@@ -113,7 +114,7 @@ protected:
     // A map that caches the state for blocks whose height is a multiple of Period().
     // The map is indexed by the block's parent, however, so all keys in the map
     // will either be nullptr or a block with (height + 1) % Period() == 0.
-    std::map<const CBlockIndex*, ThresholdState> m_cache;
+    std::map<const CBlockIndex*, ConditionLogic::ThresholdState> m_cache;
 
 public:
     VersionBitsConditionChecker() = default;
@@ -124,18 +125,18 @@ public:
 
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
-    ThresholdState GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
+    ConditionLogic::ThresholdState GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
     /** Returns the height since when the ThresholdState has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     int GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
 
     /** Activation height if known */
     std::optional<int> ActivationHeight(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
     {
-        const ThresholdState state{GetStateFor(logic, pindexPrev)};
+        const ConditionLogic::ThresholdState state{GetStateFor(logic, pindexPrev)};
         if (logic.IsCertain(state)) {
             const int since = GetStateSinceHeightFor(logic, pindexPrev);
-            if (state == ThresholdState::ACTIVE) return since;
-            if (state == ThresholdState::LOCKED_IN) {
+            if (state == ConditionLogic::ThresholdState::ACTIVE) return since;
+            if (state == ConditionLogic::ThresholdState::LOCKED_IN) {
                 return std::max(since + logic.Period(), logic.Dep().min_activation_height);
             }
         }

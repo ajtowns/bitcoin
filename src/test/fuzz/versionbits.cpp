@@ -18,6 +18,8 @@
 #include <memory>
 #include <vector>
 
+using ThresholdState = ConditionLogic::ThresholdState;
+
 namespace {
 /** Track blocks mined for test */
 class Blocks
@@ -193,7 +195,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     const ThresholdState exp_state = checker.GetStateFor(logic, prev);
 
     // get statistics from end of previous period, then reset
-    BIP9Stats last_stats;
+    ConditionLogic::BIP9Stats last_stats;
     last_stats.period = period;
     last_stats.threshold = threshold;
     last_stats.count = last_stats.elapsed = 0;
@@ -221,8 +223,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
         // check that after mining this block stats change as expected
         std::vector<bool> signals;
-        const BIP9Stats stats = logic.GetStateStatisticsFor(current_block, &signals);
-        const BIP9Stats stats_no_signals = logic.GetStateStatisticsFor(current_block);
+        const ConditionLogic::BIP9Stats stats = logic.GetStateStatisticsFor(current_block, &signals);
+        const ConditionLogic::BIP9Stats stats_no_signals = logic.GetStateStatisticsFor(current_block);
         assert(stats.period == stats_no_signals.period && stats.threshold == stats_no_signals.threshold
                && stats.elapsed == stats_no_signals.elapsed && stats.count == stats_no_signals.count
                && stats.possible == stats_no_signals.possible);
@@ -251,7 +253,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     CBlockIndex* current_block = blocks.mine_block(signal);
     assert(logic.Condition(current_block) == signal);
 
-    const BIP9Stats stats = logic.GetStateStatisticsFor(current_block);
+    const ConditionLogic::BIP9Stats stats = logic.GetStateStatisticsFor(current_block);
     assert(stats.period == period);
     assert(stats.threshold == threshold);
     assert(stats.elapsed == period);
