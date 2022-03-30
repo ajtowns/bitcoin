@@ -188,6 +188,54 @@ int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& lo
     return pindexPrev->nHeight + 1;
 }
 
+ConditionLogic VersionBitsCache::GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    return ConditionLogic{params.vDeployments[pos]};
+}
+
+using checker_array = std::array<VersionBitsConditionChecker,Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
+
+template<size_t POS>
+static inline std::pair<ConditionLogic, VersionBitsConditionChecker&> GetLogicChecker(checker_array& checkers, const Consensus::Params& params)
+{
+    return {ConditionLogic{params.vDeployments[POS]}, std::get<POS>(checkers)};
+}
+
+template<typename F, size_t... ints>
+static auto AllDeployments_impl(checker_array& checkers, const Consensus::Params& params, F&& fn, std::index_sequence<ints...> int_seq)
+{
+    return fn(GetLogicChecker<ints>(checkers, params)...);
+}
+
+template<typename F>
+static auto AllDeployments(checker_array& checkers, const Consensus::Params& params, F&& fn)
+{
+    constexpr size_t ts = std::tuple_size_v<checker_array>;
+    return AllDeployments_impl(checkers, params, fn, std::make_index_sequence<ts>{});
+}
+
+template<size_t POS, typename F, typename P, typename C>
+static auto ExactDeployment(checker_array& checkers, const Consensus::Params& params, F&& fn)
+{
+    auto [logic, checker] = GetLogicChecker<POS>(checkers, params);
+    return fn(logic, checker);
+}
+
+template<size_t I, typename F, typename P, typename C, typename T>
+static T OneDeployment_impl(checker_array& checkers, const Consensus::Params& params, T&& def, size_t pos, F&& fn)
+{
+    if constexpr (I < std::tuple_size_v<checker_array>) {
+        if (pos == I) {
+            auto [logic, checker] = GetLogicChecker<I>(checkers, params);
+            return fn(logic, checker);
+        } else {
+            return OneDeployment_impl<I+1>(checkers, params, def, pos, fn);
+        }
+    } else {
+        return def;
+    }
+}
+
 bool VersionBitsCache::IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
@@ -234,17 +282,19 @@ bool VersionBitsCache::ShouldSetVersionBit(const CBlockIndex* pindexPrev, const 
 int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(m_mutex);
-    int32_t nVersion = VERSIONBITS_TOP_BITS;
 
-    for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        ConditionLogic logic{GetLogic(params, pos)};
-        if (logic.ShouldSetVersionBit(m_checker[pos].GetStateFor(logic, pindexPrev))) {
-            nVersion |= logic.Mask();
+    auto get_mask = [&](auto p) -> int32_t {
+        auto [logic, checker] = p;
+        if (logic.ShouldSetVersionBit(checker.GetStateFor(logic, pindexPrev))) {
+            return logic.Mask();
+        } else {
+            return 0;
         }
-    }
+    };
 
-    return nVersion;
+    return AllDeployments(m_checker, params, [&](auto... p) -> int32_t {
+        return (VERSIONBITS_TOP_BITS | ... | get_mask(p));
+    });
 }
 
 void VersionBitsCache::Clear()

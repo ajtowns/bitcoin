@@ -122,6 +122,12 @@ protected:
     std::map<const CBlockIndex*, ThresholdState> m_cache;
 
 public:
+    VersionBitsConditionChecker() = default;
+    VersionBitsConditionChecker(const VersionBitsConditionChecker&) = delete;
+    VersionBitsConditionChecker(VersionBitsConditionChecker&&) = delete;
+    VersionBitsConditionChecker& operator=(const VersionBitsConditionChecker&) = delete;
+    VersionBitsConditionChecker& operator=(VersionBitsConditionChecker&&) = delete;
+
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
     ThresholdState GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
@@ -137,14 +143,11 @@ class VersionBitsCache
 {
 private:
     Mutex m_mutex;
-    mutable VersionBitsConditionChecker m_checker[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(m_mutex);
+    mutable std::array<VersionBitsConditionChecker,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> m_checker GUARDED_BY(m_mutex);
+
+    static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos);
 
 public:
-    static inline ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
-    {
-        return ConditionLogic{params.vDeployments[pos]};
-    }
-
     /** Get the numerical statistics for a given deployment for the signalling period that includes pindex.
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
