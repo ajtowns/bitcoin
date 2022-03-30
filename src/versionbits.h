@@ -140,6 +140,9 @@ public:
     /** Check if the deployment is active */
     bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 
+    /** Check if versionbit should be set */
+    bool ShouldSetVersionBit(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
     ThresholdState State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 

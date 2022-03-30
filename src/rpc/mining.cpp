@@ -853,41 +853,26 @@ static RPCHelpMan getblocktemplate()
     UniValue vbavailable(UniValue::VOBJ);
     for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
         Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
-        ThresholdState state = chainman.m_versionbitscache.State(pindexPrev, consensusParams, pos);
-        switch (state) {
-            case ThresholdState::DEFINED:
-            case ThresholdState::FAILED:
-                // Not exposed to GBT at all
-                break;
-            case ThresholdState::LOCKED_IN:
+        const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
+        auto supported = [&]() -> bool {
+            return setClientRules.find(vbinfo.name) != setClientRules.end();
+        };
+
+        if (chainman.m_versionbitscache.IsActive(pindexPrev, consensusParams, pos)) {
+            // Add to rules only
+            aRules.push_back(gbt_vb_name(pos));
+            if (!vbinfo.gbt_force && !supported()) {
+                // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", vbinfo.name));
+            }
+        } else if (chainman.m_versionbitscache.ShouldSetVersionBit(pindexPrev, consensusParams, pos)) {
+            vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
+            if (vbinfo.gbt_force || supported()) {
                 // Ensure bit is set in block version
                 pblock->nVersion |= chainman.m_versionbitscache.Mask(consensusParams, pos);
-                [[fallthrough]];
-            case ThresholdState::STARTED:
-            {
-                const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
-                vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
-                if (setClientRules.find(vbinfo.name) == setClientRules.end()) {
-                    if (!vbinfo.gbt_force) {
-                        // If the client doesn't support this, don't indicate it in the [default] version
-                        pblock->nVersion &= ~chainman.m_versionbitscache.Mask(consensusParams, pos);
-                    }
-                }
-                break;
-            }
-            case ThresholdState::ACTIVE:
-            {
-                // Add to rules only
-                const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
-                aRules.push_back(gbt_vb_name(pos));
-                if (setClientRules.find(vbinfo.name) == setClientRules.end()) {
-                    // Not supported by the client; make sure it's safe to proceed
-                    if (!vbinfo.gbt_force) {
-                        // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
-                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", vbinfo.name));
-                    }
-                }
-                break;
+            } else {
+                // If the client doesn't support this, don't indicate it in the [default] version
+                pblock->nVersion &= ~chainman.m_versionbitscache.Mask(consensusParams, pos);
             }
         }
     }

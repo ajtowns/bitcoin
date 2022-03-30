@@ -217,6 +217,13 @@ uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::Depl
     return ConditionLogic(params.vDeployments[pos]).Mask();
 }
 
+bool VersionBitsCache::ShouldSetVersionBit(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    LOCK(m_mutex);
+    ConditionLogic logic(params.vDeployments[pos]);
+    return logic.ShouldSetVersionBit(m_checker[pos].GetStateFor(logic, pindexPrev));
+}
+
 int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(m_mutex);
