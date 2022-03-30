@@ -5,7 +5,7 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-using ThresholdState = ConditionLogic::ThresholdState;
+using ThresholdState = ConditionLogic::State;
 
 std::optional<ThresholdState> ConditionLogic::SpecialState() const
 {
@@ -120,9 +120,9 @@ ThresholdState VersionBitsConditionChecker::GetStateFor(const ConditionLogic& lo
     return state;
 }
 
-ConditionLogic::BIP9Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
+ConditionLogic::Stats ConditionLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
 {
-    ConditionLogic::BIP9Stats stats = {};
+    ConditionLogic::Stats stats = {};
 
     stats.period = dep.period;
     stats.threshold = dep.threshold;

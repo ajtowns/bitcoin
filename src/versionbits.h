@@ -26,32 +26,32 @@ private:
     const Consensus::BIP9Deployment& dep;
 
 public:
-/** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
- *  State transitions happen during retarget period if conditions are met
- *  In case of reorg, transitions can go backward. Without transition, state is
- *  inherited between periods. All blocks of a period share the same state.
- */
-enum class ThresholdState {
-    DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
-    STARTED,   // For blocks past the starttime.
-    LOCKED_IN, // For at least one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion, until min_activation_height is reached.
-    ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
-    FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
-};
+    /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
+     *  State transitions happen during retarget period if conditions are met
+     *  In case of reorg, transitions can go backward. Without transition, state is
+     *  inherited between periods. All blocks of a period share the same state.
+     */
+    enum class State {
+        DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
+        STARTED,   // For blocks past the starttime.
+        LOCKED_IN, // For at least one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion, until min_activation_height is reached.
+        ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
+        FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
+    };
 
-/** Display status of an in-progress BIP9 softfork */
-struct BIP9Stats {
-    /** Length of blocks of the BIP9 signalling period */
-    int period;
-    /** Number of blocks with the version bit set required to activate the softfork */
-    int threshold;
-    /** Number of blocks elapsed since the beginning of the current period */
-    int elapsed;
-    /** Number of blocks with the version bit set since the beginning of the current period */
-    int count;
-    /** False if there are not enough blocks left in this period to pass activation threshold */
-    bool possible;
-};
+    /** Display status of an in-progress BIP9 softfork */
+    struct Stats {
+        /** Length of blocks of the BIP9 signalling period */
+        int period;
+        /** Number of blocks with the version bit set required to activate the softfork */
+        int threshold;
+        /** Number of blocks elapsed since the beginning of the current period */
+        int elapsed;
+        /** Number of blocks with the version bit set since the beginning of the current period */
+        int count;
+        /** False if there are not enough blocks left in this period to pass activation threshold */
+        bool possible;
+    };
 
 
     explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
@@ -65,29 +65,29 @@ struct BIP9Stats {
     bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
     /** Configured to be always in the same state */
-    std::optional<ThresholdState> SpecialState() const;
+    std::optional<State> SpecialState() const;
 
     /* Normal transitions */
-    static constexpr ThresholdState GenesisState = ThresholdState::DEFINED;
-    std::optional<ThresholdState> TrivialState(const CBlockIndex* pindexPrev) const;
-    ThresholdState NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const;
+    static constexpr State GenesisState = State::DEFINED;
+    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
+    State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
     /** Determine if deployment is active */
-    bool IsActive(ThresholdState state, const CBlockIndex* pindexPrev) const { return state == ThresholdState::ACTIVE; }
+    bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
 
     /** Determine if deployment is certain */
-    bool IsCertain(ThresholdState state) const
+    bool IsCertain(State state) const
     {
-        return state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN;
+        return state == State::ACTIVE || state == State::LOCKED_IN;
     }
 
     /** Get bit mask */
     uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
     /** Given current state, should bit be set? */
-    bool ShouldSetVersionBit(ThresholdState state, const CBlockIndex* pindexPrev) const
+    bool ShouldSetVersionBit(State state, const CBlockIndex* pindexPrev) const
     {
-        return (state == ThresholdState::STARTED) || (state == ThresholdState::LOCKED_IN);
+        return (state == State::STARTED) || (state == State::LOCKED_IN);
     }
 
     /** Is the bit set? */
@@ -102,7 +102,7 @@ struct BIP9Stats {
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    BIP9Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
+    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
 };
 
 /**
@@ -114,7 +114,7 @@ protected:
     // A map that caches the state for blocks whose height is a multiple of Period().
     // The map is indexed by the block's parent, however, so all keys in the map
     // will either be nullptr or a block with (height + 1) % Period() == 0.
-    std::map<const CBlockIndex*, ConditionLogic::ThresholdState> m_cache;
+    std::map<const CBlockIndex*, ConditionLogic::State> m_cache;
 
 public:
     VersionBitsConditionChecker() = default;
@@ -125,18 +125,18 @@ public:
 
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
-    ConditionLogic::ThresholdState GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
-    /** Returns the height since when the ThresholdState has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
+    ConditionLogic::State GetStateFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
+    /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     int GetStateSinceHeightFor(const ConditionLogic& logic, const CBlockIndex* pindexPrev);
 
     /** Activation height if known */
     std::optional<int> ActivationHeight(const ConditionLogic& logic, const CBlockIndex* pindexPrev)
     {
-        const ConditionLogic::ThresholdState state{GetStateFor(logic, pindexPrev)};
+        const ConditionLogic::State state{GetStateFor(logic, pindexPrev)};
         if (logic.IsCertain(state)) {
             const int since = GetStateSinceHeightFor(logic, pindexPrev);
-            if (state == ConditionLogic::ThresholdState::ACTIVE) return since;
-            if (state == ConditionLogic::ThresholdState::LOCKED_IN) {
+            if (state == ConditionLogic::State::ACTIVE) return since;
+            if (state == ConditionLogic::State::LOCKED_IN) {
                 return std::max(since + logic.Period(), logic.Dep().min_activation_height);
             }
         }

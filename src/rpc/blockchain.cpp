@@ -1070,25 +1070,25 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
     rv.pushKV("type", "buried");
 }
 
-static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const ConditionLogic& logic, VersionBitsConditionChecker& checker, ConditionLogic::ThresholdState next_state)
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const ConditionLogic& logic, VersionBitsConditionChecker& checker, ConditionLogic::State next_state)
 {
     rv.pushKV("type", "bip9");
 
     // For BIP9 deployments.
-    auto get_state_name = [](const ConditionLogic::ThresholdState state) -> std::string {
+    auto get_state_name = [](const ConditionLogic::State state) -> std::string {
         switch (state) {
-        case ConditionLogic::ThresholdState::DEFINED: return "defined";
-        case ConditionLogic::ThresholdState::STARTED: return "started";
-        case ConditionLogic::ThresholdState::LOCKED_IN: return "locked_in";
-        case ConditionLogic::ThresholdState::ACTIVE: return "active";
-        case ConditionLogic::ThresholdState::FAILED: return "failed";
+        case ConditionLogic::State::DEFINED: return "defined";
+        case ConditionLogic::State::STARTED: return "started";
+        case ConditionLogic::State::LOCKED_IN: return "locked_in";
+        case ConditionLogic::State::ACTIVE: return "active";
+        case ConditionLogic::State::FAILED: return "failed";
         }
         return "invalid";
     };
 
     UniValue bip9(UniValue::VOBJ);
 
-    const ConditionLogic::ThresholdState current_state = checker.GetStateFor(logic, blockindex->pprev);
+    const ConditionLogic::State current_state = checker.GetStateFor(logic, blockindex->pprev);
 
     const bool has_signal = logic.ShouldSetVersionBit(current_state, blockindex->pprev);
 
@@ -1115,7 +1115,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
         statsUV.pushKV("period", statsStruct.period);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
-        if (ConditionLogic::ThresholdState::LOCKED_IN != current_state) {
+        if (ConditionLogic::State::LOCKED_IN != current_state) {
             statsUV.pushKV("threshold", statsStruct.threshold);
             statsUV.pushKV("possible", statsStruct.possible);
         }
