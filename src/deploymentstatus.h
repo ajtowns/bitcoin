@@ -21,7 +21,7 @@ inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Chainstat
 inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman, Consensus::DeploymentPos dep)
 {
     assert(Consensus::ValidDeployment(dep));
-    return ThresholdState::ACTIVE == chainman.m_versionbitscache.State(pindexPrev, chainman.GetConsensus(), dep);
+    return chainman.m_versionbitscache.IsActive(pindexPrev, chainman.GetConsensus(), dep);
 }
 
 /** Determine if a deployment is active for this block */

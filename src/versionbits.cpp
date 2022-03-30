@@ -188,6 +188,13 @@ int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& lo
     return pindexPrev->nHeight + 1;
 }
 
+bool VersionBitsCache::IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    LOCK(m_mutex);
+    ConditionLogic logic(params.vDeployments[pos]);
+    return logic.IsActive(m_checker[pos].GetStateFor(logic, pindexPrev), pindexPrev);
+}
+
 ThresholdState VersionBitsCache::State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);

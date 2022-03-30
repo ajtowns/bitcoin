@@ -67,6 +67,9 @@ public:
     std::optional<ThresholdState> TrivialState(const CBlockIndex* pindexPrev) const;
     ThresholdState NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const;
 
+    /** Determine if deployment is active */
+    inline bool IsActive(ThresholdState state, const CBlockIndex* pindexPrev) const { return state == ThresholdState::ACTIVE; }
+
     /** Get bit mask */
     inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
@@ -127,6 +130,9 @@ public:
     static BIP9Stats Statistics(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, std::vector<bool>* signalling_blocks = nullptr);
 
     static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+    /** Check if the deployment is active */
+    bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
     ThresholdState State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
