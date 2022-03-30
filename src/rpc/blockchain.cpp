@@ -1065,28 +1065,16 @@ static RPCHelpMan verifychain()
     };
 }
 
-static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softforks, const ChainstateManager& chainman, Consensus::BuriedDeployment dep)
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::BuriedDeployment dep, const BuriedDeploymentLogic& logic, BuriedDeploymentChecker& checker, bool active_after)
 {
-    // For buried deployments.
-
-    if (!DeploymentEnabled(chainman, dep)) return;
-
-    UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "buried");
-    // getdeploymentinfo reports the softfork as active from when the chain height is
-    // one below the activation height
-    rv.pushKV("active", DeploymentActiveAfter(blockindex, chainman, dep));
-    rv.pushKV("height", chainman.GetConsensus().DeploymentHeight(dep));
-    softforks.pushKV(DeploymentName(dep), rv);
 }
 
-static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softforks, const ChainstateManager& chainman, Consensus::DeploymentPos id)
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const ConditionLogic& logic, VersionBitsConditionChecker& checker, ThresholdState next_state)
 {
+    rv.pushKV("type", "bip9");
+
     // For BIP9 deployments.
-
-    if (!DeploymentEnabled(chainman, id)) return;
-    if (blockindex == nullptr) return;
-
     auto get_state_name = [](const ThresholdState state) -> std::string {
         switch (state) {
         case ThresholdState::DEFINED: return "defined";
@@ -1100,29 +1088,30 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
 
     UniValue bip9(UniValue::VOBJ);
 
-    const ThresholdState next_state = chainman.m_versionbitscache.State(blockindex, chainman.GetConsensus(), id);
-    const ThresholdState current_state = chainman.m_versionbitscache.State(blockindex->pprev, chainman.GetConsensus(), id);
+    const ThresholdState current_state = checker.GetStateFor(logic, blockindex->pprev);
 
-    const bool has_signal = (ThresholdState::STARTED == current_state || ThresholdState::LOCKED_IN == current_state);
+    const bool has_signal = logic.ShouldSetVersionBit(current_state, blockindex->pprev);
+
+    const Consensus::BIP9Deployment& dep = logic.Dep();
 
     // BIP9 parameters
     if (has_signal) {
-        bip9.pushKV("bit", chainman.GetConsensus().vDeployments[id].bit);
+        bip9.pushKV("bit", dep.bit);
     }
-    bip9.pushKV("start_time", chainman.GetConsensus().vDeployments[id].nStartTime);
-    bip9.pushKV("timeout", chainman.GetConsensus().vDeployments[id].nTimeout);
-    bip9.pushKV("min_activation_height", chainman.GetConsensus().vDeployments[id].min_activation_height);
+    bip9.pushKV("start_time", dep.nStartTime);
+    bip9.pushKV("timeout", dep.nTimeout);
+    bip9.pushKV("min_activation_height", dep.min_activation_height);
 
     // BIP9 status
     bip9.pushKV("status", get_state_name(current_state));
-    bip9.pushKV("since", chainman.m_versionbitscache.StateSinceHeight(blockindex->pprev, chainman.GetConsensus(), id));
+    bip9.pushKV("since", checker.GetStateSinceHeightFor(logic, blockindex->pprev));
     bip9.pushKV("status_next", get_state_name(next_state));
 
     // BIP9 signalling status, if applicable
     if (has_signal) {
         UniValue statsUV(UniValue::VOBJ);
         std::vector<bool> signals;
-        BIP9Stats statsStruct = chainman.m_versionbitscache.Statistics(blockindex, chainman.GetConsensus(), id, &signals);
+        BIP9Stats statsStruct = logic.GetStateStatisticsFor(blockindex, &signals);
         statsUV.pushKV("period", statsStruct.period);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
@@ -1140,16 +1129,7 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
         bip9.pushKV("signalling", sig);
     }
 
-    UniValue rv(UniValue::VOBJ);
-    rv.pushKV("type", "bip9");
-    const auto act_height = chainman.m_versionbitscache.ActivationHeight(blockindex, chainman.GetConsensus(), id);
-    if (act_height) {
-        rv.pushKV("height", *act_height);
-    }
-    rv.pushKV("active", ThresholdState::ACTIVE == next_state);
     rv.pushKV("bip9", bip9);
-
-    softforks.pushKV(DeploymentName(id), rv);
 }
 
 namespace {
@@ -1274,13 +1254,20 @@ const std::vector<RPCResult> RPCHelpForDeployment{
 UniValue DeploymentInfo(const CBlockIndex* blockindex, const ChainstateManager& chainman)
 {
     UniValue softforks(UniValue::VOBJ);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_HEIGHTINCB);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_DERSIG);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_CLTV);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_CSV);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_SEGWIT);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_TESTDUMMY);
-    SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_TAPROOT);
+    chainman.m_versionbitscache.ForEachDeployment(chainman.GetConsensus(), [&](auto pos, const auto& logic, auto& checker) {
+        if (!logic.Enabled()) return;
+        const auto state = checker.GetStateFor(logic, blockindex);
+
+        UniValue rv(UniValue::VOBJ);
+        SoftForkDescPushBack(rv, blockindex, pos, logic, checker, state);
+        rv.pushKV("active", logic.IsActive(state, blockindex));
+        const auto act_height = checker.ActivationHeight(logic, blockindex);
+        if (act_height) {
+            rv.pushKV("height", *act_height);
+        }
+
+        softforks.pushKV(DeploymentName(pos), rv);
+    });
     return softforks;
 }
 } // anon namespace

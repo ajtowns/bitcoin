@@ -851,31 +851,35 @@ static RPCHelpMan getblocktemplate()
     }
 
     UniValue vbavailable(UniValue::VOBJ);
-    for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
-        Consensus::DeploymentPos pos = Consensus::DeploymentPos(j);
+
+    chainman.m_versionbitscache.ForEachDeployment(consensusParams, [&](auto pos, const auto& logic, auto& checker) {
+      if constexpr(std::is_same_v<decltype(pos), Consensus::DeploymentPos>) {
         const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
         auto supported = [&]() -> bool {
             return setClientRules.find(vbinfo.name) != setClientRules.end();
         };
 
-        if (chainman.m_versionbitscache.IsActive(pindexPrev, consensusParams, pos)) {
+        const auto state = checker.GetStateFor(logic, pindexPrev);
+        if (logic.IsActive(state, pindexPrev)) {
             // Add to rules only
             aRules.push_back(gbt_vb_name(pos));
             if (!vbinfo.gbt_force && !supported()) {
                 // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
                 throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", vbinfo.name));
             }
-        } else if (chainman.m_versionbitscache.ShouldSetVersionBit(pindexPrev, consensusParams, pos)) {
+        } else if (logic.ShouldSetVersionBit(state, pindexPrev)) {
             vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
             if (vbinfo.gbt_force || supported()) {
                 // Ensure bit is set in block version
-                pblock->nVersion |= chainman.m_versionbitscache.Mask(consensusParams, pos);
+                pblock->nVersion |= logic.Mask();
             } else {
                 // If the client doesn't support this, don't indicate it in the [default] version
-                pblock->nVersion &= ~chainman.m_versionbitscache.Mask(consensusParams, pos);
+                pblock->nVersion &= ~logic.Mask();
             }
         }
-    }
+      }
+    });
+
     result.pushKV("version", pblock->nVersion);
     result.pushKV("rules", aRules);
     result.pushKV("vbavailable", vbavailable);
