@@ -191,43 +191,43 @@ int VersionBitsConditionChecker::GetStateSinceHeightFor(const ConditionLogic& lo
 bool VersionBitsCache::IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    ConditionLogic logic(params.vDeployments[pos]);
+    ConditionLogic logic{GetLogic(params, pos)};
     return logic.IsActive(m_checker[pos].GetStateFor(logic, pindexPrev), pindexPrev);
 }
 
 ThresholdState VersionBitsCache::State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    return m_checker[pos].GetStateFor(ConditionLogic(params.vDeployments[pos]), pindexPrev);
+    return m_checker[pos].GetStateFor(GetLogic(params, pos), pindexPrev);
 }
 
 BIP9Stats VersionBitsCache::Statistics(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos, std::vector<bool>* signalling_blocks)
 {
-    return ConditionLogic(params.vDeployments[pos]).GetStateStatisticsFor(pindex, signalling_blocks);
+    return GetLogic(params, pos).GetStateStatisticsFor(pindex, signalling_blocks);
 }
 
 int VersionBitsCache::StateSinceHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    return m_checker[pos].GetStateSinceHeightFor(ConditionLogic(params.vDeployments[pos]), pindexPrev);
+    return m_checker[pos].GetStateSinceHeightFor(GetLogic(params, pos), pindexPrev);
 }
 
 std::optional<int> VersionBitsCache::ActivationHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    ConditionLogic logic(params.vDeployments[pos]);
+    ConditionLogic logic{GetLogic(params, pos)};
     return logic.ActivationHeight(m_checker[pos].GetStateFor(logic, pindexPrev), m_checker[pos].GetStateSinceHeightFor(logic, pindexPrev));
 }
 
 uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
-    return ConditionLogic(params.vDeployments[pos]).Mask();
+    return GetLogic(params, pos).Mask();
 }
 
 bool VersionBitsCache::ShouldSetVersionBit(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     LOCK(m_mutex);
-    ConditionLogic logic(params.vDeployments[pos]);
+    ConditionLogic logic{GetLogic(params, pos)};
     return logic.ShouldSetVersionBit(m_checker[pos].GetStateFor(logic, pindexPrev));
 }
 
@@ -238,7 +238,7 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        ConditionLogic logic(params.vDeployments[pos]);
+        ConditionLogic logic{GetLogic(params, pos)};
         if (logic.ShouldSetVersionBit(m_checker[pos].GetStateFor(logic, pindexPrev))) {
             nVersion |= logic.Mask();
         }

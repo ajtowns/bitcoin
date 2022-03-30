@@ -140,6 +140,11 @@ private:
     mutable VersionBitsConditionChecker m_checker[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] GUARDED_BY(m_mutex);
 
 public:
+    static inline ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
+    {
+        return ConditionLogic{params.vDeployments[pos]};
+    }
+
     /** Get the numerical statistics for a given deployment for the signalling period that includes pindex.
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
