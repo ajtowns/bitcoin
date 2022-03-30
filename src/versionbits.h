@@ -76,6 +76,16 @@ public:
         return state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN;
     }
 
+    /** Activation height if known */
+    inline std::optional<int> ActivationHeight(ThresholdState state, int since) const
+    {
+        if (state == ThresholdState::ACTIVE) return since;
+        if (state == ThresholdState::LOCKED_IN) {
+            return std::max(since + Period(), dep.min_activation_height);
+        }
+        return std::nullopt;
+    }
+
     /** Get bit mask */
     inline uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
@@ -142,6 +152,9 @@ public:
 
     /** Check if versionbit should be set */
     bool ShouldSetVersionBit(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
+
+    /** Get activation height if known */
+    std::optional<int> ActivationHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
     ThresholdState State(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos);

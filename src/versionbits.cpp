@@ -212,6 +212,13 @@ int VersionBitsCache::StateSinceHeight(const CBlockIndex* pindexPrev, const Cons
     return m_checker[pos].GetStateSinceHeightFor(ConditionLogic(params.vDeployments[pos]), pindexPrev);
 }
 
+std::optional<int> VersionBitsCache::ActivationHeight(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    LOCK(m_mutex);
+    ConditionLogic logic(params.vDeployments[pos]);
+    return logic.ActivationHeight(m_checker[pos].GetStateFor(logic, pindexPrev), m_checker[pos].GetStateSinceHeightFor(logic, pindexPrev));
+}
+
 uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
 {
     return ConditionLogic(params.vDeployments[pos]).Mask();

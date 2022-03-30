@@ -1142,8 +1142,9 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
 
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "bip9");
-    if (ThresholdState::ACTIVE == next_state) {
-        rv.pushKV("height", chainman.m_versionbitscache.StateSinceHeight(blockindex, chainman.GetConsensus(), id));
+    const auto act_height = chainman.m_versionbitscache.ActivationHeight(blockindex, chainman.GetConsensus(), id);
+    if (act_height) {
+        rv.pushKV("height", *act_height);
     }
     rv.pushKV("active", ThresholdState::ACTIVE == next_state);
     rv.pushKV("bip9", bip9);
