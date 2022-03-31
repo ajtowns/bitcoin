@@ -10,27 +10,29 @@ const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_B
     {
         /*.name =*/ "testdummy",
         /*.gbt_force =*/ true,
+        /*.gbt_hide =*/ false,
     },
     {
         /*.name =*/ "taproot",
         /*.gbt_force =*/ true,
+        /*.gbt_hide =*/ false,
     },
 };
 
-std::string DeploymentName(Consensus::BuriedDeployment dep)
+VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep)
 {
     assert(ValidDeployment(dep));
     switch (dep) {
     case Consensus::DEPLOYMENT_HEIGHTINCB:
-        return "bip34";
+        return {"bip34", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_CLTV:
-        return "bip65";
+        return {"bip65", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_DERSIG:
-        return "bip66";
+        return {"bip66", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_CSV:
-        return "csv";
+        return {"csv", /*.gbt_force=*/true, /*.gbt_hide=*/false};
     case Consensus::DEPLOYMENT_SEGWIT:
-        return "segwit";
+        return {"segwit", /*.gbt_force=*/false, /*.gbt_hide=*/false};
     } // no default case, so the compiler can warn about missing cases
-    return "";
+    return {"undef", true, true};
 }

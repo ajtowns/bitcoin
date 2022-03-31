@@ -247,8 +247,8 @@ public:
     void ForEachDeployment(const Consensus::Params& params, Fn&& fn)
     {
         LOCK(m_mutex);
-        ForEachDeployment_impl(m_cache, params, fn);
         ForEachBuriedDeployment(params, fn);
+        ForEachDeployment_impl(m_cache, params, fn);
     }
 
     /** Clear the cache */

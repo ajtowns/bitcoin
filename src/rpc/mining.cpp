@@ -511,8 +511,9 @@ static UniValue BIP22ValidationResult(const BlockValidationState& state)
     return "valid?";
 }
 
-static std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
-    const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
+template<typename T>
+static std::string gbt_vb_name(const T pos) {
+    const struct VBDeploymentInfo& vbinfo = GetDeploymentInfo(pos);
     std::string s = vbinfo.name;
     if (!vbinfo.gbt_force) {
         s.insert(s.begin(), '!');
@@ -750,11 +751,6 @@ static RPCHelpMan getblocktemplate()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the signet rule set (call with {\"rules\": [\"segwit\", \"signet\"]})");
     }
 
-    // GBT must be called with 'segwit' set in the rules
-    if (setClientRules.count("segwit") != 1) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the segwit rule set (call with {\"rules\": [\"segwit\"]})");
-    }
-
     // Update block
     static CBlockIndex* pindexPrev;
     static int64_t nStart;
@@ -842,8 +838,7 @@ static RPCHelpMan getblocktemplate()
     result.pushKV("capabilities", aCaps);
 
     UniValue aRules(UniValue::VARR);
-    aRules.push_back("csv");
-    if (!fPreSegWit) aRules.push_back("!segwit");
+
     if (consensusParams.signet_blocks) {
         // indicate to miner that they must understand signet rules
         // when attempting to mine with this template
@@ -853,8 +848,11 @@ static RPCHelpMan getblocktemplate()
     UniValue vbavailable(UniValue::VOBJ);
 
     chainman.m_versionbitscache.ForEachDeployment(consensusParams, [&](auto pos, const auto& logic, auto& cache) {
-      if constexpr(std::is_same_v<decltype(pos), Consensus::DeploymentPos>) {
-        const struct VBDeploymentInfo& vbinfo = VersionBitsDeploymentInfo[pos];
+        if (!logic.Enabled()) return;
+
+        const struct VBDeploymentInfo& vbinfo = GetDeploymentInfo(pos);
+        if (vbinfo.gbt_hide) return;
+
         auto supported = [&]() -> bool {
             return setClientRules.find(vbinfo.name) != setClientRules.end();
         };
@@ -865,7 +863,7 @@ static RPCHelpMan getblocktemplate()
             aRules.push_back(gbt_vb_name(pos));
             if (!vbinfo.gbt_force && !supported()) {
                 // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
-                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Support for '%s' rule requires explicit client support", vbinfo.name));
+                throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("getblocktemplate must be called with the %s rule set (call with {\"rules\": [\"%s\"]})", vbinfo.name, vbinfo.name));
             }
         } else if (logic.ShouldSetVersionBit(state, pindexPrev)) {
             vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
@@ -877,7 +875,6 @@ static RPCHelpMan getblocktemplate()
                 pblock->nVersion &= ~logic.Mask();
             }
         }
-      }
     });
 
     result.pushKV("version", pblock->nVersion);

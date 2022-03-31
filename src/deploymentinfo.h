@@ -14,16 +14,20 @@ struct VBDeploymentInfo {
     const char *name;
     /** Whether GBT clients can safely ignore this rule in simplified usage */
     bool gbt_force;
+    /** Whether GBT clients should be told about this rule */
+    bool gbt_hide;
 };
 
 extern const VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS];
 
-std::string DeploymentName(Consensus::BuriedDeployment dep);
-
-inline std::string DeploymentName(Consensus::DeploymentPos pos)
+VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep);
+inline const VBDeploymentInfo& GetDeploymentInfo(Consensus::DeploymentPos pos)
 {
     assert(Consensus::ValidDeployment(pos));
-    return VersionBitsDeploymentInfo[pos].name;
+    return VersionBitsDeploymentInfo[pos];
 }
+
+template<typename T>
+std::string DeploymentName(T dep) { return GetDeploymentInfo(dep).name; }
 
 #endif // BITCOIN_DEPLOYMENTINFO_H
