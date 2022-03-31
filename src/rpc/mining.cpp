@@ -778,7 +778,7 @@ static RPCHelpMan getblocktemplate()
     pblock->nNonce = 0;
 
     // NOTE: If at some point we support pre-segwit miners post-segwit-activation, this needs to take segwit support into consideration
-    const bool fPreSegWit = !DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_SEGWIT);
+    const bool fPreSegWit = !DeploymentActiveAfter<Consensus::DEPLOYMENT_SEGWIT>(pindexPrev, chainman);
 
     UniValue aCaps(UniValue::VARR); aCaps.push_back("proposal");
 
@@ -905,7 +905,7 @@ static RPCHelpMan getblocktemplate()
     result.pushKV("bits", strprintf("%08x", pblock->nBits));
     result.pushKV("height", (int64_t)(pindexPrev->nHeight+1));
 
-    if (DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_SIGNET)) {
+    if (DeploymentActiveAfter<Consensus::DEPLOYMENT_SIGNET>(pindexPrev, chainman)) {
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
     }
 
