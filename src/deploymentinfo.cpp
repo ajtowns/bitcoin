@@ -33,6 +33,8 @@ VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep)
         return {"csv", /*.gbt_force=*/true, /*.gbt_hide=*/false};
     case Consensus::DEPLOYMENT_SEGWIT:
         return {"segwit", /*.gbt_force=*/false, /*.gbt_hide=*/false};
+    case Consensus::DEPLOYMENT_SIGNET:
+        return {"signet", /*.gbt_force=*/false, /*.gbt_hide=*/false};
     } // no default case, so the compiler can warn about missing cases
     return {"undef", true, true};
 }

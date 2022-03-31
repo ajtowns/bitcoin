@@ -746,11 +746,6 @@ static RPCHelpMan getblocktemplate()
 
     const Consensus::Params& consensusParams = Params().GetConsensus();
 
-    // GBT must be called with 'signet' set in the rules for signet chains
-    if (consensusParams.signet_blocks && setClientRules.count("signet") != 1) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the signet rule set (call with {\"rules\": [\"segwit\", \"signet\"]})");
-    }
-
     // Update block
     static CBlockIndex* pindexPrev;
     static int64_t nStart;
@@ -839,12 +834,6 @@ static RPCHelpMan getblocktemplate()
 
     UniValue aRules(UniValue::VARR);
 
-    if (consensusParams.signet_blocks) {
-        // indicate to miner that they must understand signet rules
-        // when attempting to mine with this template
-        aRules.push_back("!signet");
-    }
-
     UniValue vbavailable(UniValue::VOBJ);
 
     chainman.m_versionbitscache.ForEachDeployment(consensusParams, [&](auto pos, const auto& logic, auto& cache) {
@@ -916,7 +905,7 @@ static RPCHelpMan getblocktemplate()
     result.pushKV("bits", strprintf("%08x", pblock->nBits));
     result.pushKV("height", (int64_t)(pindexPrev->nHeight+1));
 
-    if (consensusParams.signet_blocks) {
+    if (DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_SIGNET)) {
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
     }
 
