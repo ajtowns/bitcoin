@@ -26,6 +26,31 @@ static const int32_t VERSIONBITS_NUM_BITS = 29;
 template<typename Logic>
 class ThresholdConditionChecker
 {
+private:
+    /** Static checks to give cleaner errors if the "Logic" class is broken */
+    static constexpr void static_checks(const Logic& logic)
+    {
+        // need to be able to determine the period
+        static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
+
+        // need to be told whether a block signals or not
+        static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
+
+        // need to know the genesis state to kick things off
+        static_assert(std::is_same_v<const typename Logic::State, decltype(logic.GenesisState)>, "missing Logic::GenesisState");
+
+        // state transition logic:
+        // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
+        static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
+        static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
+        static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
+
+        // need to be able to return a Stats object with count and elapsed
+        typename Logic::Stats stats;
+        static_assert(std::is_same_v<int, decltype(stats.count)>, "missing Logic::Stats::count");
+        static_assert(std::is_same_v<int, decltype(stats.elapsed)>, "missing Logic::Stats::elapsed");
+    }
+
 public:
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
