@@ -67,9 +67,11 @@ public:
 
 class ConditionLogic
 {
-private:
-    const Consensus::BIP9Deployment& dep;
+public:
+    using Params = Consensus::BIP9Deployment;
 
+private:
+    const ConditionLogic::Params& dep;
     using ThreshCheck = ThresholdConditionChecker<ConditionLogic>;
 
 public:
@@ -193,6 +195,8 @@ public:
 class BuriedDeploymentLogic
 {
 public:
+    using Params = int;
+
     const int m_height;
     using State = bool;
     using Cache = std::true_type;
@@ -208,6 +212,18 @@ public:
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_height; }
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const { return m_height; }
 };
+
+template<typename P>
+struct LogicType { using Type = void; };
+
+template<>
+struct LogicType<Consensus::BIP9Deployment> { using Type = ConditionLogic; };
+
+template<>
+struct LogicType<int> { using Type = BuriedDeploymentLogic; };
+
+template<typename P>
+static typename LogicType<P>::Type xGetLogic(const P& params) { return typename LogicType<P>::Type{params}; }
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */
@@ -248,12 +264,12 @@ private:
 public:
     static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
     {
-        return ConditionLogic{params.vDeployments[pos]};
+        return xGetLogic(params.vDeployments[pos]);
     }
 
     static BuriedDeploymentLogic GetLogic(const Consensus::Params& params, Consensus::BuriedDeployment pos)
     {
-        return {params.DeploymentHeight(pos)};
+        return xGetLogic(params.DeploymentHeight(pos));
     }
 
     /** Check if the deployment is active */
