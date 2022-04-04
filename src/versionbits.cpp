@@ -4,7 +4,6 @@
 
 #include <versionbits.h>
 #include <consensus/params.h>
-#include <chainparams.h>
 
 using ThresholdState = ConditionLogic::State;
 
@@ -192,34 +191,3 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
 }
 
 template class ThresholdConditionChecker<ConditionLogic>;
-
-bool VersionBitsCache::IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos)
-{
-    LOCK(m_mutex);
-    ConditionLogic logic{GetLogic(params, pos)};
-    return logic.IsActive(m_cache[pos], pindexPrev);
-}
-
-uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
-{
-    return GetLogic(params, pos).Mask();
-}
-
-int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
-{
-    int32_t nVersion = VERSIONBITS_TOP_BITS;
-    ForEachDeployment(params, [&](auto pos, const auto& logic, auto& cache) {
-        if (logic.ShouldSetVersionBit(cache, pindexPrev)) {
-            nVersion |= logic.Mask();
-        }
-    });
-
-    return nVersion;
-}
-
-void VersionBitsCache::Clear()
-{
-    ForEachDeployment(Params().GetConsensus(), [&](auto pos, const auto& logic, auto& cache) {
-        logic.ClearCache(cache);
-    });
-}

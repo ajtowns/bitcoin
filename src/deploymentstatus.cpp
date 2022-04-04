@@ -6,8 +6,11 @@
 
 #include <consensus/params.h>
 #include <versionbits.h>
+#include <chainparams.h>
 
 #include <type_traits>
+
+using ThresholdState = ConditionLogic::State;
 
 /* Basic sanity checking for BuriedDeployment/DeploymentPos enums and
  * ValidDeployment check */
@@ -30,3 +33,27 @@ static constexpr bool is_minimum()
 
 static_assert(is_minimum<Consensus::BuriedDeployment, Consensus::DEPLOYMENT_HEIGHTINCB>(), "heightincb is not minimum value for BuriedDeployment");
 static_assert(is_minimum<Consensus::DeploymentPos, Consensus::DEPLOYMENT_TESTDUMMY>(), "testdummy is not minimum value for DeploymentPos");
+
+uint32_t VersionBitsCache::Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
+{
+    return GetLogic(params, pos).Mask();
+}
+
+int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+{
+    int32_t nVersion = VERSIONBITS_TOP_BITS;
+    ForEachDeployment(params, [&](auto pos, const auto& logic, auto& cache) {
+        if (logic.ShouldSetVersionBit(cache, pindexPrev)) {
+            nVersion |= logic.Mask();
+        }
+    });
+
+    return nVersion;
+}
+
+void VersionBitsCache::Clear()
+{
+    ForEachDeployment(Params().GetConsensus(), [&](auto pos, const auto& logic, auto& cache) {
+        logic.ClearCache(cache);
+    });
+}

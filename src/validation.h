@@ -16,6 +16,7 @@
 #include <chainparams.h>
 #include <consensus/amount.h>
 #include <consensus/params.h>
+#include <deploymentstatus.h>
 #include <fs.h>
 #include <node/blockstorage.h>
 #include <policy/feerate.h>
@@ -28,7 +29,6 @@
 #include <util/check.h>
 #include <util/hasher.h>
 #include <util/translation.h>
-#include <versionbits.h>
 
 #include <atomic>
 #include <map>
@@ -1005,6 +1005,29 @@ public:
         UnloadBlockIndex(/*mempool=*/nullptr, *this);
     }
 };
+
+/** Determine if a deployment is active for the next block */
+template<auto dep>
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman)
+{
+    static_assert(Consensus::ValidDeployment(dep));
+    return chainman.m_versionbitscache.IsActive(pindexPrev, chainman.GetConsensus(), dep);
+}
+
+template<auto dep>
+inline bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chainman)
+{
+    static_assert(Consensus::ValidDeployment(dep));
+    return DeploymentActiveAfter<dep>(index.pprev, chainman);
+}
+
+/** Determine if a deployment is enabled (can ever be active) */
+template<auto dep>
+inline bool DeploymentEnabled(const ChainstateManager& chainman)
+{
+    static_assert(Consensus::ValidDeployment(dep));
+    return chainman.m_versionbitscache.GetLogic(chainman.GetConsensus(), dep).Enabled();
+}
 
 using FopenFn = std::function<FILE*(const fs::path&, const char*)>;
 
