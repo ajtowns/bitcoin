@@ -142,14 +142,18 @@ public:
     uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
     /** Given current state, should bit be set? */
-    bool ShouldSetVersionBit(State state, const CBlockIndex* pindexPrev) const
+    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
     {
-        return (state == State::STARTED) || (state == State::LOCKED_IN);
+        if ((state == State::STARTED) || (state == State::LOCKED_IN)) {
+            return dep.bit;
+        } else {
+            return std::nullopt;
+        }
     }
 
-    bool ShouldSetVersionBit(Cache& cache, const CBlockIndex* pindexPrev) const
+    std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        return ShouldSetVersionBit(GetStateFor(cache, pindexPrev), pindexPrev);
+        return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
     /** Is the bit set? */

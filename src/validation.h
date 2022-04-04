@@ -1026,7 +1026,7 @@ template<auto dep>
 inline bool DeploymentEnabled(const ChainstateManager& chainman)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return chainman.m_versionbitscache.GetLogic(chainman.GetConsensus(), dep).Enabled();
+    return chainman.m_versionbitscache.zGetLogic<dep>(chainman.GetConsensus()).Enabled();
 }
 
 using FopenFn = std::function<FILE*(const fs::path&, const char*)>;

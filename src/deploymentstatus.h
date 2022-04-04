@@ -25,8 +25,8 @@ public:
 
     BuriedDeploymentLogic(int height) : m_height{height} { }
 
-    bool ShouldSetVersionBit(bool state, const CBlockIndex* pindexPrev) const { return false; }
     uint32_t Mask() const { return 0; }
+    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const { return std::nullopt; }
     bool Enabled() const { return m_height != std::numeric_limits<int>::max(); }
     bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
     State GetStateFor(const Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_height; }
@@ -64,7 +64,7 @@ private:
             constexpr Consensus::DeploymentPos POS = static_cast<Consensus::DeploymentPos>(I);
             static_assert(Consensus::ValidDeployment(POS), "invalid deployment");
 
-            const auto logic = GetLogic(params, POS);
+            const auto logic = yGetLogic(params, POS);
             auto& cache = std::get<I>(caches);
             fn(POS, logic, cache);
 
@@ -76,7 +76,7 @@ private:
     static void ForEachBuriedDeployment(const Consensus::Params& params, Fn&& fn)
     {
         if constexpr (ValidDeployment(POS)) {
-            const auto logic = GetLogic(params, POS);
+            const auto logic = yGetLogic(params, POS);
             BuriedDeploymentLogic::Cache cache; // dummy
             fn(POS, logic, cache);
 
@@ -84,12 +84,12 @@ private:
         }
     }
 
-    static ConditionLogic GetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
+    static ConditionLogic yGetLogic(const Consensus::Params& params, Consensus::DeploymentPos pos)
     {
         return xGetLogic(params.vDeployments[pos]);
     }
 
-    static BuriedDeploymentLogic GetLogic(const Consensus::Params& params, Consensus::BuriedDeployment pos)
+    static BuriedDeploymentLogic yGetLogic(const Consensus::Params& params, Consensus::BuriedDeployment pos)
     {
         return xGetLogic(params.DeploymentHeight(pos));
     }
@@ -105,12 +105,17 @@ private:
     }
 
 public:
+    template<auto Dep>
+    static auto zGetLogic(const Consensus::Params& params)
+    {
+        return yGetLogic(params, Dep);
+    }
 
     /** Check if the deployment is active */
     template<typename T>
     bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params, T dep)
     {
-        const auto logic{GetLogic(params, dep)};
+        const auto logic{yGetLogic(params, dep)};
         if constexpr(std::is_same_v<decltype(GetCache(params, dep)), std::true_type>) {
             std::true_type dummy_cache{};
             return logic.IsActive(dummy_cache, pindexPrev);
@@ -124,7 +129,10 @@ public:
     int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
     /** Get the bitmask for a given deployment */
-    static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos);
+    static uint32_t Mask(const Consensus::Params& params, Consensus::DeploymentPos pos)
+    {
+        return yGetLogic(params, pos).Mask();
+    }
 
     /** Iterate over all deployments, and do something
      * Fn should be [](auto pos, const auto& logic, auto& cache) { ... }

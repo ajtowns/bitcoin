@@ -69,12 +69,12 @@ static void SetDeployment(Consensus::Params& consensus,
     int min_activation_height = 0)
 {
     static_assert(ValidDeployment(dep), "dep is not a valid deployment");
-    consensus.vDeployments[dep].bit = bit;
-    consensus.vDeployments[dep].nStartTime = start_time;
-    consensus.vDeployments[dep].nTimeout = timeout;
-    consensus.vDeployments[dep].period = period;
-    consensus.vDeployments[dep].threshold = threshold;
-    consensus.vDeployments[dep].min_activation_height = min_activation_height;
+    std::get<dep>(consensus.vDeployments).bit = bit;
+    std::get<dep>(consensus.vDeployments).nStartTime = start_time;
+    std::get<dep>(consensus.vDeployments).nTimeout = timeout;
+    std::get<dep>(consensus.vDeployments).period = period;
+    std::get<dep>(consensus.vDeployments).threshold = threshold;
+    std::get<dep>(consensus.vDeployments).min_activation_height = min_activation_height;
 }
 
 /**
@@ -530,14 +530,23 @@ public:
         bech32_hrp = "bcrt";
     }
 
+    /** Helper for updating deployment parameters */
+    template<typename Fn, size_t I=0>
+    void ForEachDeployment(Fn&& fn) {
+        if constexpr (I < std::tuple_size_v<decltype(consensus.vDeployments)>) {
+            if (fn(I, std::get<I>(consensus.vDeployments))) return;
+            ForEachDeployment<Fn,I+1>(std::move(fn));
+        }
+    }
+
     /**
      * Allows modifying the Version Bits regtest parameters.
      */
-    void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout, int min_activation_height)
+    static void UpdateVersionBitsParameters(Consensus::BIP9Deployment& dep, int64_t nStartTime, int64_t nTimeout, int min_activation_height)
     {
-        consensus.vDeployments[d].nStartTime = nStartTime;
-        consensus.vDeployments[d].nTimeout = nTimeout;
-        consensus.vDeployments[d].min_activation_height = min_activation_height;
+        dep.nStartTime = nStartTime;
+        dep.nTimeout = nTimeout;
+        dep.min_activation_height = min_activation_height;
     }
     void UpdateActivationParametersFromArgs(const ArgsManager& args);
 };
@@ -594,15 +603,17 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
         if (vDeploymentParams.size() >= 4 && !ParseInt32(vDeploymentParams[3], &min_activation_height)) {
             throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
         }
+
         bool found = false;
-        for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+        ForEachDeployment([&](size_t j, Consensus::BIP9Deployment& dep) {
             if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
-                UpdateVersionBitsParameters(Consensus::DeploymentPos(j), nStartTime, nTimeout, min_activation_height);
+                UpdateVersionBitsParameters(dep, nStartTime, nTimeout, min_activation_height);
                 found = true;
                 LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], nStartTime, nTimeout, min_activation_height);
-                break;
+                return true;
             }
-        }
+            return false;
+        });
         if (!found) {
             throw std::runtime_error(strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
         }

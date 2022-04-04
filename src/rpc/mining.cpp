@@ -854,8 +854,8 @@ static RPCHelpMan getblocktemplate()
                 // If we do anything other than throw an exception here, be sure version/force isn't sent to old clients
                 throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("getblocktemplate must be called with the %s rule set (call with {\"rules\": [\"%s\"]})", vbinfo.name, vbinfo.name));
             }
-        } else if (logic.ShouldSetVersionBit(state, pindexPrev)) {
-            vbavailable.pushKV(gbt_vb_name(pos), consensusParams.vDeployments[pos].bit);
+        } else if (const std::optional<int> signal_bit = logic.VersionBitToSet(state, pindexPrev)) {
+            vbavailable.pushKV(gbt_vb_name(pos), *signal_bit);
             if (vbinfo.gbt_force || supported()) {
                 // Ensure bit is set in block version
                 pblock->nVersion |= logic.Mask();
