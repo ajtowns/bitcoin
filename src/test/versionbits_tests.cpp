@@ -264,11 +264,12 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
 }
 
 /** Check that ComputeBlockVersion will set the appropriate bit correctly */
-static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const ConditionLogic& logic)
 {
     // Clear the cache everytime
     versionbitscache.Clear();
 
+    const auto& dep = logic.Dep();
     const int64_t bit = dep.bit;
     const int64_t nStartTime = dep.nStartTime;
     const int64_t nTimeout = dep.nTimeout;
@@ -306,7 +307,7 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     // Check min_activation_height is on a retarget boundary
     BOOST_REQUIRE_EQUAL(min_activation_height % period, 0U);
 
-    const uint32_t bitmask{ConditionLogic(dep).Mask()};
+    const uint32_t bitmask{logic.Mask()};
     BOOST_CHECK_EQUAL(bitmask, uint32_t{1} << bit);
 
     // In the first chain, test that the bit is set by CBV until it has failed.
@@ -430,6 +431,11 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(lastBlock, params) & (1 << bit), 0);
 }
 
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
+{
+    check_computeblockversion(versionbitscache, params, ConditionLogic(dep));
+}
+
 BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
 {
     VersionBitsCache vbcache; // don't use chainman versionbitscache since we want custom chain params
@@ -439,18 +445,18 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     for (const auto& chain_name : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET, CBaseChainParams::SIGNET, CBaseChainParams::REGTEST}) {
         const auto chainParams = CreateChainParams(*m_node.args, chain_name);
         uint32_t chain_all_vbits{0};
-        for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
-            const auto dep = static_cast<Consensus::DeploymentPos>(i);
+        vbcache.ForEachDeployment_nocache(chainParams->GetConsensus(), [&](auto pos, const auto& logic) {
             // Check that no bits are re-used (within the same chain). This is
             // disallowed because the transition to FAILED (on timeout) does
             // not take precedence over STARTED/LOCKED_IN. So all softforks on
             // the same bit might overlap, even when non-overlapping start-end
             // times are picked.
-            const uint32_t dep_mask{vbcache.Mask(chainParams->GetConsensus(), dep)};
+            const uint32_t dep_mask{logic.Mask()};
             BOOST_CHECK(!(chain_all_vbits & dep_mask));
             chain_all_vbits |= dep_mask;
-            check_computeblockversion(vbcache, chainParams->GetConsensus(), chainParams->GetConsensus().vDeployments[dep]);
-        }
+
+            check_computeblockversion(vbcache, chainParams->GetConsensus(), logic);
+        });
     }
 
     {
@@ -459,7 +465,6 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
         ArgsManager args;
         args.ForceSetArg("-vbparams", "testdummy:1199145601:1230767999"); // January 1, 2008 - December 31, 2008
         const auto chainParams = CreateChainParams(args, CBaseChainParams::REGTEST);
-        BOOST_REQUIRE(chainParams);
         check_computeblockversion(vbcache, chainParams->GetConsensus(), std::get<Consensus::DEPLOYMENT_TESTDUMMY>(chainParams->GetConsensus().vDeployments));
     }
 
@@ -470,7 +475,6 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
         ArgsManager args;
         args.ForceSetArg("-vbparams", "testdummy:1199145601:1230767999:403200"); // January 1, 2008 - December 31, 2008, min act height 403200
         const auto chainParams = CreateChainParams(args, CBaseChainParams::REGTEST);
-        BOOST_REQUIRE(chainParams);
         check_computeblockversion(vbcache, chainParams->GetConsensus(), std::get<Consensus::DEPLOYMENT_TESTDUMMY>(chainParams->GetConsensus().vDeployments));
     }
 }

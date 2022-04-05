@@ -1011,7 +1011,7 @@ template<auto dep>
 inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return chainman.m_versionbitscache.IsActive(pindexPrev, chainman.GetConsensus(), dep);
+    return chainman.m_versionbitscache.IsActive<dep>(pindexPrev, chainman.GetConsensus());
 }
 
 template<auto dep>
@@ -1026,7 +1026,7 @@ template<auto dep>
 inline bool DeploymentEnabled(const ChainstateManager& chainman)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return chainman.m_versionbitscache.zGetLogic<dep>(chainman.GetConsensus()).Enabled();
+    return chainman.m_versionbitscache.IsEnabled<dep>(chainman.GetConsensus());
 }
 
 using FopenFn = std::function<FILE*(const fs::path&, const char*)>;

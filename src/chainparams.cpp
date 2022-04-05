@@ -69,12 +69,13 @@ static void SetDeployment(Consensus::Params& consensus,
     int min_activation_height = 0)
 {
     static_assert(ValidDeployment(dep), "dep is not a valid deployment");
-    std::get<dep>(consensus.vDeployments).bit = bit;
-    std::get<dep>(consensus.vDeployments).nStartTime = start_time;
-    std::get<dep>(consensus.vDeployments).nTimeout = timeout;
-    std::get<dep>(consensus.vDeployments).period = period;
-    std::get<dep>(consensus.vDeployments).threshold = threshold;
-    std::get<dep>(consensus.vDeployments).min_activation_height = min_activation_height;
+    auto& d = std::get<dep>(consensus.vDeployments);
+    d.bit = bit;
+    d.nStartTime = start_time;
+    d.nTimeout = timeout;
+    d.period = period;
+    d.threshold = threshold;
+    d.min_activation_height = min_activation_height;
 }
 
 /**
