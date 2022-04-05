@@ -15,56 +15,64 @@
 class BuriedDeploymentLogic
 {
 public:
-    using Params = int;
+    using Params = Consensus::BuriedDeployment;
 
-    const int m_height;
+    const Params& m_params;
     using State = bool;
     using Cache = std::true_type;
 
     static void ClearCache(const Cache& cache) { }
 
-    BuriedDeploymentLogic(int height) : m_height{height} { }
+    BuriedDeploymentLogic(const Params& params) : m_params{params} { }
 
     uint32_t Mask() const { return 0; }
     std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const { return std::nullopt; }
-    bool Enabled() const { return m_height != std::numeric_limits<int>::max(); }
+    bool Enabled() const { return m_params.height != std::numeric_limits<int>::max(); }
     bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
-    State GetStateFor(const Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_height; }
-    std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const { return m_height; }
+    State GetStateFor(const Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_params.height; }
+    std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const { return m_params.height; }
 };
-
-/** Caching for deployments */
-
-template<typename P>
-struct LogicType { using Type = void; };
-
-template<>
-struct LogicType<Consensus::BIP9Deployment> { using Type = ConditionLogic; };
-
-template<>
-struct LogicType<int> { using Type = BuriedDeploymentLogic; };
-
-template<typename P>
-static typename LogicType<P>::Type xGetLogic(const P& params) { return typename LogicType<P>::Type{params}; }
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */
 class VersionBitsCache
 {
 private:
+    /** Caching for deployments */
+
+    template<typename P>
+    struct LogicType;
+
+    template<>
+    struct LogicType<Consensus::BIP9Deployment> { using T = ConditionLogic; };
+
+    template<>
+    struct LogicType<Consensus::BuriedDeployment> { using T = BuriedDeploymentLogic; };
+
+    template<typename T> struct DepCache_impl;
+    template<size_t... I>
+    struct DepCache_impl<std::index_sequence<I...>>
+    {
+        using T = std::tuple<typename LogicType<std::tuple_element_t<I, Consensus::DeploymentParams>>::T::Cache...>;
+    };
+
+    /** Tuple type for the parameters for each deployment */
+    using DeploymentCache = DepCache_impl<std::make_index_sequence<std::tuple_size_v<Consensus::DeploymentParams>>>::T;
+
     Mutex m_mutex;
-    using cache_array = std::array<ConditionLogic::Cache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
-    mutable cache_array m_cache GUARDED_BY(m_mutex);
-    BuriedDeploymentLogic::Cache dummy_cache GUARDED_BY(m_mutex){};
+    mutable DeploymentCache m_cache GUARDED_BY(m_mutex);
+
+    template<size_t pos>
+    static auto GetLogic(const Consensus::Params& params)
+    {
+        return (typename LogicType<std::tuple_element_t<pos, Consensus::DeploymentParams>>::T){std::get<pos>(params.vDeployments)};
+    }
 
     template<size_t I=0, typename Fn>
-    static void ForEachDeployment_impl(cache_array& caches, const Consensus::Params& params, Fn&& fn)
+    static void ForEachDeployment_impl(DeploymentCache& caches, const Consensus::Params& params, Fn&& fn)
     {
-        if constexpr (I < std::tuple_size_v<cache_array>) {
-            constexpr Consensus::DeploymentPos POS = static_cast<Consensus::DeploymentPos>(I);
-            static_assert(Consensus::ValidDeployment(POS), "invalid deployment");
-            fn(POS, zGetLogic<POS>(params), std::get<I>(caches));
-
+        if constexpr (I < std::tuple_size_v<DeploymentCache>) {
+            fn(static_cast<Consensus::DeploymentPos>(I), GetLogic<I>(params), std::get<I>(caches));
             ForEachDeployment_impl<I+1>(caches, params, fn);
         }
     }
@@ -72,50 +80,10 @@ private:
     template<size_t I=0, typename Fn>
     static void ForEachDeployment_impl(const Consensus::Params& params, Fn&& fn)
     {
-        if constexpr (I < std::tuple_size_v<cache_array>) {
-            constexpr Consensus::DeploymentPos POS = static_cast<Consensus::DeploymentPos>(I);
-            static_assert(Consensus::ValidDeployment(POS), "invalid deployment");
-
-            fn(POS, zGetLogic<POS>(params));
-
+        if constexpr (I < std::tuple_size_v<DeploymentCache>) {
+            fn(static_cast<Consensus::DeploymentPos>(I), GetLogic<I>(params));
             ForEachDeployment_impl<I+1>(params, fn);
         }
-    }
-
-    template<Consensus::BuriedDeployment POS=Consensus::DEPLOYMENT_HEIGHTINCB, typename Fn>
-    static void ForEachBuriedDeployment(const Consensus::Params& params, Fn&& fn)
-    {
-        if constexpr (ValidDeployment(POS)) {
-            const auto logic = zGetLogic<POS>(params);
-            BuriedDeploymentLogic::Cache cache; // dummy
-            fn(POS, logic, cache);
-
-            ForEachBuriedDeployment<static_cast<Consensus::BuriedDeployment>(POS+1)>(params, fn);
-        }
-    }
-
-    template<Consensus::BuriedDeployment pos>
-    static BuriedDeploymentLogic zGetLogic(const Consensus::Params& params)
-    {
-        return xGetLogic(params.DeploymentHeight(pos));
-    }
-
-    template<Consensus::DeploymentPos pos>
-    static ConditionLogic zGetLogic(const Consensus::Params& params)
-    {
-        return xGetLogic(std::get<pos>(params.vDeployments));
-    }
-
-    template<Consensus::DeploymentPos pos>
-    ConditionLogic::Cache& GetCache(const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(m_mutex)
-    {
-        return std::get<pos>(m_cache);
-    }
-
-    template<Consensus::BuriedDeployment pos>
-    BuriedDeploymentLogic::Cache& GetCache(const Consensus::Params& params)
-    {
-        return dummy_cache;
     }
 
 public:
@@ -123,20 +91,21 @@ public:
     template<auto dep>
     static bool IsEnabled(const Consensus::Params& params)
     {
-        return zGetLogic<dep>(params).Enabled();
+        return GetLogic<dep>(params).Enabled();
     }
 
     /** Check if the deployment is active */
     template<auto dep>
     bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params) LOCKS_EXCLUDED(m_mutex)
     {
-        const auto logic{zGetLogic<dep>(params)};
-        if constexpr(std::is_same_v<decltype(GetCache<dep>(params)), std::true_type>) {
+        const auto logic{GetLogic<dep>(params)};
+        if constexpr(std::is_same_v<typename decltype(logic)::Cache, std::true_type>) {
+            // cache is a dummy, so avoid locking
             std::true_type dummy_cache{};
             return logic.IsActive(dummy_cache, pindexPrev);
         } else {
             LOCK(m_mutex);
-            return logic.IsActive(GetCache<dep>(params), pindexPrev);
+            return logic.IsActive(std::get<dep>(m_cache), pindexPrev);
         }
     }
 
@@ -150,7 +119,6 @@ public:
     void ForEachDeployment(const Consensus::Params& params, Fn&& fn)
     {
         LOCK(m_mutex);
-        ForEachBuriedDeployment(params, fn);
         ForEachDeployment_impl(m_cache, params, fn);
     }
 

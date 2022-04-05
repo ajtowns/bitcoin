@@ -68,14 +68,24 @@ static void SetDeployment(Consensus::Params& consensus,
     int threshold,
     int min_activation_height = 0)
 {
-    static_assert(ValidDeployment(dep), "dep is not a valid deployment");
     auto& d = std::get<dep>(consensus.vDeployments);
+    static_assert(std::is_same_v<decltype(d), Consensus::BIP9Deployment&>);
+
     d.bit = bit;
     d.nStartTime = start_time;
     d.nTimeout = timeout;
     d.period = period;
     d.threshold = threshold;
     d.min_activation_height = min_activation_height;
+}
+
+template<Consensus::DeploymentPos dep>
+static void SetDeployment(Consensus::Params& consensus, int height)
+{
+    auto& d = std::get<dep>(consensus.vDeployments);
+    static_assert(std::is_same_v<decltype(d), Consensus::BuriedDeployment&>);
+
+    d.height = height;
 }
 
 /**
@@ -92,12 +102,7 @@ public:
             uint256S("0x00000000000002dc756eebf4f49723ed8d30cc28a5f108eb94b1ba88ac4f9c22"), SCRIPT_VERIFY_NONE);
         consensus.script_flag_exceptions.emplace( // Taproot exception
             uint256S("0x0000000000000000000f14c35b2d841e986ab5441de8c585d5ffe55ea1e395ad"), SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS);
-        consensus.BIP34Height = 227931;
-        consensus.BIP34Hash = uint256S("0x000000000000024b89b42a942fe0d9fea3bb44ab7bd1b19115dd6a759c0808b8");
-        consensus.BIP65Height = 388381; // 000000000000000004c2b624ed5d7756c508d90fd0da2c7c679febfa6c4735f0
-        consensus.BIP66Height = 363725; // 00000000000000000379eaa19dce8c9b722d46ae6a57c2f1a988119488b50931
-        consensus.CSVHeight = 419328; // 000000000000000004a1b34462cb8aeebd5799177f7a29cf28f2d1961716b5b5
-        consensus.SegwitHeight = 481824; // 0000000000000000001c8018d9cb3b742ef25114f27563e3fc4a1902167f9893
+
         consensus.MinBIP9WarningHeight = 483840; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
@@ -114,6 +119,13 @@ public:
             /*period=*/ 2016,
             /*threshold=*/ 1815
         );
+
+        SetDeployment<Consensus::DEPLOYMENT_HEIGHTINCB>(consensus, 227931);
+        consensus.BIP34Hash = uint256S("0x000000000000024b89b42a942fe0d9fea3bb44ab7bd1b19115dd6a759c0808b8");
+        SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 388381); // 000000000000000004c2b624ed5d7756c508d90fd0da2c7c679febfa6c4735f0
+        SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 363725); // 00000000000000000379eaa19dce8c9b722d46ae6a57c2f1a988119488b50931
+        SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 419328); // 000000000000000004a1b34462cb8aeebd5799177f7a29cf28f2d1961716b5b5
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 481824); // 0000000000000000001c8018d9cb3b742ef25114f27563e3fc4a1902167f9893
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -220,12 +232,6 @@ public:
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.script_flag_exceptions.emplace( // BIP16 exception
             uint256S("0x00000000dd30457c001f4095d208cc1296b0eed002427aa599874af7a432b105"), SCRIPT_VERIFY_NONE);
-        consensus.BIP34Height = 21111;
-        consensus.BIP34Hash = uint256S("0x0000000023b3a96d3484e5abb3755c413e7d41500f8e2a5c3f0dd01299cd8ef8");
-        consensus.BIP65Height = 581885; // 00000000007f6655f22f98e72ed80d8b06dc761d5da09df0fa1dc4be4f861eb6
-        consensus.BIP66Height = 330776; // 000000002104c8c45e99a8853285a3b592602a3ccde2b832481da85e9e4ba182
-        consensus.CSVHeight = 770112; // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
-        consensus.SegwitHeight = 834624; // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
         consensus.MinBIP9WarningHeight = 836640; // segwit activation height + miner confirmation window
         consensus.powLimit = uint256S("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
@@ -242,6 +248,13 @@ public:
             /*period=*/ 2016,
             /*threshold=*/ 1512
         );
+
+        SetDeployment<Consensus::DEPLOYMENT_HEIGHTINCB>(consensus, 21111);
+        consensus.BIP34Hash = uint256S("0x0000000023b3a96d3484e5abb3755c413e7d41500f8e2a5c3f0dd01299cd8ef8");
+        SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 581885); // 00000000007f6655f22f98e72ed80d8b06dc761d5da09df0fa1dc4be4f861eb6
+        SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 330776); // 000000002104c8c45e99a8853285a3b592602a3ccde2b832481da85e9e4ba182
+        SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 770112); // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 834624); // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -365,12 +378,6 @@ public:
         consensus.signet_blocks = true;
         consensus.signet_challenge.assign(bin.begin(), bin.end());
         consensus.nSubsidyHalvingInterval = 210000;
-        consensus.BIP34Height = 1;
-        consensus.BIP34Hash = uint256{};
-        consensus.BIP65Height = 1;
-        consensus.BIP66Height = 1;
-        consensus.CSVHeight = 1;
-        consensus.SegwitHeight = 1;
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = false;
@@ -387,6 +394,13 @@ public:
             /*period=*/ 2016,
             /*threshold=*/ 1815
         );
+
+        SetDeployment<Consensus::DEPLOYMENT_HEIGHTINCB>(consensus, 1);
+        consensus.BIP34Hash = uint256{};
+        SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 1);
+        SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 1);
+        SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 1);
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 1);
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -439,12 +453,7 @@ public:
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 150;
-        consensus.BIP34Height = 1; // Always active unless overridden
-        consensus.BIP34Hash = uint256();
-        consensus.BIP65Height = 1;  // Always active unless overridden
-        consensus.BIP66Height = 1;  // Always active unless overridden
-        consensus.CSVHeight = 1;    // Always active unless overridden
-        consensus.SegwitHeight = 0; // Always active unless overridden
+
         consensus.MinBIP9WarningHeight = 0;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
@@ -461,6 +470,13 @@ public:
             /*period=*/ 144,
             /*threshold=*/ 108
         );
+
+        SetDeployment<Consensus::DEPLOYMENT_HEIGHTINCB>(consensus, 1); // Always active unless overridden
+        consensus.BIP34Hash = uint256();
+        SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 1); // Always active unless overridden
+        SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 1); // Always active unless overridden
+        SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 1); // Always active unless overridden
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 0); // Always active unless overridden
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -532,11 +548,11 @@ public:
     }
 
     /** Helper for updating deployment parameters */
-    template<typename Fn, size_t I=0>
+    template<size_t I=0, typename Fn>
     void ForEachDeployment(Fn&& fn) {
         if constexpr (I < std::tuple_size_v<decltype(consensus.vDeployments)>) {
-            if (fn(I, std::get<I>(consensus.vDeployments))) return;
-            ForEachDeployment<Fn,I+1>(std::move(fn));
+            if (fn(static_cast<Consensus::DeploymentPos>(I), std::get<I>(consensus.vDeployments))) return;
+            ForEachDeployment<I+1>(fn);
         }
     }
 
@@ -550,32 +566,34 @@ public:
         dep.min_activation_height = min_activation_height;
     }
     void UpdateActivationParametersFromArgs(const ArgsManager& args);
+    void MaybeUpdateHeights(const ArgsManager& args);
 };
 
-static void MaybeUpdateHeights(const ArgsManager& args, Consensus::Params& consensus)
+void CRegTestParams::MaybeUpdateHeights(const ArgsManager& args)
 {
     for (const std::string& arg : args.GetArgs("-testactivationheight")) {
-        const auto found{arg.find('@')};
-        if (found == std::string::npos) {
+        const auto at_pos{arg.find('@')};
+        if (at_pos == std::string::npos) {
             throw std::runtime_error(strprintf("Invalid format (%s) for -testactivationheight=name@height.", arg));
         }
-        const auto name{arg.substr(0, found)};
-        const auto value{arg.substr(found + 1)};
+        const auto name{arg.substr(0, at_pos)};
+        const auto value{arg.substr(at_pos + 1)};
         int32_t height;
         if (!ParseInt32(value, &height) || height < 0 || height >= std::numeric_limits<int>::max()) {
             throw std::runtime_error(strprintf("Invalid height value (%s) for -testactivationheight=name@height.", arg));
         }
-        if (name == "segwit") {
-            consensus.SegwitHeight = int{height};
-        } else if (name == "bip34") {
-            consensus.BIP34Height = int{height};
-        } else if (name == "dersig") {
-            consensus.BIP66Height = int{height};
-        } else if (name == "cltv") {
-            consensus.BIP65Height = int{height};
-        } else if (name == "csv") {
-            consensus.CSVHeight = int{height};
-        } else {
+
+        bool found = false;
+        ForEachDeployment([&](Consensus::DeploymentPos i, auto& param) {
+            if constexpr(std::is_same_v<decltype(param), Consensus::BuriedDeployment&>) {
+                if (name == DeploymentName(i)) {
+                    param.height = int{height};
+                    return found = true;
+                }
+            }
+            return false;
+        });
+        if (!found) {
             throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
         }
     }
@@ -583,7 +601,7 @@ static void MaybeUpdateHeights(const ArgsManager& args, Consensus::Params& conse
 
 void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
 {
-    MaybeUpdateHeights(args, consensus);
+    MaybeUpdateHeights(args);
 
     if (!args.IsArgSet("-vbparams")) return;
 
@@ -606,12 +624,13 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
         }
 
         bool found = false;
-        ForEachDeployment([&](size_t j, Consensus::BIP9Deployment& dep) {
-            if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
-                UpdateVersionBitsParameters(dep, nStartTime, nTimeout, min_activation_height);
-                found = true;
+        ForEachDeployment([&](Consensus::DeploymentPos j, auto& param) {
+            if constexpr(std::is_same_v<decltype(param), Consensus::BIP9Deployment&>) {
+                if (vDeploymentParams[0] != DeploymentName(j)) return false;
+
+                UpdateVersionBitsParameters(param, nStartTime, nTimeout, min_activation_height);
                 LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], nStartTime, nTimeout, min_activation_height);
-                return true;
+                return found = true;
             }
             return false;
         });

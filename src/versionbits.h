@@ -173,9 +173,7 @@ public:
         Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
         stats.period = Period();
         stats.threshold = dep.threshold;
-        if (stats.count > 0) {
-            stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
-        }
+        stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
         return stats;
     }
 

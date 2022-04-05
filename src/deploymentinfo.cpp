@@ -6,23 +6,9 @@
 
 #include <consensus/params.h>
 
-const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] = {
-    {
-        /*.name =*/ "testdummy",
-        /*.gbt_force =*/ true,
-        /*.gbt_hide =*/ false,
-    },
-    {
-        /*.name =*/ "taproot",
-        /*.gbt_force =*/ true,
-        /*.gbt_hide =*/ false,
-    },
-};
-
-VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep)
+VBDeploymentInfo GetDeploymentInfo(Consensus::DeploymentPos pos)
 {
-    assert(ValidDeployment(dep));
-    switch (dep) {
+    switch (pos) {
     case Consensus::DEPLOYMENT_HEIGHTINCB:
         return {"bip34", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_CLTV:
@@ -35,6 +21,20 @@ VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep)
         return {"segwit", /*.gbt_force=*/false, /*.gbt_hide=*/false};
     case Consensus::DEPLOYMENT_SIGNET:
         return {"signet", /*.gbt_force=*/false, /*.gbt_hide=*/false};
+    case Consensus::DEPLOYMENT_TESTDUMMY:
+        return {
+            /*.name =*/ "testdummy",
+            /*.gbt_force =*/ true,
+            /*.gbt_hide =*/ false,
+        };
+    case Consensus::DEPLOYMENT_TAPROOT:
+        return {
+            /*.name =*/ "taproot",
+            /*.gbt_force =*/ true,
+            /*.gbt_hide =*/ false,
+        };
+    case Consensus::MAX_VERSION_BITS_DEPLOYMENTS:
+        break;
     } // no default case, so the compiler can warn about missing cases
-    return {"undef", true, true};
+    assert(false);
 }

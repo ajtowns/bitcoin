@@ -431,6 +431,11 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(lastBlock, params) & (1 << bit), 0);
 }
 
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const BuriedDeploymentLogic& logic)
+{
+    BOOST_CHECK(logic.m_params.height >= 0);
+}
+
 static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
 {
     check_computeblockversion(versionbitscache, params, ConditionLogic(dep));

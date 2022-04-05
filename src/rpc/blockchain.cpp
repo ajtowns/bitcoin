@@ -1065,7 +1065,7 @@ static RPCHelpMan verifychain()
     };
 }
 
-static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::BuriedDeployment dep, const BuriedDeploymentLogic& logic, BuriedDeploymentLogic::Cache& cache, bool active_after)
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const BuriedDeploymentLogic& logic, BuriedDeploymentLogic::Cache& cache, bool active_after)
 {
     rv.pushKV("type", "buried");
 }

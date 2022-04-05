@@ -1466,7 +1466,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                 break;
             case ChainstateLoadingError::ERROR_BLOCKS_WITNESS_INSUFFICIENTLY_VALIDATED:
                 strLoadError = strprintf(_("Witness data for blocks after height %d requires validation. Please restart with -reindex."),
-                                         chainparams.GetConsensus().SegwitHeight);
+                                         std::get<Consensus::DEPLOYMENT_SEGWIT>(chainparams.GetConsensus().vDeployments).height);
                 break;
             case ChainstateLoadingError::SHUTDOWN_PROBED:
                 break;

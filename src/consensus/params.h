@@ -17,24 +17,9 @@ namespace Consensus {
  * A buried deployment is one where the height of the activation has been hardcoded into
  * the client implementation long after the consensus change has activated. See BIP 90.
  */
-enum BuriedDeployment : int16_t {
-    // buried deployments get negative values to avoid overlap with DeploymentPos
-    DEPLOYMENT_HEIGHTINCB = std::numeric_limits<int16_t>::min(),
-    DEPLOYMENT_CLTV,
-    DEPLOYMENT_DERSIG,
-    DEPLOYMENT_CSV,
-    DEPLOYMENT_SEGWIT,
-    DEPLOYMENT_SIGNET,
+struct BuriedDeployment {
+    int height = std::numeric_limits<int>::max();
 };
-constexpr bool ValidDeployment(BuriedDeployment dep) { return dep <= DEPLOYMENT_SIGNET; }
-
-enum DeploymentPos : uint16_t {
-    DEPLOYMENT_TESTDUMMY,
-    DEPLOYMENT_TAPROOT, // Deployment of Schnorr/Taproot (BIPs 340-342)
-    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in deploymentinfo.cpp
-    MAX_VERSION_BITS_DEPLOYMENTS
-};
-constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
 
 /**
  * Struct for each individual consensus rule change using BIP9.
@@ -72,6 +57,37 @@ struct BIP9Deployment {
     static constexpr int64_t NEVER_ACTIVE = -2;
 };
 
+enum DeploymentPos {
+    DEPLOYMENT_HEIGHTINCB,
+    DEPLOYMENT_CLTV,
+    DEPLOYMENT_DERSIG,
+    DEPLOYMENT_CSV,
+    DEPLOYMENT_SEGWIT,
+    DEPLOYMENT_SIGNET,
+    DEPLOYMENT_TAPROOT, // Deployment of Schnorr/Taproot (BIPs 340-342)
+
+    DEPLOYMENT_TESTDUMMY,
+    MAX_VERSION_BITS_DEPLOYMENTS
+    // NOTE: Also add new deployments to VersionBitsDeploymentInfo in deploymentinfo.cpp
+};
+
+/** Deployment type (buried, bip9)
+ * Usually buried, but overridden for specific deployments
+ */
+template<size_t pos> struct DeploymentType { using T = BuriedDeployment; };
+template<> struct DeploymentType<DEPLOYMENT_TAPROOT> { using T = BIP9Deployment; };
+template<> struct DeploymentType<DEPLOYMENT_TESTDUMMY> { using T = BIP9Deployment; };
+
+template<typename T> struct DepParams_impl;
+template<size_t... I>
+struct DepParams_impl<std::index_sequence<I...>>
+{
+    using T = std::tuple<typename DeploymentType<static_cast<DeploymentPos>(I)>::T...>;
+};
+
+/** Tuple type for the parameters for each deployment */
+using DeploymentParams = DepParams_impl<std::make_index_sequence<MAX_VERSION_BITS_DEPLOYMENTS>>::T;
+
 /**
  * Parameters that influence chain consensus.
  */
@@ -85,19 +101,8 @@ struct Params {
      * - fail if the default script verify flags are applied.
      */
     std::map<uint256, uint32_t> script_flag_exceptions;
-    /** Block height and hash at which BIP34 becomes active */
-    int BIP34Height;
+    /** Hash at which HEIGHTINCB/BIP34 becomes active */
     uint256 BIP34Hash;
-    /** Block height at which BIP65 becomes active */
-    int BIP65Height;
-    /** Block height at which BIP66 becomes active */
-    int BIP66Height;
-    /** Block height at which CSV (BIP68, BIP112 and BIP113) becomes active */
-    int CSVHeight;
-    /** Block height at which Segwit (BIP141, BIP143 and BIP147) becomes active.
-     * Note that segwit v0 script rules are enforced on all blocks except the
-     * BIP 16 exception blocks. */
-    int SegwitHeight;
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
@@ -108,7 +113,7 @@ struct Params {
      */
     uint32_t nRuleChangeActivationThreshold;
     uint32_t nMinerConfirmationWindow;
-    std::tuple<BIP9Deployment,BIP9Deployment> vDeployments;
+    DeploymentParams vDeployments;
     static_assert(std::tuple_size_v<decltype(vDeployments)> == MAX_VERSION_BITS_DEPLOYMENTS);
     /** Proof of work parameters */
     uint256 powLimit;
@@ -128,25 +133,6 @@ struct Params {
      */
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
-
-    int DeploymentHeight(BuriedDeployment dep) const
-    {
-        switch (dep) {
-        case DEPLOYMENT_HEIGHTINCB:
-            return BIP34Height;
-        case DEPLOYMENT_CLTV:
-            return BIP65Height;
-        case DEPLOYMENT_DERSIG:
-            return BIP66Height;
-        case DEPLOYMENT_CSV:
-            return CSVHeight;
-        case DEPLOYMENT_SEGWIT:
-            return SegwitHeight;
-        case DEPLOYMENT_SIGNET:
-            return (signet_blocks ? 0 : std::numeric_limits<int>::max());
-        } // no default case, so the compiler can warn about missing cases
-        return std::numeric_limits<int>::max();
-    }
 };
 
 } // namespace Consensus

@@ -1007,25 +1007,22 @@ public:
 };
 
 /** Determine if a deployment is active for the next block */
-template<auto dep>
+template<Consensus::DeploymentPos dep>
 inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return chainman.m_versionbitscache.IsActive<dep>(pindexPrev, chainman.GetConsensus());
 }
 
-template<auto dep>
+template<Consensus::DeploymentPos dep>
 inline bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chainman)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return DeploymentActiveAfter<dep>(index.pprev, chainman);
 }
 
 /** Determine if a deployment is enabled (can ever be active) */
-template<auto dep>
+template<Consensus::DeploymentPos dep>
 inline bool DeploymentEnabled(const ChainstateManager& chainman)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return chainman.m_versionbitscache.IsEnabled<dep>(chainman.GetConsensus());
 }
 

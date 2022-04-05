@@ -18,16 +18,7 @@ struct VBDeploymentInfo {
     bool gbt_hide;
 };
 
-extern const VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS];
-
-VBDeploymentInfo GetDeploymentInfo(Consensus::BuriedDeployment dep);
-inline const VBDeploymentInfo& GetDeploymentInfo(Consensus::DeploymentPos pos)
-{
-    assert(Consensus::ValidDeployment(pos));
-    return VersionBitsDeploymentInfo[pos];
-}
-
-template<typename T>
-std::string DeploymentName(T dep) { return GetDeploymentInfo(dep).name; }
+VBDeploymentInfo GetDeploymentInfo(Consensus::DeploymentPos pos);
+inline std::string DeploymentName(Consensus::DeploymentPos pos) { return GetDeploymentInfo(pos).name; }
 
 #endif // BITCOIN_DEPLOYMENTINFO_H
