@@ -108,7 +108,8 @@ struct Params {
      */
     uint32_t nRuleChangeActivationThreshold;
     uint32_t nMinerConfirmationWindow;
-    std::array<BIP9Deployment,MAX_VERSION_BITS_DEPLOYMENTS> vDeployments;
+    std::tuple<BIP9Deployment,BIP9Deployment> vDeployments;
+    static_assert(std::tuple_size_v<decltype(vDeployments)> == MAX_VERSION_BITS_DEPLOYMENTS);
     /** Proof of work parameters */
     uint256 powLimit;
     bool fPowAllowMinDifficultyBlocks;
