@@ -29,14 +29,14 @@ static const std::string StateName(ThresholdState state)
     return "";
 }
 
-class TestBIP9DeploymentLogic : public BIP9DeploymentLogic
+class TestBIP9DeploymentLogic : public BIP341DeploymentLogic
 {
 protected:
-    Consensus::BIP9Deployment m_dep;
-    BIP9DeploymentLogic::Cache m_cache;
+    Consensus::BIP341Deployment m_dep;
+    BIP341DeploymentLogic::Cache m_cache;
 
 public:
-    TestBIP9DeploymentLogic() : BIP9DeploymentLogic{m_dep}
+    TestBIP9DeploymentLogic() : BIP341DeploymentLogic{m_dep}
     {
         m_dep.bit = 8;
         m_dep.nStartTime = TestTime(10000);
@@ -46,9 +46,9 @@ public:
         m_dep.min_activation_height = 0;
     }
 
-    void clear() { BIP9DeploymentLogic::ClearCache(m_cache); }
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return BIP9DeploymentLogic::GetStateFor(m_cache, pindexPrev); }
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return BIP9DeploymentLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
+    void clear() { BIP341DeploymentLogic::ClearCache(m_cache); }
+    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return BIP341DeploymentLogic::GetStateFor(m_cache, pindexPrev); }
+    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return BIP341DeploymentLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
 };
 
 
@@ -264,7 +264,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
 }
 
 /** Check that ComputeBlockVersion will set the appropriate bit correctly */
-static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const BIP9DeploymentLogic& logic)
+template<typename Logic>
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Logic& logic)
 {
     // Clear the cache everytime
     versionbitscache.Clear();
@@ -273,7 +274,12 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     const int64_t bit = dep.bit;
     const int64_t nStartTime = dep.nStartTime;
     const int64_t nTimeout = dep.nTimeout;
-    const int min_activation_height = dep.min_activation_height;
+    const int min_activation_height = [&]() {
+        if constexpr (std::is_same_v<Logic, BIP341DeploymentLogic>) {
+            return dep.min_activation_height;
+        }
+        return 0;
+    }();
 
     BOOST_CHECK_EQUAL(dep.period, params.nMinerConfirmationWindow);
     BOOST_CHECK_EQUAL(dep.threshold, params.nRuleChangeActivationThreshold);
@@ -436,9 +442,14 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     BOOST_CHECK(logic.m_params.height >= 0);
 }
 
-static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
+[[maybe_unused]] static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
 {
     check_computeblockversion(versionbitscache, params, BIP9DeploymentLogic(dep));
+}
+
+[[maybe_unused]] static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP341Deployment& dep)
+{
+    check_computeblockversion(versionbitscache, params, BIP341DeploymentLogic(dep));
 }
 
 BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)

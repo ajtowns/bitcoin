@@ -43,11 +43,9 @@ private:
     template<typename P>
     struct LogicType;
 
-    template<>
-    struct LogicType<Consensus::BIP9Deployment> { using T = BIP9DeploymentLogic; };
-
-    template<>
-    struct LogicType<Consensus::BuriedDeployment> { using T = BuriedDeploymentLogic; };
+    template<> struct LogicType<Consensus::BIP9Deployment> { using T = BIP9DeploymentLogic; };
+    template<> struct LogicType<Consensus::BIP341Deployment> { using T = BIP341DeploymentLogic; };
+    template<> struct LogicType<Consensus::BuriedDeployment> { using T = BuriedDeploymentLogic; };
 
     template<typename T> struct DepCache_impl;
     template<size_t... I>

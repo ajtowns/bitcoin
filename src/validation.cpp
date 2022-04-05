@@ -1848,7 +1848,6 @@ private:
             m_dep.nTimeout = std::numeric_limits<int64_t>::max();
             m_dep.period = m_params.nMinerConfirmationWindow;
             m_dep.threshold = m_params.nRuleChangeActivationThreshold;
-            m_dep.min_activation_height = 0;
         }
 
         bool Condition(const CBlockIndex* pindex) const override

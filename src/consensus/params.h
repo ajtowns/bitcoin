@@ -31,11 +31,6 @@ struct BIP9Deployment {
     int64_t nStartTime{NEVER_ACTIVE};
     /** Timeout/expiry MedianTime for the deployment attempt. */
     int64_t nTimeout{NEVER_ACTIVE};
-    /** If lock in occurs, delay activation until at least this block
-     *  height.  Note that activation will only occur on a retarget
-     *  boundary.
-     */
-    int min_activation_height{0};
 
     /** Number of blocks in period */
     int period = std::numeric_limits<int>::max();
@@ -57,6 +52,15 @@ struct BIP9Deployment {
     static constexpr int64_t NEVER_ACTIVE = -2;
 };
 
+struct BIP341Deployment : public BIP9Deployment
+{
+    /** If lock in occurs, delay activation until at least this block
+     *  height.  Note that activation will only occur on a retarget
+     *  boundary.
+     */
+    int min_activation_height{0};
+};
+
 enum DeploymentPos {
     DEPLOYMENT_HEIGHTINCB,
     DEPLOYMENT_CLTV,
@@ -75,8 +79,8 @@ enum DeploymentPos {
  * Usually buried, but overridden for specific deployments
  */
 template<size_t pos> struct DeploymentType { using T = BuriedDeployment; };
-template<> struct DeploymentType<DEPLOYMENT_TAPROOT> { using T = BIP9Deployment; };
-template<> struct DeploymentType<DEPLOYMENT_TESTDUMMY> { using T = BIP9Deployment; };
+template<> struct DeploymentType<DEPLOYMENT_TAPROOT> { using T = BIP341Deployment; };
+template<> struct DeploymentType<DEPLOYMENT_TESTDUMMY> { using T = BIP341Deployment; };
 
 template<typename T> struct DepParams_impl;
 template<size_t... I>

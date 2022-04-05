@@ -132,7 +132,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     assert(0 <= bit && bit < 32 && bit < VERSIONBITS_NUM_BITS);
     assert(0 <= min_activation);
 
-    Consensus::BIP9Deployment dep;
+    Consensus::BIP341Deployment dep;
     dep.bit = bit;
     dep.nStartTime = start_time;
     dep.nTimeout = timeout;
@@ -140,8 +140,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     dep.threshold = threshold;
     dep.min_activation_height = min_activation;
 
-    const BIP9DeploymentLogic logic(dep);
-    BIP9DeploymentLogic::Cache cache;
+    const BIP341DeploymentLogic logic(dep);
+    BIP341DeploymentLogic::Cache cache;
 
     // Early exit if the versions don't signal sensibly for the deployment
     if (!logic.VersionBitIsSet(ver_signal)) return;

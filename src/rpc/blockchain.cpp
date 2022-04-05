@@ -1070,29 +1070,30 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
     rv.pushKV("type", "buried");
 }
 
-static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const BIP9DeploymentLogic& logic, BIP9DeploymentLogic::Cache& cache, BIP9DeploymentLogic::State next_state)
+template<typename Logic, std::enable_if_t<std::is_same_v<Logic, BIP9DeploymentLogic> || std::is_same_v<Logic, BIP341DeploymentLogic>, bool> = true>
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const Logic& logic, typename Logic::Cache& cache, typename Logic::State next_state)
 {
     rv.pushKV("type", "bip9");
 
     // For BIP9 deployments.
-    auto get_state_name = [](const BIP9DeploymentLogic::State state) -> std::string {
+    auto get_state_name = [](const typename Logic::State state) -> std::string {
         switch (state) {
-        case BIP9DeploymentLogic::State::DEFINED: return "defined";
-        case BIP9DeploymentLogic::State::STARTED: return "started";
-        case BIP9DeploymentLogic::State::LOCKED_IN: return "locked_in";
-        case BIP9DeploymentLogic::State::ACTIVE: return "active";
-        case BIP9DeploymentLogic::State::FAILED: return "failed";
+        case Logic::State::DEFINED: return "defined";
+        case Logic::State::STARTED: return "started";
+        case Logic::State::LOCKED_IN: return "locked_in";
+        case Logic::State::ACTIVE: return "active";
+        case Logic::State::FAILED: return "failed";
         }
         return "invalid";
     };
 
     UniValue bip9(UniValue::VOBJ);
 
-    const BIP9DeploymentLogic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
+    const typename Logic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
 
     const std::optional<int> signal_bit = logic.VersionBitToSet(current_state, blockindex->pprev);
 
-    const Consensus::BIP9Deployment& dep = logic.Dep();
+    const auto& dep = logic.Dep();
 
     // BIP9 parameters
     if (signal_bit) {
@@ -1100,7 +1101,9 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
     }
     bip9.pushKV("start_time", dep.nStartTime);
     bip9.pushKV("timeout", dep.nTimeout);
-    bip9.pushKV("min_activation_height", dep.min_activation_height);
+    if constexpr (std::is_same_v<Logic, BIP341DeploymentLogic>) {
+        bip9.pushKV("min_activation_height", dep.min_activation_height);
+    }
 
     // BIP9 status
     bip9.pushKV("status", get_state_name(current_state));
@@ -1115,7 +1118,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
         statsUV.pushKV("period", statsStruct.period);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
-        if (BIP9DeploymentLogic::State::LOCKED_IN != current_state) {
+        if (Logic::State::LOCKED_IN != current_state) {
             statsUV.pushKV("threshold", statsStruct.threshold);
             statsUV.pushKV("possible", statsStruct.possible);
         }
@@ -1129,7 +1132,11 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
         bip9.pushKV("signalling", sig);
     }
 
-    rv.pushKV("bip9", bip9);
+    if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
+        rv.pushKV("bip9", bip9);
+    } else if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
+        rv.pushKV("bip341", bip9);
+    }
 }
 
 namespace {

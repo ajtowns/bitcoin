@@ -35,6 +35,78 @@ ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const 
 {
     const int nPeriod{dep.period};
     const int nThreshold{dep.threshold};
+    const int64_t nTimeStart{dep.nStartTime};
+    const int64_t nTimeTimeout{dep.nTimeout};
+
+    switch (state) {
+        case ThresholdState::DEFINED: {
+            if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                return ThresholdState::FAILED;
+            } else if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
+                return ThresholdState::STARTED;
+            }
+            break;
+        }
+        case ThresholdState::STARTED: {
+            // If after the timeout, automatic fail
+            if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                return ThresholdState::FAILED;
+            }
+            // Otherwise, we need to count
+            const CBlockIndex* pindexCount = pindexPrev;
+            int count = 0;
+            for (int i = 0; i < nPeriod; i++) {
+                if (Condition(pindexCount)) {
+                    count++;
+                }
+                pindexCount = pindexCount->pprev;
+            }
+            if (count >= nThreshold) {
+                return ThresholdState::LOCKED_IN;
+            }
+            break;
+        }
+        case ThresholdState::LOCKED_IN: {
+            // Always progresses into ACTIVE
+            return ThresholdState::ACTIVE;
+        }
+        case ThresholdState::FAILED:
+        case ThresholdState::ACTIVE: {
+            // Nothing happens, these are terminal states.
+            break;
+        }
+    }
+    return state;
+}
+
+std::optional<ThresholdState> BIP341DeploymentLogic::SpecialState() const
+{
+    // Check if this deployment is always active.
+    if (dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
+        return ThresholdState::ACTIVE;
+    }
+
+    // Check if this deployment is never active.
+    if (dep.nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
+        return ThresholdState::FAILED;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ThresholdState> BIP341DeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
+{
+    if (pindexPrev->GetMedianTimePast() < dep.nStartTime) {
+        return ThresholdState::DEFINED;
+    }
+
+    return std::nullopt;
+}
+
+ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
+{
+    const int nPeriod{dep.period};
+    const int nThreshold{dep.threshold};
     const int min_activation_height{dep.min_activation_height};
     const int64_t nTimeStart{dep.nStartTime};
     const int64_t nTimeTimeout{dep.nTimeout};
@@ -191,3 +263,4 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
 }
 
 template class ThresholdConditionChecker<BIP9DeploymentLogic>;
+template class ThresholdConditionChecker<BIP341DeploymentLogic>;

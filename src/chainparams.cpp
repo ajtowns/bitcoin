@@ -69,14 +69,20 @@ static void SetDeployment(Consensus::Params& consensus,
     int min_activation_height = 0)
 {
     auto& d = std::get<dep>(consensus.vDeployments);
-    static_assert(std::is_same_v<decltype(d), Consensus::BIP9Deployment&>);
+    static_assert(std::is_same_v<decltype(d), Consensus::BIP9Deployment&>
+                  || std::is_same_v<decltype(d), Consensus::BIP341Deployment&>);
 
     d.bit = bit;
     d.nStartTime = start_time;
     d.nTimeout = timeout;
     d.period = period;
     d.threshold = threshold;
-    d.min_activation_height = min_activation_height;
+
+    if constexpr (std::is_same_v<decltype(d), Consensus::BIP341Deployment&>) {
+        d.min_activation_height = min_activation_height;
+    } else {
+        assert(min_activation_height == 0); // can't set min_activation_height for non-speedy-trial
+    }
 }
 
 template<Consensus::DeploymentPos dep>
@@ -563,6 +569,11 @@ public:
     {
         dep.nStartTime = nStartTime;
         dep.nTimeout = nTimeout;
+    }
+    static void UpdateVersionBitsParameters(Consensus::BIP341Deployment& dep, int64_t nStartTime, int64_t nTimeout, int min_activation_height)
+    {
+        dep.nStartTime = nStartTime;
+        dep.nTimeout = nTimeout;
         dep.min_activation_height = min_activation_height;
     }
     void UpdateActivationParametersFromArgs(const ArgsManager& args);
@@ -625,7 +636,16 @@ void CRegTestParams::UpdateActivationParametersFromArgs(const ArgsManager& args)
 
         bool found = false;
         ForEachDeployment([&](Consensus::DeploymentPos j, auto& param) {
-            if constexpr(std::is_same_v<decltype(param), Consensus::BIP9Deployment&>) {
+            if constexpr (std::is_same_v<decltype(param), Consensus::BIP9Deployment&>) {
+                if (vDeploymentParams[0] != DeploymentName(j)) return false;
+                if (vDeploymentParams.size() >= 4) {
+                    throw std::runtime_error(strprintf("Cannot specify min_activation_height for BIP9 deployment %s", vDeploymentParams[0]));
+                }
+                UpdateVersionBitsParameters(param, nStartTime, nTimeout);
+                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld\n", vDeploymentParams[0], nStartTime, nTimeout);
+                return found = true;
+            }
+            if constexpr (std::is_same_v<decltype(param), Consensus::BIP341Deployment&>) {
                 if (vDeploymentParams[0] != DeploymentName(j)) return false;
 
                 UpdateVersionBitsParameters(param, nStartTime, nTimeout, min_activation_height);
