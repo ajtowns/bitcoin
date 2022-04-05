@@ -131,7 +131,16 @@ public:
         SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 388381); // 000000000000000004c2b624ed5d7756c508d90fd0da2c7c679febfa6c4735f0
         SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 363725); // 00000000000000000379eaa19dce8c9b722d46ae6a57c2f1a988119488b50931
         SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 419328); // 000000000000000004a1b34462cb8aeebd5799177f7a29cf28f2d1961716b5b5
-        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 481824); // 0000000000000000001c8018d9cb3b742ef25114f27563e3fc4a1902167f9893
+
+        // Deployment of SegWit (BIP141, BIP143, and BIP147)
+        // SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 481824); // 0000000000000000001c8018d9cb3b742ef25114f27563e3fc4a1902167f9893
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus,
+            /*bit=*/ 1,
+            /*start_time=*/ 1479168000, // November 15th, 2016.
+            /*timeout=*/ 1510704000, // November 15th, 2017.
+            /*period=*/ 2016,
+            /*threshold=*/ 1916
+        );
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -260,7 +269,16 @@ public:
         SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 581885); // 00000000007f6655f22f98e72ed80d8b06dc761d5da09df0fa1dc4be4f861eb6
         SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 330776); // 000000002104c8c45e99a8853285a3b592602a3ccde2b832481da85e9e4ba182
         SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 770112); // 00000000025e930139bac5c6c31a403776da130831ab85be56578f3fa75369bb
-        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 834624); // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
+
+        // Deployment of SegWit (BIP141, BIP143, and BIP147)
+        // SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 834624); // 00000000002b980fcd729daaa248fd9316a5200e9b367f4ff2c42453e84201ca
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus,
+            /*bit=*/ 1,
+            /*start_time=*/ 1462060800, // May 1st 2016
+            /*timeout=*/ 1493596800, // May 1st 2017
+            /*period=*/ 2016,
+            /*threshold=*/ 1512
+        );
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -406,7 +424,15 @@ public:
         SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 1);
         SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 1);
         SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 1);
-        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 1);
+
+        // SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 1);
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus,
+            /*bit=*/ 1,
+            /*start_time=*/ Consensus::BIP9Deployment::ALWAYS_ACTIVE,
+            /*timeout=*/ Consensus::BIP9Deployment::NO_TIMEOUT,
+            /*period=*/ 2016,
+            /*threshold=*/ 1815
+        );
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -482,7 +508,15 @@ public:
         SetDeployment<Consensus::DEPLOYMENT_CLTV>(consensus, 1); // Always active unless overridden
         SetDeployment<Consensus::DEPLOYMENT_DERSIG>(consensus, 1); // Always active unless overridden
         SetDeployment<Consensus::DEPLOYMENT_CSV>(consensus, 1); // Always active unless overridden
-        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 0); // Always active unless overridden
+
+        // SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus, 0); // Always active unless overridden
+        SetDeployment<Consensus::DEPLOYMENT_SEGWIT>(consensus,
+            /*bit=*/ 1,
+            /*start_time=*/ Consensus::BIP9Deployment::ALWAYS_ACTIVE,
+            /*timeout=*/ Consensus::BIP9Deployment::NO_TIMEOUT,
+            /*period=*/ 144,
+            /*threshold=*/ 108
+        );
 
         // Deployment of Taproot (BIPs 340-342)
         SetDeployment<Consensus::DEPLOYMENT_TAPROOT>(consensus,
@@ -565,7 +599,7 @@ public:
     /**
      * Allows modifying the Version Bits regtest parameters.
      */
-    static void UpdateVersionBitsParameters(Consensus::BIP9Deployment& dep, int64_t nStartTime, int64_t nTimeout, int min_activation_height)
+    static void UpdateVersionBitsParameters(Consensus::BIP9Deployment& dep, int64_t nStartTime, int64_t nTimeout)
     {
         dep.nStartTime = nStartTime;
         dep.nTimeout = nTimeout;

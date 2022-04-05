@@ -79,6 +79,7 @@ enum DeploymentPos {
  * Usually buried, but overridden for specific deployments
  */
 template<size_t pos> struct DeploymentType { using T = BuriedDeployment; };
+template<> struct DeploymentType<DEPLOYMENT_SEGWIT> { using T = BIP9Deployment; };
 template<> struct DeploymentType<DEPLOYMENT_TAPROOT> { using T = BIP341Deployment; };
 template<> struct DeploymentType<DEPLOYMENT_TESTDUMMY> { using T = BIP341Deployment; };
 

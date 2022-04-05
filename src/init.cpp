@@ -1465,8 +1465,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                 strLoadError = _("Error opening block database");
                 break;
             case ChainstateLoadingError::ERROR_BLOCKS_WITNESS_INSUFFICIENTLY_VALIDATED:
-                strLoadError = strprintf(_("Witness data for blocks after height %d requires validation. Please restart with -reindex."),
-                                         std::get<Consensus::DEPLOYMENT_SEGWIT>(chainparams.GetConsensus().vDeployments).height);
+                strLoadError = _("Witness data for blocks after segwit activation requires validation. Please restart with -reindex.");
                 break;
             case ChainstateLoadingError::SHUTDOWN_PROBED:
                 break;

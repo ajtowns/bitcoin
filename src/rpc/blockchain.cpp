@@ -1073,7 +1073,13 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
 template<typename Logic, std::enable_if_t<std::is_same_v<Logic, BIP9DeploymentLogic> || std::is_same_v<Logic, BIP341DeploymentLogic>, bool> = true>
 static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const Logic& logic, typename Logic::Cache& cache, typename Logic::State next_state)
 {
-    rv.pushKV("type", "bip9");
+    if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
+        rv.pushKV("type", "bip9");
+    } else if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
+        rv.pushKV("type", "bip341");
+    } else {
+        static_assert(0 > sizeof(logic), "unkonwn Logic??");
+    }
 
     // For BIP9 deployments.
     auto get_state_name = [](const typename Logic::State state) -> std::string {
@@ -1132,11 +1138,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
         bip9.pushKV("signalling", sig);
     }
 
-    if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
-        rv.pushKV("bip9", bip9);
-    } else if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
-        rv.pushKV("bip341", bip9);
-    }
+    rv.pushKV("bip9", bip9);
 }
 
 namespace {
