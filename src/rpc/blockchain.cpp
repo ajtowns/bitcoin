@@ -1070,25 +1070,25 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
     rv.pushKV("type", "buried");
 }
 
-static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const ConditionLogic& logic, ConditionLogic::Cache& cache, ConditionLogic::State next_state)
+static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Consensus::DeploymentPos id, const BIP9DeploymentLogic& logic, BIP9DeploymentLogic::Cache& cache, BIP9DeploymentLogic::State next_state)
 {
     rv.pushKV("type", "bip9");
 
     // For BIP9 deployments.
-    auto get_state_name = [](const ConditionLogic::State state) -> std::string {
+    auto get_state_name = [](const BIP9DeploymentLogic::State state) -> std::string {
         switch (state) {
-        case ConditionLogic::State::DEFINED: return "defined";
-        case ConditionLogic::State::STARTED: return "started";
-        case ConditionLogic::State::LOCKED_IN: return "locked_in";
-        case ConditionLogic::State::ACTIVE: return "active";
-        case ConditionLogic::State::FAILED: return "failed";
+        case BIP9DeploymentLogic::State::DEFINED: return "defined";
+        case BIP9DeploymentLogic::State::STARTED: return "started";
+        case BIP9DeploymentLogic::State::LOCKED_IN: return "locked_in";
+        case BIP9DeploymentLogic::State::ACTIVE: return "active";
+        case BIP9DeploymentLogic::State::FAILED: return "failed";
         }
         return "invalid";
     };
 
     UniValue bip9(UniValue::VOBJ);
 
-    const ConditionLogic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
+    const BIP9DeploymentLogic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
 
     const std::optional<int> signal_bit = logic.VersionBitToSet(current_state, blockindex->pprev);
 
@@ -1115,7 +1115,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
         statsUV.pushKV("period", statsStruct.period);
         statsUV.pushKV("elapsed", statsStruct.elapsed);
         statsUV.pushKV("count", statsStruct.count);
-        if (ConditionLogic::State::LOCKED_IN != current_state) {
+        if (BIP9DeploymentLogic::State::LOCKED_IN != current_state) {
             statsUV.pushKV("threshold", statsStruct.threshold);
             statsUV.pushKV("possible", statsStruct.possible);
         }

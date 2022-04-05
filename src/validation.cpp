@@ -1833,7 +1833,7 @@ namespace {
 class WarningBits
 {
 private:
-    class WarningBitsConditionLogic : public ConditionLogic
+    class WarningBitsBIP9DeploymentLogic : public BIP9DeploymentLogic
     {
     private:
         const Consensus::Params& m_params;
@@ -1841,7 +1841,7 @@ private:
         Consensus::BIP9Deployment m_dep;
 
     public:
-        WarningBitsConditionLogic(const Consensus::Params& params, VersionBitsCache& vbcache, int bit) : ConditionLogic{m_dep}, m_params{params}, m_vbcache{vbcache}
+        WarningBitsBIP9DeploymentLogic(const Consensus::Params& params, VersionBitsCache& vbcache, int bit) : BIP9DeploymentLogic{m_dep}, m_params{params}, m_vbcache{vbcache}
         {
             m_dep.bit = bit;
             m_dep.nStartTime = 0;
@@ -1854,12 +1854,12 @@ private:
         bool Condition(const CBlockIndex* pindex) const override
         {
             return pindex->nHeight >= m_params.MinBIP9WarningHeight &&
-                   ConditionLogic::Condition(pindex) &&
+                   BIP9DeploymentLogic::Condition(pindex) &&
                    (m_vbcache.ComputeBlockVersion(pindex->pprev, m_params) & Mask()) == 0;
         }
     };
 
-    std::array<ConditionLogic::Cache,VERSIONBITS_NUM_BITS> m_cache;
+    std::array<BIP9DeploymentLogic::Cache,VERSIONBITS_NUM_BITS> m_cache;
 
 public:
     struct WarningStatus
@@ -1872,14 +1872,14 @@ public:
     {
         if (bit < 0 || bit >= VERSIONBITS_NUM_BITS) return {false, false};
 
-        const WarningBitsConditionLogic logic(chainman.GetConsensus(), chainman.m_versionbitscache, bit);
+        const WarningBitsBIP9DeploymentLogic logic(chainman.GetConsensus(), chainman.m_versionbitscache, bit);
         const auto state{logic.GetStateFor(m_cache[bit], pindex)};
         return {logic.IsCertain(state), logic.IsActive(state, pindex)};
     }
 
     void Clear() {
         for (auto& c : m_cache) {
-            WarningBitsConditionLogic::ClearCache(c);
+            WarningBitsBIP9DeploymentLogic::ClearCache(c);
         }
     }
 };

@@ -12,7 +12,7 @@
 
 #include <boost/test/unit_test.hpp>
 
-using ThresholdState = ConditionLogic::State;
+using ThresholdState = BIP9DeploymentLogic::State;
 
 /* Define a virtual block time, one block per 10 minutes after Nov 14 2014, 0:55:36am */
 static int32_t TestTime(int nHeight) { return 1415926536 + 600 * nHeight; }
@@ -29,14 +29,14 @@ static const std::string StateName(ThresholdState state)
     return "";
 }
 
-class TestConditionLogic : public ConditionLogic
+class TestBIP9DeploymentLogic : public BIP9DeploymentLogic
 {
 protected:
     Consensus::BIP9Deployment m_dep;
-    ConditionLogic::Cache m_cache;
+    BIP9DeploymentLogic::Cache m_cache;
 
 public:
-    TestConditionLogic() : ConditionLogic{m_dep}
+    TestBIP9DeploymentLogic() : BIP9DeploymentLogic{m_dep}
     {
         m_dep.bit = 8;
         m_dep.nStartTime = TestTime(10000);
@@ -46,28 +46,28 @@ public:
         m_dep.min_activation_height = 0;
     }
 
-    void clear() { ConditionLogic::ClearCache(m_cache); }
-    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return ConditionLogic::GetStateFor(m_cache, pindexPrev); }
-    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return ConditionLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
+    void clear() { BIP9DeploymentLogic::ClearCache(m_cache); }
+    ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return BIP9DeploymentLogic::GetStateFor(m_cache, pindexPrev); }
+    int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return BIP9DeploymentLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
 };
 
 
-class TestDelayedActivationConditionLogic : public TestConditionLogic
+class TestDelayedActivationBIP9DeploymentLogic : public TestBIP9DeploymentLogic
 {
 public:
-    TestDelayedActivationConditionLogic() : TestConditionLogic() { m_dep.min_activation_height = 15000; }
+    TestDelayedActivationBIP9DeploymentLogic() : TestBIP9DeploymentLogic() { m_dep.min_activation_height = 15000; }
 };
 
-class TestAlwaysActiveConditionLogic : public TestConditionLogic
+class TestAlwaysActiveBIP9DeploymentLogic : public TestBIP9DeploymentLogic
 {
 public:
-    TestAlwaysActiveConditionLogic() : TestConditionLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
+    TestAlwaysActiveBIP9DeploymentLogic() : TestBIP9DeploymentLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
 };
 
-class TestNeverActiveConditionLogic : public TestConditionLogic
+class TestNeverActiveBIP9DeploymentLogic : public TestBIP9DeploymentLogic
 {
 public:
-    TestNeverActiveConditionLogic() : TestConditionLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE; }
+    TestNeverActiveBIP9DeploymentLogic() : TestBIP9DeploymentLogic() { m_dep.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE; }
 };
 
 #define CHECKERS 6
@@ -80,13 +80,13 @@ class VersionBitsTester
     // 6 independent logics for the same bit.
     // The first one performs all checks, the second only 50%, the third only 25%, etc...
     // This is to test whether lack of cached information leads to the same results.
-    TestConditionLogic logic[CHECKERS];
+    TestBIP9DeploymentLogic logic[CHECKERS];
     // Another 6 that assume delayed activation
-    TestDelayedActivationConditionLogic logic_delayed[CHECKERS];
+    TestDelayedActivationBIP9DeploymentLogic logic_delayed[CHECKERS];
     // Another 6 that assume always active activation
-    TestAlwaysActiveConditionLogic logic_always[CHECKERS];
+    TestAlwaysActiveBIP9DeploymentLogic logic_always[CHECKERS];
     // Another 6 that assume never active activation
-    TestNeverActiveConditionLogic logic_never[CHECKERS];
+    TestNeverActiveBIP9DeploymentLogic logic_never[CHECKERS];
 
     // Test counter (to identify failures)
     int num{1000};
@@ -264,7 +264,7 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
 }
 
 /** Check that ComputeBlockVersion will set the appropriate bit correctly */
-static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const ConditionLogic& logic)
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const BIP9DeploymentLogic& logic)
 {
     // Clear the cache everytime
     versionbitscache.Clear();
@@ -438,7 +438,7 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
 
 static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
 {
-    check_computeblockversion(versionbitscache, params, ConditionLogic(dep));
+    check_computeblockversion(versionbitscache, params, BIP9DeploymentLogic(dep));
 }
 
 BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)

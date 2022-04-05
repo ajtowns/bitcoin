@@ -5,9 +5,9 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-using ThresholdState = ConditionLogic::State;
+using ThresholdState = BIP9DeploymentLogic::State;
 
-std::optional<ThresholdState> ConditionLogic::SpecialState() const
+std::optional<ThresholdState> BIP9DeploymentLogic::SpecialState() const
 {
     // Check if this deployment is always active.
     if (dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
@@ -22,7 +22,7 @@ std::optional<ThresholdState> ConditionLogic::SpecialState() const
     return std::nullopt;
 }
 
-std::optional<ThresholdState> ConditionLogic::TrivialState(const CBlockIndex* pindexPrev) const
+std::optional<ThresholdState> BIP9DeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
 {
     if (pindexPrev->GetMedianTimePast() < dep.nStartTime) {
         return ThresholdState::DEFINED;
@@ -31,7 +31,7 @@ std::optional<ThresholdState> ConditionLogic::TrivialState(const CBlockIndex* pi
     return std::nullopt;
 }
 
-ThresholdState ConditionLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
+ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
 {
     const int nPeriod{dep.period};
     const int nThreshold{dep.threshold};
@@ -190,4 +190,4 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
     return pindexPrev->nHeight + 1;
 }
 
-template class ThresholdConditionChecker<ConditionLogic>;
+template class ThresholdConditionChecker<BIP9DeploymentLogic>;

@@ -44,7 +44,7 @@ private:
     struct LogicType;
 
     template<>
-    struct LogicType<Consensus::BIP9Deployment> { using T = ConditionLogic; };
+    struct LogicType<Consensus::BIP9Deployment> { using T = BIP9DeploymentLogic; };
 
     template<>
     struct LogicType<Consensus::BuriedDeployment> { using T = BuriedDeploymentLogic; };

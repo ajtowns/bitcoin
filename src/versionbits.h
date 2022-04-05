@@ -65,14 +65,14 @@ public:
     static typename Logic::Stats GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr);
 };
 
-class ConditionLogic
+class BIP9DeploymentLogic
 {
 public:
     using Params = Consensus::BIP9Deployment;
 
 private:
-    const ConditionLogic::Params& dep;
-    using ThreshCheck = ThresholdConditionChecker<ConditionLogic>;
+    const BIP9DeploymentLogic::Params& dep;
+    using ThreshCheck = ThresholdConditionChecker<BIP9DeploymentLogic>;
 
 public:
     /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
@@ -107,7 +107,7 @@ public:
     // will either be nullptr or a block with (height + 1) % Period() == 0.
     using Cache = std::map<const CBlockIndex*, State>;
 
-    explicit ConditionLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
+    explicit BIP9DeploymentLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
     const Consensus::BIP9Deployment& Dep() const { return dep; }
     int Period() const { return dep.period; }
@@ -180,11 +180,11 @@ public:
     /** Activation height if known */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        const State state{ThresholdConditionChecker<ConditionLogic>::GetStateFor(*this, cache, pindexPrev)};
+        const State state{ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateFor(*this, cache, pindexPrev)};
         if (IsCertain(state)) {
-            const int since{ThresholdConditionChecker<ConditionLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev)};
-            if (state == ConditionLogic::State::ACTIVE) return since;
-            if (state == ConditionLogic::State::LOCKED_IN) {
+            const int since{ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev)};
+            if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
+            if (state == BIP9DeploymentLogic::State::LOCKED_IN) {
                 return std::max(since + Period(), dep.min_activation_height);
             }
         }
