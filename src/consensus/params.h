@@ -61,6 +61,28 @@ struct BIP341Deployment : public BIP9Deployment
     int min_activation_height{0};
 };
 
+struct BIPBlahDeployment
+{
+    int period{MAX};
+    int bit{28};
+    int64_t optin_start{NEVER_ACTIVE};
+    int64_t optin_timeout{NEVER_ACTIVE};
+    int64_t optin_earliest_activation{MAX};
+    int optin_threshold{MAX};
+
+    int optout_delay_mins{MAX};
+    int optout_delay_activation_mins{MAX};
+    int optout_threshold{0};
+
+    int optout_block_height{0};
+    uint256 optout_block_hash{};
+
+    static constexpr int MAX{std::numeric_limits<int>::max()};
+    static constexpr int ALWAYS_ACTIVE{-1};
+    static constexpr int NEVER_ACTIVE{-2};
+    static constexpr int64_t NO_TIMEOUT{std::numeric_limits<int64_t>::max()};
+};
+
 enum DeploymentPos {
     DEPLOYMENT_HEIGHTINCB,
     DEPLOYMENT_CLTV,

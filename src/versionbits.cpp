@@ -135,6 +135,110 @@ ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, cons
     return state;
 }
 
+std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::SpecialState() const
+{
+    // Check if this deployment is always active.
+    if (dep.optin_start == Consensus::BIPBlahDeployment::ALWAYS_ACTIVE) {
+        return {{StateCode::ACTIVE, 0}};
+    }
+
+    // Check if this deployment is never active.
+    if (dep.optin_start == Consensus::BIPBlahDeployment::NEVER_ACTIVE) {
+        return {{StateCode::FAILED, 0}};
+    }
+
+    return std::nullopt;
+}
+
+std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
+{
+    if (pindexPrev->GetMedianTimePast() < dep.optin_start) {
+        return {{StateCode::DEFINED, 0}};
+    }
+
+    return std::nullopt;
+}
+
+BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::NextState(const BIPBlahDeploymentLogic::State state, const CBlockIndex* pindexPrev) const
+{
+    switch (state.code) {
+        case StateCode::DEFINED: {
+            if (pindexPrev->GetMedianTimePast() >= dep.optin_start) {
+                return {StateCode::OPT_IN, 0};
+            }
+            break;
+        }
+        case StateCode::OPT_IN: {
+            // We need to count
+            const int count = ThreshCheck::Count(*this, pindexPrev);
+            if (count >= dep.optin_threshold) {
+                return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
+            } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
+                if (pindexPrev->nHeight < dep.optout_block_height) {
+                    return {StateCode::OPT_OUT_WAIT, 0};
+                } else {
+                    return {StateCode::FAILED, 0};
+                }
+            }
+            break;
+        }
+        case StateCode::OPT_OUT_WAIT: {
+           if (pindexPrev->nHeight + 1 == dep.optout_block_height + dep.period) {
+               const CBlockIndex* pindexFlag = pindexPrev->GetAncestor(dep.optout_block_height);
+               if (pindexFlag->GetBlockHash() != dep.optout_block_hash) {
+                   return {StateCode::FAILED, 0};
+               } else {
+                   return {StateCode::OPT_OUT, pindexFlag->GetMedianTimePast()/60 + dep.optout_delay_mins};
+               }
+           }
+           break;
+        }
+        case StateCode::OPT_OUT: {
+            if (pindexPrev->GetMedianTimePast() < state.data * 60) break;
+            const CBlockIndex* pindexStart = pindexPrev->GetAncestor(pindexPrev->nHeight - (dep.period - 1));
+            const int64_t start_mtp = pindexStart->GetMedianTimePast();
+            if (start_mtp < state.data * 60) break;
+
+            // We need to count
+            const int count = ThreshCheck::Count(*this, pindexPrev);
+            if (count >= dep.optout_threshold) {
+                return {StateCode::FAILED, 0};
+            } else {
+                return {StateCode::LOCKED_IN, start_mtp/60 + dep.optout_delay_activation_mins};
+            }
+            break;
+        }
+        case StateCode::LOCKED_IN: {
+            // Progresses into ACTIVE provided activation height will have been reached.
+            std::optional<int> act_height = ActivationHeight(state, pindexPrev);
+            if (act_height) {
+                return {StateCode::ACTIVE, *act_height};
+            }
+            break;
+        }
+        case StateCode::FAILED:
+        case StateCode::ACTIVE: {
+            // Nothing happens, these are terminal states.
+            break;
+        }
+    }
+    return state;
+}
+
+std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLogic::State state, const CBlockIndex* pindexPrev) const
+{
+    if (state.code == StateCode::ACTIVE) return static_cast<int>(state.data);
+    if (state.code == StateCode::LOCKED_IN) {
+        if (pindexPrev->GetMedianTimePast() >= state.data * 60) {
+            while (pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
+                pindexPrev = pindexPrev->pprev;
+            }
+            return pindexPrev->nHeight + dep.period;
+        }
+    }
+    return std::nullopt;
+}
+
 template<typename Logic>
 typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
 {
@@ -248,3 +352,4 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
 
 template class ThresholdConditionChecker<BIP9DeploymentLogic>;
 template class ThresholdConditionChecker<BIP341DeploymentLogic>;
+template class ThresholdConditionChecker<BIPBlahDeploymentLogic>;

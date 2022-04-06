@@ -304,4 +304,112 @@ public:
     static void ClearCache(Cache& cache) { cache.clear(); }
 };
 
+class BIPBlahDeploymentLogic
+{
+public:
+    using Params = Consensus::BIPBlahDeployment;
+
+private:
+    const Params& dep;
+    using ThreshCheck = ThresholdConditionChecker<BIPBlahDeploymentLogic>;
+
+    static int height(const CBlockIndex* pindexPrev) { return pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1; }
+
+public:
+    enum class StateCode : int64_t {
+        DEFINED,
+        OPT_IN,
+        OPT_OUT_WAIT,
+        OPT_OUT,      // count if first block in period has MTP greater than data
+        LOCKED_IN,    // switch to ACTIVE when MTP greater than data
+        ACTIVE,       // data = period + (height of first block greater than LOCKED_IN data)
+        FAILED,
+    };
+    struct State {
+        StateCode code :  4;
+        int64_t data   : 58; // allows timestamp in minutes instead of seconds
+
+        bool operator==(const State& other) const { return code == other.code && data == other.data; }
+    };
+    static_assert(sizeof(State) == sizeof(int64_t));
+    using Stats = BIP9DeploymentLogic::Stats;
+    using Cache = std::map<const CBlockIndex*, State>;
+
+    explicit BIPBlahDeploymentLogic(const Consensus::BIPBlahDeployment& dep) : dep{dep} {}
+
+    const Consensus::BIPBlahDeployment& Dep() const { return dep; }
+    int Period() const { return dep.period; }
+
+    /* State logic */
+
+    /** Is deployment enabled at all? */
+    bool Enabled() const { return dep.optin_start != Consensus::BIPBlahDeployment::NEVER_ACTIVE; }
+
+    /** Configured to be always in the same state */
+    std::optional<State> SpecialState() const;
+
+    /* Normal transitions */
+    static constexpr State GenesisState{StateCode::DEFINED, 0};
+    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
+    State NextState(const State state, const CBlockIndex* pindexPrev) const;
+
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateFor(*this, cache, pindexPrev); }
+    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev); }
+
+    /** Determine if deployment is active */
+    bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state.code == StateCode::ACTIVE && state.data <= height(pindexPrev); }
+    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return IsActive(GetStateFor(cache, pindexPrev), pindexPrev); }
+
+    /** Determine if deployment is certain */
+    bool IsCertain(State state) const { return state.code == StateCode::ACTIVE || state.code == StateCode::LOCKED_IN; }
+
+    /** Get bit mask */
+    uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+
+    /** Given current state, should bit be set? */
+    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
+    {
+        if ((state.code == StateCode::OPT_IN) || (state.code == StateCode::LOCKED_IN)) {
+            return dep.bit;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
+    {
+        return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
+    }
+
+    /** Is the bit set? */
+    bool VersionBitIsSet(int32_t version) const
+    {
+        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
+    }
+
+    /** Does this block count towards the threshold? */
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
+
+    /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
+     * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
+     */
+    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    {
+        Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
+        stats.period = Period();
+        stats.threshold = dep.optin_threshold; // XXX
+        stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
+        return stats;
+    }
+
+    /** Activation height if known */
+    std::optional<int> ActivationHeight(State state, const CBlockIndex* pindexPrev) const;
+    std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
+    {
+        return ActivationHeight(ThreshCheck::GetStateFor(*this, cache, pindexPrev), pindexPrev);
+    }
+
+    static void ClearCache(Cache& cache) { cache.clear(); }
+};
+
 #endif // BITCOIN_VERSIONBITS_H
