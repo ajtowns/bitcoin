@@ -1075,7 +1075,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
 {
     if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
         rv.pushKV("type", "bip9");
-    } else if constexpr (std::is_same_v<Logic, BIP9DeploymentLogic>) {
+    } else if constexpr (std::is_same_v<Logic, BIP341DeploymentLogic>) {
         rv.pushKV("type", "bip341");
     } else {
         static_assert(0 > sizeof(logic), "unkonwn Logic??");
@@ -1244,7 +1244,7 @@ const std::vector<RPCResult> RPCHelpForDeployment{
         {RPCResult::Type::NUM, "bit", /*optional=*/true, "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" and \"locked_in\" status)"},
         {RPCResult::Type::NUM_TIME, "start_time", "the minimum median time past of a block at which the bit gains its meaning"},
         {RPCResult::Type::NUM_TIME, "timeout", "the median time past of a block at which the deployment is considered failed if not yet locked in"},
-        {RPCResult::Type::NUM, "min_activation_height", "minimum height of blocks for which the rules may be enforced"},
+        {RPCResult::Type::NUM, "min_activation_height", /*optional=*/true, "minimum height of blocks for which the rules may be enforced"},
         {RPCResult::Type::STR, "status", "status of deployment at specified block (one of \"defined\", \"started\", \"locked_in\", \"active\", \"failed\")"},
         {RPCResult::Type::NUM, "since", "height of the first block to which the status applies"},
         {RPCResult::Type::STR, "status_next", "status of deployment at the next block"},

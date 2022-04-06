@@ -183,17 +183,28 @@ class BlockchainTest(BitcoinTestFramework):
     def check_signalling_deploymentinfo_result(self, gdi_result, height, blockhash, status_next):
         assert height >= 144 and height <= 287
 
-        assert_equal(gdi_result, {
+        exp_result = {
           "hash": blockhash,
           "height": height,
           "deployments": {
             'bip34': {'type': 'buried', 'active': True, 'height': 2},
-            'bip66': {'type': 'buried', 'active': True, 'height': 3},
-            'bip65': {'type': 'buried', 'active': True, 'height': 4},
+            'dersig': {'type': 'buried', 'active': True, 'height': 3},
+            'cltv': {'type': 'buried', 'active': True, 'height': 4},
             'csv': {'type': 'buried', 'active': True, 'height': 5},
-            'segwit': {'type': 'buried', 'active': True, 'height': 6},
-            'testdummy': {
+            'segwit': {
                 'type': 'bip9',
+                'bip9': {
+                    'start_time': -1,
+                    'timeout': 0x7fffffffffffffff,
+                    'status': 'active',
+                    'status_next': 'active',
+                    'since': 0,
+                },
+                'active': True,
+                'height': 0
+            },
+            'testdummy': {
+                'type': 'bip341',
                 'bip9': {
                     'bit': 28,
                     'start_time': 0,
@@ -214,7 +225,7 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': False
             },
             'taproot': {
-                'type': 'bip9',
+                'type': 'bip341',
                 'bip9': {
                     'start_time': -1,
                     'timeout': 9223372036854775807,
@@ -227,7 +238,11 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': True
             }
           }
-        })
+        }
+        if exp_result["deployments"]["testdummy"]["bip9"]["status_next"] == "locked_in":
+            # current status is started, so next block is first locked in
+            exp_result["deployments"]["testdummy"]["height"] = height + 1 + 144
+        assert_equal(gdi_result, exp_result)
 
     def _test_getdeploymentinfo(self):
         # Note: continues past -stopatheight height, so must be invoked
@@ -240,7 +255,7 @@ class BlockchainTest(BitcoinTestFramework):
             '-testactivationheight=dersig@3',
             '-testactivationheight=cltv@4',
             '-testactivationheight=csv@5',
-            '-testactivationheight=segwit@6',
+            #'-testactivationheight=segwit@6',
         ])
 
         gbci207 = self.nodes[0].getblockchaininfo()

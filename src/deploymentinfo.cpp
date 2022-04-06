@@ -12,9 +12,9 @@ VBDeploymentInfo GetDeploymentInfo(Consensus::DeploymentPos pos)
     case Consensus::DEPLOYMENT_HEIGHTINCB:
         return {"bip34", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_CLTV:
-        return {"bip65", /*.gbt_force=*/true, /*.gbt_hide=*/true};
+        return {"cltv", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_DERSIG:
-        return {"bip66", /*.gbt_force=*/true, /*.gbt_hide=*/true};
+        return {"dersig", /*.gbt_force=*/true, /*.gbt_hide=*/true};
     case Consensus::DEPLOYMENT_CSV:
         return {"csv", /*.gbt_force=*/true, /*.gbt_hide=*/false};
     case Consensus::DEPLOYMENT_SEGWIT:

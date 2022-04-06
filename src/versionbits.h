@@ -282,7 +282,7 @@ public:
             const int since{ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
             if (state == BIP9DeploymentLogic::State::LOCKED_IN) {
-                return std::min(since + Period(), dep.min_activation_height);
+                return std::max(since + Period(), dep.min_activation_height);
             }
         }
         return std::nullopt;
