@@ -52,6 +52,19 @@ private:
     }
 
 public:
+    /** Counts how many of the previous Period() blocks signalled */
+    static int Count(const Logic& logic, const CBlockIndex* blockindex)
+    {
+        int count = 0;
+        for (int i = logic.Period(); i > 0; --i) {
+            if (logic.Condition(blockindex)) {
+                ++count;
+            }
+            blockindex = blockindex->pprev;
+        }
+        return count;
+    }
+
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
     static typename Logic::State GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);

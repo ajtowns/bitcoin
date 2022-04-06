@@ -33,7 +33,6 @@ std::optional<ThresholdState> BIP9DeploymentLogic::TrivialState(const CBlockInde
 
 ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
 {
-    const int nPeriod{dep.period};
     const int nThreshold{dep.threshold};
     const int64_t nTimeStart{dep.nStartTime};
     const int64_t nTimeTimeout{dep.nTimeout};
@@ -53,14 +52,7 @@ ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const 
                 return ThresholdState::FAILED;
             }
             // Otherwise, we need to count
-            const CBlockIndex* pindexCount = pindexPrev;
-            int count = 0;
-            for (int i = 0; i < nPeriod; i++) {
-                if (Condition(pindexCount)) {
-                    count++;
-                }
-                pindexCount = pindexCount->pprev;
-            }
+            const int count = ThreshCheck::Count(*this, pindexPrev);
             if (count >= nThreshold) {
                 return ThresholdState::LOCKED_IN;
             }
@@ -105,7 +97,6 @@ std::optional<ThresholdState> BIP341DeploymentLogic::TrivialState(const CBlockIn
 
 ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
 {
-    const int nPeriod{dep.period};
     const int nThreshold{dep.threshold};
     const int min_activation_height{dep.min_activation_height};
     const int64_t nTimeStart{dep.nStartTime};
@@ -120,14 +111,7 @@ ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, cons
         }
         case ThresholdState::STARTED: {
             // We need to count
-            const CBlockIndex* pindexCount = pindexPrev;
-            int count = 0;
-            for (int i = 0; i < nPeriod; i++) {
-                if (Condition(pindexCount)) {
-                    count++;
-                }
-                pindexCount = pindexCount->pprev;
-            }
+            const int count = ThreshCheck::Count(*this, pindexPrev);
             if (count >= nThreshold) {
                 return ThresholdState::LOCKED_IN;
             } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
@@ -181,7 +165,7 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
 
     // At this point, cache[pindexPrev] is known
     assert(cache.count(pindexPrev));
-    ThresholdState state = cache[pindexPrev];
+    typename Logic::State state = cache[pindexPrev];
 
     // Now walk forward and compute the state of descendants of pindexPrev
     while (!vToCompute.empty()) {
