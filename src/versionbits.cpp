@@ -240,6 +240,19 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
 }
 
 template<typename Logic>
+int ThresholdConditionChecker<Logic>::Count(const Logic& logic, const CBlockIndex* blockindex)
+{
+    int count = 0;
+    for (int i = logic.Period(); i > 0; --i) {
+        if (logic.Condition(blockindex)) {
+            ++count;
+        }
+        blockindex = blockindex->pprev;
+    }
+    return count;
+}
+
+template<typename Logic>
 typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
 {
     if (auto maybe_state = logic.SpecialState()) return *maybe_state;
@@ -282,10 +295,9 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
 }
 
 template<typename Logic>
-typename Logic::Stats ThresholdConditionChecker<Logic>::GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, std::vector<bool>* signalling_blocks)
+typename ThresholdConditionChecker<Logic>::Stats ThresholdConditionChecker<Logic>::GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, int threshold, std::vector<bool>* signalling_blocks)
 {
-    typename Logic::Stats stats = {};
-    if (pindex == nullptr) return stats;
+    if (pindex == nullptr) return Stats{};
 
     const int period = logic.Period();
 
@@ -311,8 +323,12 @@ typename Logic::Stats ThresholdConditionChecker<Logic>::GetStateStatisticsFor(co
         currentIndex = currentIndex->pprev;
     } while(blocks_in_period > 0);
 
+    Stats stats;
+    stats.period = period;
+    stats.threshold = threshold;
     stats.elapsed = elapsed;
     stats.count = count;
+    stats.possible = (stats.period - stats.elapsed) >= (stats.threshold - stats.count);
 
     return stats;
 }

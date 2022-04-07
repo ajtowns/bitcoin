@@ -27,43 +27,40 @@ template<typename Logic>
 class ThresholdConditionChecker
 {
 private:
-    /** Static checks to give cleaner errors if the "Logic" class is broken */
-    static constexpr void static_checks(const Logic& logic)
-    {
-        // need to be able to determine the period
-        static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
+    // Static checks to give cleaner errors if the "Logic" class is broken */
 
-        // need to be told whether a block signals or not
-        static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
+    // need to be able to determine the period
+    static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
 
-        // need to know the genesis state to kick things off
-        static_assert(std::is_same_v<const typename Logic::State, decltype(logic.GenesisState)>, "missing Logic::GenesisState");
+    // need to be told whether a block signals or not
+    static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
 
-        // state transition logic:
-        // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
-        static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
-        static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
-        static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
+    // need to know the genesis state to kick things off
+    static_assert(std::is_same_v<const typename Logic::State, decltype(Logic::GenesisState)>, "missing Logic::GenesisState");
 
-        // need to be able to return a Stats object with count and elapsed
-        typename Logic::Stats stats;
-        static_assert(std::is_same_v<int, decltype(stats.count)>, "missing Logic::Stats::count");
-        static_assert(std::is_same_v<int, decltype(stats.elapsed)>, "missing Logic::Stats::elapsed");
-    }
+    // state transition logic:
+    // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
+    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
+    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
+    static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
 
 public:
+    /** Display status of an in-progress softfork */
+    struct Stats {
+        /** Length of blocks of the signalling period */
+        int period;
+        /** Number of blocks with the version bit set required to activate the softfork */
+        int threshold;
+        /** Number of blocks elapsed since the beginning of the current period */
+        int elapsed;
+        /** Number of blocks with the version bit set since the beginning of the current period */
+        int count;
+        /** False if there are not enough blocks left in this period to pass activation threshold */
+        bool possible;
+    };
+
     /** Counts how many of the previous Period() blocks signalled */
-    static int Count(const Logic& logic, const CBlockIndex* blockindex)
-    {
-        int count = 0;
-        for (int i = logic.Period(); i > 0; --i) {
-            if (logic.Condition(blockindex)) {
-                ++count;
-            }
-            blockindex = blockindex->pprev;
-        }
-        return count;
-    }
+    static int Count(const Logic& logic, const CBlockIndex* blockindex);
 
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
@@ -75,7 +72,7 @@ public:
     /** Returns the numerical statistics of an in-progress softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    static typename Logic::Stats GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr);
+    static Stats GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, int threshold, std::vector<bool>* signalling_blocks = nullptr);
 };
 
 class BIP9DeploymentLogic
@@ -99,20 +96,6 @@ public:
         LOCKED_IN, // For at least one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion, until min_activation_height is reached.
         ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
         FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
-    };
-
-    /** Display status of an in-progress BIP9 softfork */
-    struct Stats {
-        /** Length of blocks of the BIP9 signalling period */
-        int period;
-        /** Number of blocks with the version bit set required to activate the softfork */
-        int threshold;
-        /** Number of blocks elapsed since the beginning of the current period */
-        int elapsed;
-        /** Number of blocks with the version bit set since the beginning of the current period */
-        int count;
-        /** False if there are not enough blocks left in this period to pass activation threshold */
-        bool possible;
     };
 
     // A map that caches the state for blocks whose height is a multiple of Period().
@@ -181,13 +164,9 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
-        stats.period = Period();
-        stats.threshold = dep.threshold;
-        stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
-        return stats;
+        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.threshold, signalling_blocks);
     }
 
     /** Activation height if known */
@@ -217,7 +196,6 @@ private:
 
 public:
     using State = BIP9DeploymentLogic::State;
-    using Stats = BIP9DeploymentLogic::Stats;
     using Cache = std::map<const CBlockIndex*, State>;
 
     explicit BIP341DeploymentLogic(const Consensus::BIP341Deployment& dep) : dep{dep} {}
@@ -278,13 +256,9 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
-        stats.period = Period();
-        stats.threshold = dep.threshold;
-        stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
-        return stats;
+        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.threshold, signalling_blocks);
     }
 
     /** Activation height if known */
@@ -332,7 +306,6 @@ public:
         bool operator==(const State& other) const { return code == other.code && data == other.data; }
     };
     static_assert(sizeof(State) == sizeof(int64_t));
-    using Stats = BIP9DeploymentLogic::Stats;
     using Cache = std::map<const CBlockIndex*, State>;
 
     explicit BIPBlahDeploymentLogic(const Consensus::BIPBlahDeployment& dep) : dep{dep} {}
@@ -393,13 +366,9 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        Stats stats{ThreshCheck::GetStateStatisticsFor(*this, pindex, signalling_blocks)};
-        stats.period = Period();
-        stats.threshold = dep.optin_threshold; // XXX
-        stats.possible = (stats.period - stats.threshold ) >= (stats.elapsed - stats.count);
-        return stats;
+        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.optin_threshold, signalling_blocks);
     }
 
     /** Activation height if known */

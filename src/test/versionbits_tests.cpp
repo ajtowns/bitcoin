@@ -282,7 +282,7 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     }();
 
     BOOST_CHECK_EQUAL(dep.period, params.nMinerConfirmationWindow);
-    BOOST_CHECK_EQUAL(dep.threshold, params.nRuleChangeActivationThreshold);
+    BOOST_CHECK((int64_t)dep.threshold >= params.nRuleChangeActivationThreshold);
 
     // test will not function correctly if period or threshold are misspecified
     BOOST_REQUIRE(dep.period > 0);
