@@ -97,13 +97,16 @@ public:
     bool IsActive(const CBlockIndex* pindexPrev, const Consensus::Params& params) LOCKS_EXCLUDED(m_mutex)
     {
         const auto logic{GetLogic<dep>(params)};
+        auto is_active = [&](auto& cache) {
+            return logic.IsActive(logic.GetStateFor(cache, pindexPrev), pindexPrev);
+        };
         if constexpr(std::is_same_v<typename decltype(logic)::Cache, std::true_type>) {
             // cache is a dummy, so avoid locking
             std::true_type dummy_cache{};
-            return logic.IsActive(dummy_cache, pindexPrev);
+            return is_active(dummy_cache);
         } else {
             LOCK(m_mutex);
-            return logic.IsActive(std::get<dep>(m_cache), pindexPrev);
+            return is_active(std::get<dep>(m_cache));
         }
     }
 

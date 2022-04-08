@@ -86,7 +86,6 @@ public:
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
-    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return IsActive(GetStateFor(cache, pindexPrev), pindexPrev); }
 
     /** Determine if deployment is certain */
     bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
@@ -157,7 +156,6 @@ public:
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
-    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return GetStateFor(cache, pindexPrev) == State::ACTIVE; }
 
     /** Determine if deployment is certain */
     bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
@@ -249,7 +247,6 @@ public:
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state.code == StateCode::ACTIVE && state.data <= height(pindexPrev); }
-    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return IsActive(GetStateFor(cache, pindexPrev), pindexPrev); }
 
     /** Determine if deployment is certain */
     bool IsCertain(State state) const { return state.code == StateCode::ACTIVE || state.code == StateCode::LOCKED_IN; }
