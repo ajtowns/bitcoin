@@ -21,13 +21,14 @@ public:
 
     const Params& m_params;
 
-    BuriedDeploymentLogic(const Params& params) : m_params{params} { }
+    explicit BuriedDeploymentLogic(const Params& params) : m_params{params} { }
 
-    int Bit() const { return -1; }
-    bool ShouldSetVersionBit(State state) const { return false; }
-    bool Enabled() const { return m_params.height != std::numeric_limits<int>::max(); }
-    bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
     State GetStateFor(const Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_params.height; }
+
+    bool Enabled() const { return m_params.height != std::numeric_limits<int>::max(); }
+    bool ShouldSetVersionBit(State state) const { return false; }
+    bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
+    int Bit() const { return -1; }
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const { return m_params.height; }
 };
 

@@ -89,9 +89,6 @@ public: /* Results */
         return (state == State::STARTED) || (state == State::LOCKED_IN);
     }
 
-    /** Determine if activation is certain */
-    bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
-
     /** Determine if deployment is enforced */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
 
@@ -106,10 +103,10 @@ public: /* Information */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
         const State state{GetStateFor(cache, pindexPrev)};
-        if (IsCertain(state)) {
+        if (state == State::ACTIVE || state == State::LOCKED_IN) {
             const int since{GetStateSinceHeightFor(cache, pindexPrev)};
-            if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
-            if (state == BIP9DeploymentLogic::State::LOCKED_IN) return since + dep.period;
+            if (state == State::ACTIVE) return since;
+            if (state == State::LOCKED_IN) return since + dep.period;
         }
         return std::nullopt;
     }
@@ -148,9 +145,6 @@ public:
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
 
-    /** Determine if deployment is certain */
-    bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
-
     /** Get bit */
     int Bit() const { return dep.bit; }
 
@@ -172,7 +166,7 @@ public:
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
         const State state{GetStateFor(cache, pindexPrev)};
-        if (IsCertain(state)) {
+        if (state == State::ACTIVE || state == State::LOCKED_IN) {
             const int since{GetStateSinceHeightFor(cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
             if (state == BIP9DeploymentLogic::State::LOCKED_IN) {
@@ -223,9 +217,6 @@ public:
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state.code == StateCode::ACTIVE && state.data <= height(pindexPrev); }
-
-    /** Determine if deployment is certain */
-    bool IsCertain(State state) const { return state.code == StateCode::ACTIVE || state.code == StateCode::LOCKED_IN; }
 
     /** Get bit */
     int Bit() const { return dep.bit; }

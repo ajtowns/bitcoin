@@ -1873,7 +1873,10 @@ public:
 
         const WarningBitsBIP9DeploymentLogic logic(chainman.GetConsensus(), chainman.m_versionbitscache, bit);
         const auto state{logic.GetStateFor(m_cache[bit], pindex)};
-        return {logic.IsCertain(state), logic.IsActive(state, pindex)};
+        WarningStatus r;
+        r.active = logic.IsActive(state, pindex);
+        r.certain = r.active || state == BIP9DeploymentLogic::State::LOCKED_IN;
+        return r;
     }
 
     void Clear() {
