@@ -5,8 +5,6 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
-using ThresholdState = BIP9DeploymentLogic::State;
-
 namespace {
 template<typename Logic>
 int Count(const Logic& logic, const CBlockIndex* blockindex)
@@ -24,39 +22,40 @@ int Count(const Logic& logic, const CBlockIndex* blockindex)
 /**
  * Class that implements BIP9-style threshold logic, and caches results.
  */
-template<typename Logic>
+template<typename StateLogic>
 class ThresholdConditionChecker
 {
 private:
-    // Static checks to give cleaner errors if the "Logic" class is broken */
+    // Static checks to give cleaner errors if the "StateLogic" class is broken */
 
     // need to be able to determine the period
-    static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
+    static_assert(std::is_invocable_r_v<int, decltype(&StateLogic::Period), const StateLogic&>, "missing StateLogic::Period");
 
     // need to be told whether a block signals or not
-    static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
+    static_assert(std::is_invocable_r_v<bool, decltype(&StateLogic::Condition), const StateLogic&, const CBlockIndex*>, "missing StateLogic::Condition");
 
     // need to know the genesis state to kick things off
-    static_assert(std::is_same_v<const typename Logic::State, decltype(Logic::GenesisState)>, "missing Logic::GenesisState");
+    static_assert(std::is_same_v<const typename StateLogic::State, decltype(StateLogic::GenesisState)>, "missing StateLogic::GenesisState");
 
     // state transition logic:
     // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
-    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
-    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
-    static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
+    static_assert(std::is_invocable_r_v<std::optional<typename StateLogic::State>, decltype(&StateLogic::SpecialState), const StateLogic&>, "missing StateLogic::SpecialState");
+    static_assert(std::is_invocable_r_v<std::optional<typename StateLogic::State>, decltype(&StateLogic::TrivialState), const StateLogic&, const CBlockIndex*>, "missing StateLogic::TrivialState");
+    static_assert(std::is_invocable_r_v<typename StateLogic::State, decltype(&StateLogic::NextState), const StateLogic&, typename StateLogic::State, const CBlockIndex*>, "missing StateLogic::NextState");
 
 public:
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
-    static typename Logic::State GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+    static typename StateLogic::State GetStateFor(const StateLogic& logic, typename StateLogic::Cache& cache, const CBlockIndex* pindexPrev);
 
     /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
-    static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+    static int GetStateSinceHeightFor(const StateLogic& logic, typename StateLogic::Cache& cache, const CBlockIndex* pindexPrev);
 };
 } // anonymous namespace
 
 // BIP 9
 
+namespace {
 class BIP9StateLogic {
 public:
     const BIP9DeploymentLogic& logic;
@@ -74,12 +73,12 @@ public:
     {
         // Check if this deployment is always active.
         if (logic.Dep().nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
-            return ThresholdState::ACTIVE;
+            return State::ACTIVE;
         }
 
         // Check if this deployment is never active.
         if (logic.Dep().nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
-            return ThresholdState::FAILED;
+            return State::FAILED;
         }
 
         return std::nullopt;
@@ -91,7 +90,7 @@ public:
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
     {
         if (pindexPrev->GetMedianTimePast() < logic.Dep().nStartTime) {
-            return ThresholdState::DEFINED;
+            return GenesisState;
         }
 
         return std::nullopt;
@@ -104,32 +103,32 @@ public:
         const int64_t nTimeTimeout{logic.Dep().nTimeout};
 
         switch (state) {
-            case ThresholdState::DEFINED: {
+            case State::DEFINED: {
                 if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                    return ThresholdState::FAILED;
+                    return State::FAILED;
                 } else if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
-                    return ThresholdState::STARTED;
+                    return State::STARTED;
                 }
                 break;
             }
-            case ThresholdState::STARTED: {
+            case State::STARTED: {
                 // If after the timeout, automatic fail
                 if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                    return ThresholdState::FAILED;
+                    return State::FAILED;
                 }
                 // Otherwise, we need to count
                 const int count = Count(*this, pindexPrev);
                 if (count >= nThreshold) {
-                    return ThresholdState::LOCKED_IN;
+                    return State::LOCKED_IN;
                 }
                 break;
             }
-            case ThresholdState::LOCKED_IN: {
+            case State::LOCKED_IN: {
                 // Always progresses into ACTIVE
-                return ThresholdState::ACTIVE;
+                return State::ACTIVE;
             }
-            case ThresholdState::FAILED:
-            case ThresholdState::ACTIVE: {
+            case State::FAILED:
+            case State::ACTIVE: {
                 // Nothing happens, these are terminal states.
                 break;
             }
@@ -137,6 +136,7 @@ public:
         return state;
     }
 };
+} // anonymous namespace
 
 BIP9DeploymentLogic::State BIP9DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
@@ -150,171 +150,208 @@ int BIP9DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex*
 
 // BIP 341
 
-std::optional<ThresholdState> BIP341DeploymentLogic::SpecialState() const
-{
-    // Check if this deployment is always active.
-    if (dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
-        return ThresholdState::ACTIVE;
+namespace {
+class BIP341StateLogic {
+public:
+    const BIP341DeploymentLogic& logic;
+
+    /* implicit */ BIP341StateLogic(const BIP341DeploymentLogic& logic) : logic{logic} { }
+
+    using State = BIP341DeploymentLogic::State;
+    using Cache = BIP341DeploymentLogic::Cache;
+
+    int Period() const { return logic.Period(); }
+    bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
+
+    std::optional<State> SpecialState() const
+    {
+        // Check if this deployment is always active.
+        if (logic.Dep().nStartTime == Consensus::BIP341Deployment::ALWAYS_ACTIVE) {
+            return State::ACTIVE;
+        }
+
+        // Check if this deployment is never active.
+        if (logic.Dep().nStartTime == Consensus::BIP341Deployment::NEVER_ACTIVE) {
+            return State::FAILED;
+        }
+
+        return std::nullopt;
     }
 
-    // Check if this deployment is never active.
-    if (dep.nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
-        return ThresholdState::FAILED;
+    static constexpr State GenesisState = State::DEFINED;
+
+    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
+    {
+        if (pindexPrev->GetMedianTimePast() < logic.Dep().nStartTime) {
+            return GenesisState;
+        }
+
+        return std::nullopt;
     }
 
-    return std::nullopt;
-}
+    State NextState(const State state, const CBlockIndex* pindexPrev) const
+    {
+        const int nThreshold{logic.Dep().threshold};
+        const int min_activation_height{logic.Dep().min_activation_height};
+        const int64_t nTimeStart{logic.Dep().nStartTime};
+        const int64_t nTimeTimeout{logic.Dep().nTimeout};
 
-std::optional<ThresholdState> BIP341DeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
-{
-    if (pindexPrev->GetMedianTimePast() < dep.nStartTime) {
-        return ThresholdState::DEFINED;
-    }
-
-    return std::nullopt;
-}
-
-ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
-{
-    const int nThreshold{dep.threshold};
-    const int min_activation_height{dep.min_activation_height};
-    const int64_t nTimeStart{dep.nStartTime};
-    const int64_t nTimeTimeout{dep.nTimeout};
-
-    switch (state) {
-        case ThresholdState::DEFINED: {
-            if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
-                return ThresholdState::STARTED;
+        switch (state) {
+            case State::DEFINED: {
+                if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
+                    return State::STARTED;
+                }
+                break;
             }
-            break;
-        }
-        case ThresholdState::STARTED: {
-            // We need to count
-            const int count = Count(*this, pindexPrev);
-            if (count >= nThreshold) {
-                return ThresholdState::LOCKED_IN;
-            } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                return ThresholdState::FAILED;
+            case State::STARTED: {
+                // We need to count
+                const int count = Count(*this, pindexPrev);
+                if (count >= nThreshold) {
+                    return State::LOCKED_IN;
+                } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                    return State::FAILED;
+                }
+                break;
             }
-            break;
-        }
-        case ThresholdState::LOCKED_IN: {
-            // Progresses into ACTIVE provided activation height will have been reached.
-            if (pindexPrev->nHeight + 1 >= min_activation_height) {
-                return ThresholdState::ACTIVE;
+            case State::LOCKED_IN: {
+                // Progresses into ACTIVE provided activation height will have been reached.
+                if (pindexPrev->nHeight + 1 >= min_activation_height) {
+                    return State::ACTIVE;
+                }
+                break;
             }
-            break;
+            case State::FAILED:
+            case State::ACTIVE: {
+                // Nothing happens, these are terminal states.
+                break;
+            }
         }
-        case ThresholdState::FAILED:
-        case ThresholdState::ACTIVE: {
-            // Nothing happens, these are terminal states.
-            break;
-        }
+        return state;
     }
-    return state;
-}
+};
+} // anonymous namespace
 
 BIP341DeploymentLogic::State BIP341DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+    return ThresholdConditionChecker<BIP341StateLogic>::GetStateFor(*this, cache, pindexPrev);
 }
 
 int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+    return ThresholdConditionChecker<BIP341StateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
 // BIP Blah
 
-std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::SpecialState() const
-{
-    // Check if this deployment is always active.
-    if (dep.optin_start == Consensus::BIPBlahDeployment::ALWAYS_ACTIVE) {
-        return {{StateCode::ACTIVE, 0}};
-    }
+namespace {
+class BIPBlahStateLogic {
+public:
+    const BIPBlahDeploymentLogic& logic;
 
-    // Check if this deployment is never active.
-    if (dep.optin_start == Consensus::BIPBlahDeployment::NEVER_ACTIVE) {
-        return {{StateCode::FAILED, 0}};
-    }
+    /* implicit */ BIPBlahStateLogic(const BIPBlahDeploymentLogic& logic) : logic{logic} { }
 
-    return std::nullopt;
-}
+    using State = BIPBlahDeploymentLogic::State;
+    using Cache = BIPBlahDeploymentLogic::Cache;
+    using StateCode = BIPBlahDeploymentLogic::StateCode;
 
-std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
-{
-    if (pindexPrev->GetMedianTimePast() < dep.optin_start) {
-        return {{StateCode::DEFINED, 0}};
-    }
+    int Period() const { return logic.Period(); }
+    bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
-    return std::nullopt;
-}
-
-BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::NextState(const BIPBlahDeploymentLogic::State state, const CBlockIndex* pindexPrev) const
-{
-    switch (state.code) {
-        case StateCode::DEFINED: {
-            if (pindexPrev->GetMedianTimePast() >= dep.optin_start) {
-                return {StateCode::OPT_IN, 0};
-            }
-            break;
+    std::optional<State> SpecialState() const
+    {
+        // Check if this deployment is always active.
+        if (logic.Dep().optin_start == Consensus::BIPBlahDeployment::ALWAYS_ACTIVE) {
+            return {{StateCode::ACTIVE, 0}};
         }
-        case StateCode::OPT_IN: {
-            // We need to count
-            const int count = Count(*this, pindexPrev);
-            if (count >= dep.optin_threshold) {
-                return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
-            } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
-                if (pindexPrev->nHeight < dep.optout_block_height) {
-                    return {StateCode::OPT_OUT_WAIT, 0};
-                } else {
-                    return {StateCode::FAILED, 0};
+
+        // Check if this deployment is never active.
+        if (logic.Dep().optin_start == Consensus::BIPBlahDeployment::NEVER_ACTIVE) {
+            return {{StateCode::FAILED, 0}};
+        }
+
+        return std::nullopt;
+    }
+
+    static constexpr State GenesisState = {StateCode::DEFINED, 0};
+
+    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
+    {
+        if (pindexPrev->GetMedianTimePast() < logic.Dep().optin_start) {
+            return GenesisState;
+        }
+
+        return std::nullopt;
+    }
+
+    State NextState(const State state, const CBlockIndex* pindexPrev) const
+    {
+        const auto& dep = logic.Dep();
+
+        switch (state.code) {
+            case StateCode::DEFINED: {
+                if (pindexPrev->GetMedianTimePast() >= dep.optin_start) {
+                    return {StateCode::OPT_IN, 0};
                 }
+                break;
             }
-            break;
-        }
-        case StateCode::OPT_OUT_WAIT: {
-           if (pindexPrev->nHeight + 1 == dep.optout_block_height + dep.period) {
-               const CBlockIndex* pindexFlag = pindexPrev->GetAncestor(dep.optout_block_height);
-               if (pindexFlag->GetBlockHash() != dep.optout_block_hash) {
-                   return {StateCode::FAILED, 0};
-               } else {
-                   return {StateCode::OPT_OUT, pindexFlag->GetMedianTimePast()/60 + dep.optout_delay_mins};
+            case StateCode::OPT_IN: {
+                // We need to count
+                const int count = Count(*this, pindexPrev);
+                if (count >= dep.optin_threshold) {
+                    return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
+                } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
+                    if (pindexPrev->nHeight < dep.optout_block_height) {
+                        return {StateCode::OPT_OUT_WAIT, 0};
+                    } else {
+                        return {StateCode::FAILED, 0};
+                    }
+                }
+                break;
+            }
+            case StateCode::OPT_OUT_WAIT: {
+               if (pindexPrev->nHeight + 1 == dep.optout_block_height + dep.period) {
+                   const CBlockIndex* pindexFlag = pindexPrev->GetAncestor(dep.optout_block_height);
+                   if (pindexFlag->GetBlockHash() != dep.optout_block_hash) {
+                       return {StateCode::FAILED, 0};
+                   } else {
+                       return {StateCode::OPT_OUT, pindexFlag->GetMedianTimePast()/60 + dep.optout_delay_mins};
+                   }
                }
-           }
-           break;
-        }
-        case StateCode::OPT_OUT: {
-            if (pindexPrev->GetMedianTimePast() < state.data * 60) break;
-            const CBlockIndex* pindexStart = pindexPrev->GetAncestor(pindexPrev->nHeight - (dep.period - 1));
-            const int64_t start_mtp = pindexStart->GetMedianTimePast();
-            if (start_mtp < state.data * 60) break;
+               break;
+            }
+            case StateCode::OPT_OUT: {
+                if (pindexPrev->GetMedianTimePast() < state.data * 60) break;
+                const CBlockIndex* pindexStart = pindexPrev->GetAncestor(pindexPrev->nHeight - (dep.period - 1));
+                const int64_t start_mtp = pindexStart->GetMedianTimePast();
+                if (start_mtp < state.data * 60) break;
 
-            // We need to count
-            const int count = Count(*this, pindexPrev);
-            if (count >= dep.optout_threshold) {
-                return {StateCode::FAILED, 0};
-            } else {
-                return {StateCode::LOCKED_IN, start_mtp/60 + dep.optout_delay_activation_mins};
+                // We need to count
+                const int count = Count(*this, pindexPrev);
+                if (count >= dep.optout_threshold) {
+                    return {StateCode::FAILED, 0};
+                } else {
+                    return {StateCode::LOCKED_IN, start_mtp/60 + dep.optout_delay_activation_mins};
+                }
+                break;
             }
-            break;
-        }
-        case StateCode::LOCKED_IN: {
-            // Progresses into ACTIVE provided activation height will have been reached.
-            std::optional<int> act_height = ActivationHeight(state, pindexPrev);
-            if (act_height) {
-                return {StateCode::ACTIVE, *act_height};
+            case StateCode::LOCKED_IN: {
+                // Progresses into ACTIVE provided activation height will have been reached.
+                std::optional<int> act_height = logic.ActivationHeight(state, pindexPrev);
+                if (act_height) {
+                    return {StateCode::ACTIVE, *act_height};
+                }
+                break;
             }
-            break;
+            case StateCode::FAILED:
+            case StateCode::ACTIVE: {
+                // Nothing happens, these are terminal states.
+                break;
+            }
         }
-        case StateCode::FAILED:
-        case StateCode::ACTIVE: {
-            // Nothing happens, these are terminal states.
-            break;
-        }
+        return state;
     }
-    return state;
-}
+};
+} // anonymous namespace
 
 std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLogic::State state, const CBlockIndex* pindexPrev) const
 {
@@ -324,7 +361,7 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
             while (pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
                 pindexPrev = pindexPrev->pprev;
             }
-            return pindexPrev->nHeight + dep.period;
+            return pindexPrev->nHeight + Period();
         }
     }
     return std::nullopt;
@@ -332,12 +369,12 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
 
 BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+    return ThresholdConditionChecker<BIPBlahStateLogic>::GetStateFor(*this, cache, pindexPrev);
 }
 
 int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+    return ThresholdConditionChecker<BIPBlahStateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
 // generic state transition functions
@@ -391,7 +428,6 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
 
     const typename Logic::State initialState = GetStateFor(logic, cache, pindexPrev);
 
-    // BIP 9 about state DEFINED: "The genesis block is by definition in this state for each deployment."
     if (initialState == logic.GenesisState) {
         return 0;
     }

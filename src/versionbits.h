@@ -158,19 +158,11 @@ public:
 
     /* State logic */
 
-    /** Is deployment enabled at all? */
-    bool Enabled() const { return dep.nStartTime != Consensus::BIP341Deployment::NEVER_ACTIVE; }
-
-    /** Configured to be always in the same state */
-    std::optional<State> SpecialState() const;
-
-    /* Normal transitions */
-    static constexpr State GenesisState = State::DEFINED;
-    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
-    State NextState(const State state, const CBlockIndex* pindexPrev) const;
-
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
     int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
+
+    /** Is deployment enabled at all? */
+    bool Enabled() const { return dep.nStartTime != Consensus::BIP341Deployment::NEVER_ACTIVE; }
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
@@ -263,14 +255,6 @@ public:
 
     /** Is deployment enabled at all? */
     bool Enabled() const { return dep.optin_start != Consensus::BIPBlahDeployment::NEVER_ACTIVE; }
-
-    /** Configured to be always in the same state */
-    std::optional<State> SpecialState() const;
-
-    /* Normal transitions */
-    static constexpr State GenesisState{StateCode::DEFINED, 0};
-    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
-    State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
     int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
