@@ -144,8 +144,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     BIP341DeploymentLogic::Cache cache;
 
     // Early exit if the versions don't signal sensibly for the deployment
-    if (!logic.VersionBitIsSet(ver_signal)) return;
-    if (logic.VersionBitIsSet(ver_nosignal)) return;
+    if (!VersionBits::IsBitSet(bit, ver_signal)) return;
+    if (VersionBits::IsBitSet(bit, ver_nosignal)) return;
     if (ver_nosignal < 0) return;
 
     // TOP_BITS should ensure version will be positive and meet min

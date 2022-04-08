@@ -13,13 +13,13 @@
 #include <optional>
 
 /** What block version to use for new blocks (pre versionbits) */
-static const int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
+static constexpr int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
 /** What bits to set in version for versionbits blocks */
-static const int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
+static constexpr int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
 /** What bitmask determines whether versionbits is in use */
-static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
+static constexpr int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
-static const int32_t VERSIONBITS_NUM_BITS = 29;
+static constexpr int32_t VERSIONBITS_NUM_BITS = 29;
 
 namespace VersionBits {
 /** Display status of an in-progress softfork */
@@ -40,6 +40,12 @@ struct Stats {
  * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
  */
 Stats GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks);
+
+inline bool IsBitSet(int bit, int32_t version)
+{
+    if (bit < 0 || bit >= VERSIONBITS_NUM_BITS) return false;
+    return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & (1 << bit)) != 0);
+}
 
 } // namespace VersionBits
 
@@ -77,22 +83,19 @@ public:
 
     /* State logic */
 
-    /** Is deployment enabled at all? */
-    bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
-
     /* Get state! */
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
     int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
+
+    /** Is deployment enabled at all? */
+    bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
     bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return IsActive(GetStateFor(cache, pindexPrev), pindexPrev); }
 
     /** Determine if deployment is certain */
-    bool IsCertain(State state) const
-    {
-        return state == State::ACTIVE || state == State::LOCKED_IN;
-    }
+    bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
 
     /** Get bit mask */
     uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
@@ -100,11 +103,8 @@ public:
     /** Given current state, should bit be set? */
     std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
     {
-        if ((state == State::STARTED) || (state == State::LOCKED_IN)) {
-            return dep.bit;
-        } else {
-            return std::nullopt;
-        }
+        if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
+        return std::nullopt;
     }
 
     std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
@@ -112,14 +112,8 @@ public:
         return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
-    /** Is the bit set? */
-    bool VersionBitIsSet(int32_t version) const
-    {
-        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
-    }
-
     /** Does this block count towards the threshold? */
-    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
 
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
@@ -203,14 +197,8 @@ public:
         return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
-    /** Is the bit set? */
-    bool VersionBitIsSet(int32_t version) const
-    {
-        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
-    }
-
     /** Does this block count towards the threshold? */
-    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
 
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
@@ -312,14 +300,8 @@ public:
         return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
-    /** Is the bit set? */
-    bool VersionBitIsSet(int32_t version) const
-    {
-        return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & Mask()) != 0);
-    }
-
     /** Does this block count towards the threshold? */
-    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBitIsSet(pindex->nVersion); }
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
 
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
