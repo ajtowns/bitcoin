@@ -5,6 +5,8 @@
 #include <versionbits.h>
 #include <consensus/params.h>
 
+#include <functional>
+
 namespace {
 template<typename Logic>
 int Count(const Logic& logic, const CBlockIndex* blockindex)
@@ -17,6 +19,45 @@ int Count(const Logic& logic, const CBlockIndex* blockindex)
         blockindex = blockindex->pprev;
     }
     return count;
+}
+
+/** Returns the numerical statistics of an in-progress softfork in the period including pindex
+ * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
+ */
+VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks)
+{
+    if (pindex == nullptr) return VersionBits::Stats{};
+
+    // Find how many blocks are in the current period
+    int blocks_in_period = 1 + (pindex->nHeight % period);
+
+    // Reset signalling_blocks
+    if (signalling_blocks) {
+        signalling_blocks->assign(blocks_in_period, false);
+    }
+
+    // Count from current block to beginning of period
+    int elapsed = 0;
+    int count = 0;
+    const CBlockIndex* currentIndex = pindex;
+    do {
+        ++elapsed;
+        --blocks_in_period;
+        if (condition(currentIndex)) {
+            ++count;
+            if (signalling_blocks) signalling_blocks->at(blocks_in_period) = true;
+        }
+        currentIndex = currentIndex->pprev;
+    } while(blocks_in_period > 0);
+
+    VersionBits::Stats stats;
+    stats.period = period;
+    stats.threshold = threshold;
+    stats.elapsed = elapsed;
+    stats.count = count;
+    stats.possible = (stats.period - stats.elapsed) >= (stats.threshold - stats.count);
+
+    return stats;
 }
 
 /**
@@ -148,6 +189,11 @@ int BIP9DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex*
     return ThresholdConditionChecker<BIP9StateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
+VersionBits::Stats BIP9DeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
+{
+    return ::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
+}
+
 // BIP 341
 
 namespace {
@@ -239,6 +285,11 @@ BIP341DeploymentLogic::State BIP341DeploymentLogic::GetStateFor(Cache& cache, co
 int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
     return ThresholdConditionChecker<BIP341StateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+}
+
+VersionBits::Stats BIP341DeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
+{
+    return ::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
 }
 
 // BIP Blah
@@ -377,6 +428,12 @@ int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockInd
     return ThresholdConditionChecker<BIPBlahStateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
+VersionBits::Stats BIPBlahDeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, const State& state, std::vector<bool>* signalling_blocks) const
+{
+    const int threshold = (state.code == StateCode::OPT_OUT || state.code == StateCode::OPT_OUT_WAIT) ? dep.optout_threshold : dep.optin_threshold;
+    return ::GetStateStatisticsFor(pindex, Period(), threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
+}
+
 // generic state transition functions
 
 template<typename Logic>
@@ -452,40 +509,3 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
     // Adjust the result because right now we point to the parent block.
     return pindexPrev->nHeight + 1;
 }
-
-VersionBits::Stats VersionBits::GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks)
-{
-    if (pindex == nullptr) return VersionBits::Stats{};
-
-    // Find how many blocks are in the current period
-    int blocks_in_period = 1 + (pindex->nHeight % period);
-
-    // Reset signalling_blocks
-    if (signalling_blocks) {
-        signalling_blocks->assign(blocks_in_period, false);
-    }
-
-    // Count from current block to beginning of period
-    int elapsed = 0;
-    int count = 0;
-    const CBlockIndex* currentIndex = pindex;
-    do {
-        ++elapsed;
-        --blocks_in_period;
-        if (condition(currentIndex)) {
-            ++count;
-            if (signalling_blocks) signalling_blocks->at(blocks_in_period) = true;
-        }
-        currentIndex = currentIndex->pprev;
-    } while(blocks_in_period > 0);
-
-    VersionBits::Stats stats;
-    stats.period = period;
-    stats.threshold = threshold;
-    stats.elapsed = elapsed;
-    stats.count = count;
-    stats.possible = (stats.period - stats.elapsed) >= (stats.threshold - stats.count);
-
-    return stats;
-}
-

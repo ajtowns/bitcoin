@@ -8,7 +8,6 @@
 #include <chain.h>
 #include <sync.h>
 
-#include <functional>
 #include <map>
 #include <optional>
 
@@ -36,15 +35,10 @@ struct Stats {
     bool possible;
 };
 
-/** Returns the numerical statistics of an in-progress softfork in the period including pindex
- * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
- */
-Stats GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks);
-
 inline bool IsBitSet(int bit, int32_t version)
 {
-    if (bit < 0 || bit >= VERSIONBITS_NUM_BITS) return false;
-    return (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & (1 << bit)) != 0);
+    return (bit >= 0) && (bit < VERSIONBITS_NUM_BITS)
+           && (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & (1 << bit)) != 0);
 }
 
 } // namespace VersionBits
@@ -118,10 +112,7 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
-    {
-        return VersionBits::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
-    }
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
 
     /** Activation height if known */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
@@ -195,10 +186,7 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
-    {
-        return VersionBits::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
-    }
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
 
     /** Activation height if known */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
@@ -290,11 +278,7 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, State& state, std::vector<bool>* signalling_blocks = nullptr) const
-    {
-        const int threshold = (state.code == StateCode::OPT_OUT || state.code == StateCode::OPT_OUT_WAIT) ? dep.optout_threshold : dep.optin_threshold;
-        return VersionBits::GetStateStatisticsFor(pindex, Period(), threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
-    }
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, const State& state, std::vector<bool>* signalling_blocks = nullptr) const;
 
     /** Activation height if known */
     std::optional<int> ActivationHeight(State state, const CBlockIndex* pindexPrev) const;
