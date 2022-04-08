@@ -7,6 +7,19 @@
 
 using ThresholdState = BIP9DeploymentLogic::State;
 
+template<typename Logic>
+static int Count(const Logic& logic, const CBlockIndex* blockindex)
+{
+    int count = 0;
+    for (int i = logic.Period(); i > 0; --i) {
+        if (logic.Condition(blockindex)) {
+            ++count;
+        }
+        blockindex = blockindex->pprev;
+    }
+    return count;
+}
+
 std::optional<ThresholdState> BIP9DeploymentLogic::SpecialState() const
 {
     // Check if this deployment is always active.
@@ -52,7 +65,7 @@ ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const 
                 return ThresholdState::FAILED;
             }
             // Otherwise, we need to count
-            const int count = ThreshCheck::Count(*this, pindexPrev);
+            const int count = Count(*this, pindexPrev);
             if (count >= nThreshold) {
                 return ThresholdState::LOCKED_IN;
             }
@@ -111,7 +124,7 @@ ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, cons
         }
         case ThresholdState::STARTED: {
             // We need to count
-            const int count = ThreshCheck::Count(*this, pindexPrev);
+            const int count = Count(*this, pindexPrev);
             if (count >= nThreshold) {
                 return ThresholdState::LOCKED_IN;
             } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
@@ -170,7 +183,7 @@ BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::NextState(const BIPBlahDep
         }
         case StateCode::OPT_IN: {
             // We need to count
-            const int count = ThreshCheck::Count(*this, pindexPrev);
+            const int count = Count(*this, pindexPrev);
             if (count >= dep.optin_threshold) {
                 return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
             } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
@@ -200,7 +213,7 @@ BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::NextState(const BIPBlahDep
             if (start_mtp < state.data * 60) break;
 
             // We need to count
-            const int count = ThreshCheck::Count(*this, pindexPrev);
+            const int count = Count(*this, pindexPrev);
             if (count >= dep.optout_threshold) {
                 return {StateCode::FAILED, 0};
             } else {
@@ -237,19 +250,6 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
         }
     }
     return std::nullopt;
-}
-
-template<typename Logic>
-int ThresholdConditionChecker<Logic>::Count(const Logic& logic, const CBlockIndex* blockindex)
-{
-    int count = 0;
-    for (int i = logic.Period(); i > 0; --i) {
-        if (logic.Condition(blockindex)) {
-            ++count;
-        }
-        blockindex = blockindex->pprev;
-    }
-    return count;
 }
 
 template<typename Logic>
@@ -294,12 +294,9 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
     return state;
 }
 
-template<typename Logic>
-typename ThresholdConditionChecker<Logic>::Stats ThresholdConditionChecker<Logic>::GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, int threshold, std::vector<bool>* signalling_blocks)
+VersionBits::Stats VersionBits::GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks)
 {
-    if (pindex == nullptr) return Stats{};
-
-    const int period = logic.Period();
+    if (pindex == nullptr) return VersionBits::Stats{};
 
     // Find how many blocks are in the current period
     int blocks_in_period = 1 + (pindex->nHeight % period);
@@ -316,14 +313,14 @@ typename ThresholdConditionChecker<Logic>::Stats ThresholdConditionChecker<Logic
     do {
         ++elapsed;
         --blocks_in_period;
-        if (logic.Condition(currentIndex)) {
+        if (condition(currentIndex)) {
             ++count;
             if (signalling_blocks) signalling_blocks->at(blocks_in_period) = true;
         }
         currentIndex = currentIndex->pprev;
     } while(blocks_in_period > 0);
 
-    Stats stats;
+    VersionBits::Stats stats;
     stats.period = period;
     stats.threshold = threshold;
     stats.elapsed = elapsed;

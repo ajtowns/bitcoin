@@ -195,7 +195,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     const ThresholdState exp_state = logic.GetStateFor(cache, prev);
 
     // get statistics from end of previous period, then reset
-    ThresholdConditionChecker<BIP341DeploymentLogic>::Stats last_stats;
+    VersionBits::Stats last_stats;
     last_stats.period = period;
     last_stats.threshold = threshold;
     last_stats.count = last_stats.elapsed = 0;

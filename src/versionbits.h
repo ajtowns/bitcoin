@@ -8,6 +8,7 @@
 #include <chain.h>
 #include <sync.h>
 
+#include <functional>
 #include <map>
 #include <optional>
 
@@ -19,6 +20,28 @@ static const int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
 static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const int32_t VERSIONBITS_NUM_BITS = 29;
+
+namespace VersionBits {
+/** Display status of an in-progress softfork */
+struct Stats {
+    /** Length of blocks of the signalling period */
+    int period;
+    /** Number of blocks with the version bit set required to activate the softfork */
+    int threshold;
+    /** Number of blocks elapsed since the beginning of the current period */
+    int elapsed;
+    /** Number of blocks with the version bit set since the beginning of the current period */
+    int count;
+    /** False if there are not enough blocks left in this period to pass activation threshold */
+    bool possible;
+};
+
+/** Returns the numerical statistics of an in-progress softfork in the period including pindex
+ * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
+ */
+Stats GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks);
+
+} // namespace VersionBits
 
 /**
  * Class that implements BIP9-style threshold logic, and caches results.
@@ -45,22 +68,6 @@ private:
     static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
 
 public:
-    /** Display status of an in-progress softfork */
-    struct Stats {
-        /** Length of blocks of the signalling period */
-        int period;
-        /** Number of blocks with the version bit set required to activate the softfork */
-        int threshold;
-        /** Number of blocks elapsed since the beginning of the current period */
-        int elapsed;
-        /** Number of blocks with the version bit set since the beginning of the current period */
-        int count;
-        /** False if there are not enough blocks left in this period to pass activation threshold */
-        bool possible;
-    };
-
-    /** Counts how many of the previous Period() blocks signalled */
-    static int Count(const Logic& logic, const CBlockIndex* blockindex);
 
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
@@ -69,10 +76,6 @@ public:
     /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
 
-    /** Returns the numerical statistics of an in-progress softfork in the period including pindex
-     * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
-     */
-    static Stats GetStateStatisticsFor(const Logic& logic, const CBlockIndex* pindex, int threshold, std::vector<bool>* signalling_blocks = nullptr);
 };
 
 class BIP9DeploymentLogic
@@ -164,9 +167,9 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.threshold, signalling_blocks);
+        return VersionBits::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
     }
 
     /** Activation height if known */
@@ -256,9 +259,9 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.threshold, signalling_blocks);
+        return VersionBits::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
     }
 
     /** Activation height if known */
@@ -366,9 +369,10 @@ public:
     /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
-    ThreshCheck::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const
+    VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, State& state, std::vector<bool>* signalling_blocks = nullptr) const
     {
-        return ThreshCheck::GetStateStatisticsFor(*this, pindex, dep.optin_threshold, signalling_blocks);
+        const int threshold = (state.code == StateCode::OPT_OUT || state.code == StateCode::OPT_OUT_WAIT) ? dep.optout_threshold : dep.optin_threshold;
+        return VersionBits::GetStateStatisticsFor(pindex, Period(), threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
     }
 
     /** Activation height if known */
