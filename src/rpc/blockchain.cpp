@@ -1097,13 +1097,13 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
 
     const typename Logic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
 
-    const std::optional<int> signal_bit = logic.VersionBitToSet(current_state);
+    const bool signalling = logic.ShouldSetVersionBit(current_state);
 
     const auto& dep = logic.Dep();
 
     // BIP9 parameters
-    if (signal_bit) {
-        bip9.pushKV("bit", *signal_bit);
+    if (signalling) {
+        bip9.pushKV("bit", logic.Bit());
     }
     bip9.pushKV("start_time", dep.nStartTime);
     bip9.pushKV("timeout", dep.nTimeout);
@@ -1117,7 +1117,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
     bip9.pushKV("status_next", get_state_name(next_state));
 
     // BIP9 signalling status, if applicable
-    if (signal_bit) {
+    if (signalling) {
         UniValue statsUV(UniValue::VOBJ);
         std::vector<bool> signals;
         auto statsStruct{logic.GetStateStatisticsFor(blockindex, &signals)};

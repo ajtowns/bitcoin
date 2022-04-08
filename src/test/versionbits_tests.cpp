@@ -313,9 +313,6 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     // Check min_activation_height is on a retarget boundary
     BOOST_REQUIRE_EQUAL(min_activation_height % period, 0U);
 
-    const uint32_t bitmask{logic.Mask()};
-    BOOST_CHECK_EQUAL(bitmask, uint32_t{1} << bit);
-
     // In the first chain, test that the bit is set by CBV until it has failed.
     // In the second chain, test the bit is set by CBV while STARTED and
     // LOCKED-IN, and then no longer set while ACTIVE.
@@ -460,14 +457,16 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     // ACTIVE and FAILED states in roughly the way we expect
     for (const auto& chain_name : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET, CBaseChainParams::SIGNET, CBaseChainParams::REGTEST}) {
         const auto chainParams = CreateChainParams(*m_node.args, chain_name);
-        uint32_t chain_all_vbits{0};
+        int32_t chain_all_vbits{0};
         vbcache.ForEachDeployment_nocache(chainParams->GetConsensus(), [&](auto pos, const auto& logic) {
             // Check that no bits are re-used (within the same chain). This is
             // disallowed because the transition to FAILED (on timeout) does
             // not take precedence over STARTED/LOCKED_IN. So all softforks on
             // the same bit might overlap, even when non-overlapping start-end
             // times are picked.
-            const uint32_t dep_mask{logic.Mask()};
+            int bit{logic.Bit()};
+            const int32_t dep_mask{VersionBits::Mask(bit)};
+            if (!dep_mask) BOOST_CHECK_EQUAL(bit, -1);
             BOOST_CHECK(!(chain_all_vbits & dep_mask));
             chain_all_vbits |= dep_mask;
 

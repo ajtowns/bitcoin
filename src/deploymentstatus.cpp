@@ -14,8 +14,8 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
 {
     int32_t nVersion = VERSIONBITS_TOP_BITS;
     ForEachDeployment(params, [&](auto pos, const auto& logic, auto& cache) {
-        if (logic.VersionBitToSet(logic.GetStateFor(cache, pindexPrev))) {
-            nVersion |= logic.Mask();
+        if (auto x = logic.ShouldSetVersionBit(logic.GetStateFor(cache, pindexPrev))) {
+            nVersion |= VersionBits::Mask(logic.Bit());
         }
     });
 

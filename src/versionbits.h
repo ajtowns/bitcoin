@@ -35,9 +35,15 @@ struct Stats {
     bool possible;
 };
 
+inline int32_t Mask(int bit)
+{
+    if (bit >= 0 && bit < VERSIONBITS_NUM_BITS) return int32_t{1} << bit;
+    return 0;
+}
+
 inline bool IsBitSet(int bit, int32_t version)
 {
-    return (bit >= 0) && (bit < VERSIONBITS_NUM_BITS)
+    return (bit >= 0 && bit < VERSIONBITS_NUM_BITS)
            && (((version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (version & (int32_t{1} << bit)) != 0);
 }
 
@@ -82,10 +88,9 @@ public:
     bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
     /** Should we be signalling on a bit? */
-    std::optional<int> VersionBitToSet(State state) const
+    bool ShouldSetVersionBit(State state) const
     {
-        if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
-        return std::nullopt;
+        return (state == State::STARTED) || (state == State::LOCKED_IN);
     }
 
     /** Determine if activation is certain */
@@ -94,8 +99,8 @@ public:
     /** Determine if deployment is enforced */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
 
-    /** Get bit mask */
-    uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+    /** Get bit */
+    int Bit() const { return dep.bit; }
 
     /** Does this block count towards the threshold? */
     virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
@@ -152,14 +157,13 @@ public:
     /** Determine if deployment is certain */
     bool IsCertain(State state) const { return state == State::ACTIVE || state == State::LOCKED_IN; }
 
-    /** Get bit mask */
-    uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+    /** Get bit */
+    int Bit() const { return dep.bit; }
 
-    /** Given current state, should bit be set? */
-    std::optional<int> VersionBitToSet(State state) const
+    /** Should we be signalling on a bit? */
+    bool ShouldSetVersionBit(State state) const
     {
-        if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
-        return std::nullopt;
+        return (state == State::STARTED) || (state == State::LOCKED_IN);
     }
 
     /** Does this block count towards the threshold? */
@@ -232,14 +236,13 @@ public:
     /** Determine if deployment is certain */
     bool IsCertain(State state) const { return state.code == StateCode::ACTIVE || state.code == StateCode::LOCKED_IN; }
 
-    /** Get bit mask */
-    uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
+    /** Get bit */
+    int Bit() const { return dep.bit; }
 
-    /** Given current state, should bit be set? */
-    std::optional<int> VersionBitToSet(State state) const
+    /** Should we be signalling on a bit? */
+    bool ShouldSetVersionBit(State state) const
     {
-        if ((state.code == StateCode::OPT_IN) || (state.code == StateCode::LOCKED_IN)) return dep.bit;
-        return std::nullopt;
+        return (state.code == StateCode::OPT_IN) || (state.code == StateCode::LOCKED_IN);
     }
 
     /** Does this block count towards the threshold? */

@@ -1854,7 +1854,7 @@ private:
         {
             return pindex->nHeight >= m_params.MinBIP9WarningHeight &&
                    BIP9DeploymentLogic::Condition(pindex) &&
-                   (m_vbcache.ComputeBlockVersion(pindex->pprev, m_params) & Mask()) == 0;
+                   !VersionBits::IsBitSet(/*bit=*/ m_dep.bit, /*version=*/ m_vbcache.ComputeBlockVersion(pindex->pprev, m_params));
         }
     };
 
