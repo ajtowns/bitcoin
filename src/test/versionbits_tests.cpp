@@ -270,7 +270,7 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     // Clear the cache everytime
     versionbitscache.Clear();
 
-    const auto& dep = logic.Dep();
+    const auto& dep = logic.dep;
     const int64_t bit = dep.bit;
     const int64_t nStartTime = dep.nStartTime;
     const int64_t nTimeout = dep.nTimeout;

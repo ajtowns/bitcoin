@@ -106,19 +106,19 @@ public:
     using State = BIP9DeploymentLogic::State;
     using Cache = BIP9DeploymentLogic::Cache;
 
-    int Period() const { return logic.Dep().period; }
+    int Period() const { return logic.dep.period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     /** Configured to be always in the same state */
     std::optional<State> SpecialState() const
     {
         // Check if this deployment is always active.
-        if (logic.Dep().nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
+        if (logic.dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
             return State::ACTIVE;
         }
 
         // Check if this deployment is never active.
-        if (logic.Dep().nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
+        if (logic.dep.nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
             return State::FAILED;
         }
 
@@ -130,7 +130,7 @@ public:
 
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
     {
-        if (pindexPrev->GetMedianTimePast() < logic.Dep().nStartTime) {
+        if (pindexPrev->GetMedianTimePast() < logic.dep.nStartTime) {
             return GenesisState;
         }
 
@@ -139,9 +139,9 @@ public:
 
     State NextState(const State state, const CBlockIndex* pindexPrev) const
     {
-        const int nThreshold{logic.Dep().threshold};
-        const int64_t nTimeStart{logic.Dep().nStartTime};
-        const int64_t nTimeTimeout{logic.Dep().nTimeout};
+        const int nThreshold{logic.dep.threshold};
+        const int64_t nTimeStart{logic.dep.nStartTime};
+        const int64_t nTimeTimeout{logic.dep.nTimeout};
 
         switch (state) {
             case State::DEFINED: {
@@ -206,18 +206,18 @@ public:
     using State = BIP341DeploymentLogic::State;
     using Cache = BIP341DeploymentLogic::Cache;
 
-    int Period() const { return logic.Dep().period; }
+    int Period() const { return logic.dep.period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     std::optional<State> SpecialState() const
     {
         // Check if this deployment is always active.
-        if (logic.Dep().nStartTime == Consensus::BIP341Deployment::ALWAYS_ACTIVE) {
+        if (logic.dep.nStartTime == Consensus::BIP341Deployment::ALWAYS_ACTIVE) {
             return State::ACTIVE;
         }
 
         // Check if this deployment is never active.
-        if (logic.Dep().nStartTime == Consensus::BIP341Deployment::NEVER_ACTIVE) {
+        if (logic.dep.nStartTime == Consensus::BIP341Deployment::NEVER_ACTIVE) {
             return State::FAILED;
         }
 
@@ -228,7 +228,7 @@ public:
 
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
     {
-        if (pindexPrev->GetMedianTimePast() < logic.Dep().nStartTime) {
+        if (pindexPrev->GetMedianTimePast() < logic.dep.nStartTime) {
             return GenesisState;
         }
 
@@ -237,10 +237,10 @@ public:
 
     State NextState(const State state, const CBlockIndex* pindexPrev) const
     {
-        const int nThreshold{logic.Dep().threshold};
-        const int min_activation_height{logic.Dep().min_activation_height};
-        const int64_t nTimeStart{logic.Dep().nStartTime};
-        const int64_t nTimeTimeout{logic.Dep().nTimeout};
+        const int nThreshold{logic.dep.threshold};
+        const int min_activation_height{logic.dep.min_activation_height};
+        const int64_t nTimeStart{logic.dep.nStartTime};
+        const int64_t nTimeTimeout{logic.dep.nTimeout};
 
         switch (state) {
             case State::DEFINED: {
@@ -305,18 +305,18 @@ public:
     using Cache = BIPBlahDeploymentLogic::Cache;
     using StateCode = BIPBlahDeploymentLogic::StateCode;
 
-    int Period() const { return logic.Dep().period; }
+    int Period() const { return logic.dep.period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     std::optional<State> SpecialState() const
     {
         // Check if this deployment is always active.
-        if (logic.Dep().optin_start == Consensus::BIPBlahDeployment::ALWAYS_ACTIVE) {
+        if (logic.dep.optin_start == Consensus::BIPBlahDeployment::ALWAYS_ACTIVE) {
             return {{StateCode::ACTIVE, 0}};
         }
 
         // Check if this deployment is never active.
-        if (logic.Dep().optin_start == Consensus::BIPBlahDeployment::NEVER_ACTIVE) {
+        if (logic.dep.optin_start == Consensus::BIPBlahDeployment::NEVER_ACTIVE) {
             return {{StateCode::FAILED, 0}};
         }
 
@@ -327,7 +327,7 @@ public:
 
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
     {
-        if (pindexPrev->GetMedianTimePast() < logic.Dep().optin_start) {
+        if (pindexPrev->GetMedianTimePast() < logic.dep.optin_start) {
             return GenesisState;
         }
 
@@ -336,7 +336,7 @@ public:
 
     State NextState(const State state, const CBlockIndex* pindexPrev) const
     {
-        const auto& dep = logic.Dep();
+        const auto& dep = logic.dep;
 
         switch (state.code) {
             case StateCode::DEFINED: {
@@ -485,9 +485,7 @@ int ThresholdConditionChecker<StateLogic>::GetStateSinceHeightFor(const StateLog
 
     const typename StateLogic::State initialState = GetStateFor(logic, cache, pindexPrev);
 
-    if (initialState == logic.GenesisState) {
-        return 0;
-    }
+    if (initialState == logic.GenesisState) return 0;
 
     const int nPeriod{logic.Period()};
 

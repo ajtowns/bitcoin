@@ -1099,16 +1099,14 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
 
     const bool signalling = logic.ShouldSetVersionBit(current_state);
 
-    const auto& dep = logic.Dep();
-
     // BIP9 parameters
     if (signalling) {
         bip9.pushKV("bit", logic.Bit());
     }
-    bip9.pushKV("start_time", dep.nStartTime);
-    bip9.pushKV("timeout", dep.nTimeout);
+    bip9.pushKV("start_time", logic.dep.nStartTime);
+    bip9.pushKV("timeout", logic.dep.nTimeout);
     if constexpr (std::is_same_v<Logic, BIP341DeploymentLogic>) {
-        bip9.pushKV("min_activation_height", dep.min_activation_height);
+        bip9.pushKV("min_activation_height", logic.dep.min_activation_height);
     }
 
     // BIP9 status

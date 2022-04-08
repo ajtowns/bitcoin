@@ -72,18 +72,14 @@ public:
     // will either be nullptr or a block with (height + 1) % period == 0.
     using Cache = std::map<const CBlockIndex*, State>;
 
-private:
-    const Params& dep;
-
-public:
-    explicit BIP9DeploymentLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
-
-    const Consensus::BIP9Deployment& Dep() const { return dep; }
+public: /* Implementation */
+    /** Does this block count towards the threshold? */
+    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
 
     /* State machine */
-
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
+public: /* Results */
     /** Is deployment enabled at all? */
     bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
@@ -102,10 +98,8 @@ public:
     /** Get bit */
     int Bit() const { return dep.bit; }
 
-    /** Does this block count towards the threshold? */
-    virtual bool Condition(const CBlockIndex* pindex) const { return VersionBits::IsBitSet(dep.bit, pindex->nVersion); }
-
 public: /* Information */
+    /** At what height did we transition into this state */
     int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
     /** Activation height if known */
@@ -124,6 +118,10 @@ public: /* Information */
      * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
      */
     VersionBits::Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
+
+public: /* params and constructor */
+    const Params& dep;
+    explicit BIP9DeploymentLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 };
 
 
@@ -132,16 +130,12 @@ class BIP341DeploymentLogic
 public:
     using Params = Consensus::BIP341Deployment;
 
-private:
     const Params& dep;
 
-public:
     using State = BIP9DeploymentLogic::State;
     using Cache = std::map<const CBlockIndex*, State>;
 
     explicit BIP341DeploymentLogic(const Consensus::BIP341Deployment& dep) : dep{dep} {}
-
-    const Consensus::BIP341Deployment& Dep() const { return dep; }
 
     /* State logic */
 
@@ -191,15 +185,14 @@ public:
 
 class BIPBlahDeploymentLogic
 {
-public:
-    using Params = Consensus::BIPBlahDeployment;
-
 private:
-    const Params& dep;
-
     static int height(const CBlockIndex* pindexPrev) { return pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1; }
 
 public:
+    using Params = Consensus::BIPBlahDeployment;
+
+    const Params& dep;
+
     enum class StateCode : int64_t {
         DEFINED,
         OPT_IN,
@@ -219,8 +212,6 @@ public:
     using Cache = std::map<const CBlockIndex*, State>;
 
     explicit BIPBlahDeploymentLogic(const Consensus::BIPBlahDeployment& dep) : dep{dep} {}
-
-    const Consensus::BIPBlahDeployment& Dep() const { return dep; }
 
     /* State logic */
 
