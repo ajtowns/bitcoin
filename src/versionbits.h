@@ -43,41 +43,6 @@ Stats GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold
 
 } // namespace VersionBits
 
-/**
- * Class that implements BIP9-style threshold logic, and caches results.
- */
-template<typename Logic>
-class ThresholdConditionChecker
-{
-private:
-    // Static checks to give cleaner errors if the "Logic" class is broken */
-
-    // need to be able to determine the period
-    static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
-
-    // need to be told whether a block signals or not
-    static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
-
-    // need to know the genesis state to kick things off
-    static_assert(std::is_same_v<const typename Logic::State, decltype(Logic::GenesisState)>, "missing Logic::GenesisState");
-
-    // state transition logic:
-    // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
-    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
-    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
-    static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
-
-public:
-
-    /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
-     *  Caches state from first block of period. */
-    static typename Logic::State GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
-
-    /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
-    static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
-
-};
-
 class BIP9DeploymentLogic
 {
 public:
@@ -85,7 +50,6 @@ public:
 
 private:
     const Params& dep;
-    using ThreshCheck = ThresholdConditionChecker<BIP9DeploymentLogic>;
 
 public:
     /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
@@ -124,8 +88,8 @@ public:
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
     State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
-    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateFor(*this, cache, pindexPrev); }
-    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev); }
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
+    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
@@ -175,9 +139,9 @@ public:
     /** Activation height if known */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        const State state{ThreshCheck::GetStateFor(*this, cache, pindexPrev)};
+        const State state{GetStateFor(cache, pindexPrev)};
         if (IsCertain(state)) {
-            const int since{ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev)};
+            const int since{GetStateSinceHeightFor(cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
             if (state == BIP9DeploymentLogic::State::LOCKED_IN) return since + Period();
         }
@@ -195,7 +159,6 @@ public:
 
 private:
     const Params& dep;
-    using ThreshCheck = ThresholdConditionChecker<BIP341DeploymentLogic>;
 
 public:
     using State = BIP9DeploymentLogic::State;
@@ -219,8 +182,8 @@ public:
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
     State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
-    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateFor(*this, cache, pindexPrev); }
-    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev); }
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
+    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
@@ -267,9 +230,9 @@ public:
     /** Activation height if known */
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        const State state{ThreshCheck::GetStateFor(*this, cache, pindexPrev)};
+        const State state{GetStateFor(cache, pindexPrev)};
         if (IsCertain(state)) {
-            const int since{ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev)};
+            const int since{GetStateSinceHeightFor(cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
             if (state == BIP9DeploymentLogic::State::LOCKED_IN) {
                 return std::max(since + Period(), dep.min_activation_height);
@@ -288,7 +251,6 @@ public:
 
 private:
     const Params& dep;
-    using ThreshCheck = ThresholdConditionChecker<BIPBlahDeploymentLogic>;
 
     static int height(const CBlockIndex* pindexPrev) { return pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1; }
 
@@ -329,8 +291,8 @@ public:
     std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
     State NextState(const State state, const CBlockIndex* pindexPrev) const;
 
-    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateFor(*this, cache, pindexPrev); }
-    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const { return ThreshCheck::GetStateSinceHeightFor(*this, cache, pindexPrev); }
+    State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
+    int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state.code == StateCode::ACTIVE && state.data <= height(pindexPrev); }
@@ -379,7 +341,7 @@ public:
     std::optional<int> ActivationHeight(State state, const CBlockIndex* pindexPrev) const;
     std::optional<int> ActivationHeight(Cache& cache, const CBlockIndex* pindexPrev) const
     {
-        return ActivationHeight(ThreshCheck::GetStateFor(*this, cache, pindexPrev), pindexPrev);
+        return ActivationHeight(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
     static void ClearCache(Cache& cache) { cache.clear(); }

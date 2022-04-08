@@ -7,8 +7,9 @@
 
 using ThresholdState = BIP9DeploymentLogic::State;
 
+namespace {
 template<typename Logic>
-static int Count(const Logic& logic, const CBlockIndex* blockindex)
+int Count(const Logic& logic, const CBlockIndex* blockindex)
 {
     int count = 0;
     for (int i = logic.Period(); i > 0; --i) {
@@ -18,6 +19,53 @@ static int Count(const Logic& logic, const CBlockIndex* blockindex)
         blockindex = blockindex->pprev;
     }
     return count;
+}
+
+/**
+ * Class that implements BIP9-style threshold logic, and caches results.
+ */
+template<typename Logic>
+class ThresholdConditionChecker
+{
+private:
+    // Static checks to give cleaner errors if the "Logic" class is broken */
+
+    // need to be able to determine the period
+    static_assert(std::is_invocable_r_v<int, decltype(&Logic::Period), const Logic&>, "missing Logic::Period");
+
+    // need to be told whether a block signals or not
+    static_assert(std::is_invocable_r_v<bool, decltype(&Logic::Condition), const Logic&, const CBlockIndex*>, "missing Logic::Condition");
+
+    // need to know the genesis state to kick things off
+    static_assert(std::is_same_v<const typename Logic::State, decltype(Logic::GenesisState)>, "missing Logic::GenesisState");
+
+    // state transition logic:
+    // SpecialState (always the same), TrivialState (doesn't depend on earlier blocks) and NextState (conditional on earlier blocks)
+    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::SpecialState), const Logic&>, "missing Logic::SpecialState");
+    static_assert(std::is_invocable_r_v<std::optional<typename Logic::State>, decltype(&Logic::TrivialState), const Logic&, const CBlockIndex*>, "missing Logic::TrivialState");
+    static_assert(std::is_invocable_r_v<typename Logic::State, decltype(&Logic::NextState), const Logic&, typename Logic::State, const CBlockIndex*>, "missing Logic::NextState");
+
+public:
+    /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
+     *  Caches state from first block of period. */
+    static typename Logic::State GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+
+    /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
+    static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
+};
+
+} // anonymous namespace
+
+// BIP 9
+
+BIP9DeploymentLogic::State BIP9DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+}
+
+int BIP9DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
 std::optional<ThresholdState> BIP9DeploymentLogic::SpecialState() const
@@ -84,6 +132,18 @@ ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const 
     return state;
 }
 
+// BIP 341
+
+BIP341DeploymentLogic::State BIP341DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+}
+
+int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+}
+
 std::optional<ThresholdState> BIP341DeploymentLogic::SpecialState() const
 {
     // Check if this deployment is always active.
@@ -146,6 +206,18 @@ ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, cons
         }
     }
     return state;
+}
+
+// BIP Blah
+
+BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+}
+
+int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
 std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::SpecialState() const
@@ -363,6 +435,3 @@ int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic,
     return pindexPrev->nHeight + 1;
 }
 
-template class ThresholdConditionChecker<BIP9DeploymentLogic>;
-template class ThresholdConditionChecker<BIP341DeploymentLogic>;
-template class ThresholdConditionChecker<BIPBlahDeploymentLogic>;
