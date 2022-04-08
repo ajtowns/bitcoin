@@ -8,8 +8,8 @@
 #include <functional>
 
 namespace {
-template<typename Logic>
-int Count(const Logic& logic, const CBlockIndex* blockindex)
+template<typename StateLogic>
+int Count(const StateLogic& logic, const CBlockIndex* blockindex)
 {
     int count = 0;
     for (int i = logic.Period(); i > 0; --i) {
@@ -106,7 +106,7 @@ public:
     using State = BIP9DeploymentLogic::State;
     using Cache = BIP9DeploymentLogic::Cache;
 
-    int Period() const { return logic.Period(); }
+    int Period() const { return logic.Dep().period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     /** Configured to be always in the same state */
@@ -191,7 +191,7 @@ int BIP9DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex*
 
 VersionBits::Stats BIP9DeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
 {
-    return ::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
+    return ::GetStateStatisticsFor(pindex, dep.period, dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
 }
 
 // BIP 341
@@ -206,7 +206,7 @@ public:
     using State = BIP341DeploymentLogic::State;
     using Cache = BIP341DeploymentLogic::Cache;
 
-    int Period() const { return logic.Period(); }
+    int Period() const { return logic.Dep().period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     std::optional<State> SpecialState() const
@@ -289,7 +289,7 @@ int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockInde
 
 VersionBits::Stats BIP341DeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks) const
 {
-    return ::GetStateStatisticsFor(pindex, Period(), dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
+    return ::GetStateStatisticsFor(pindex, dep.period, dep.threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
 }
 
 // BIP Blah
@@ -305,7 +305,7 @@ public:
     using Cache = BIPBlahDeploymentLogic::Cache;
     using StateCode = BIPBlahDeploymentLogic::StateCode;
 
-    int Period() const { return logic.Period(); }
+    int Period() const { return logic.Dep().period; }
     bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
 
     std::optional<State> SpecialState() const
@@ -412,7 +412,7 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
             while (pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
                 pindexPrev = pindexPrev->pprev;
             }
-            return pindexPrev->nHeight + Period();
+            return pindexPrev->nHeight + dep.period;
         }
     }
     return std::nullopt;
@@ -431,13 +431,13 @@ int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockInd
 VersionBits::Stats BIPBlahDeploymentLogic::GetStateStatisticsFor(const CBlockIndex* pindex, const State& state, std::vector<bool>* signalling_blocks) const
 {
     const int threshold = (state.code == StateCode::OPT_OUT || state.code == StateCode::OPT_OUT_WAIT) ? dep.optout_threshold : dep.optin_threshold;
-    return ::GetStateStatisticsFor(pindex, Period(), threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
+    return ::GetStateStatisticsFor(pindex, dep.period, threshold, [&](const CBlockIndex* p){return Condition(p);}, signalling_blocks);
 }
 
 // generic state transition functions
 
-template<typename Logic>
-typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
+template<typename StateLogic>
+typename StateLogic::State ThresholdConditionChecker<StateLogic>::GetStateFor(const StateLogic& logic, typename StateLogic::Cache& cache, const CBlockIndex* pindexPrev)
 {
     if (auto maybe_state = logic.SpecialState()) return *maybe_state;
 
@@ -466,7 +466,7 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
 
     // At this point, cache[pindexPrev] is known
     assert(cache.count(pindexPrev));
-    typename Logic::State state = cache[pindexPrev];
+    typename StateLogic::State state = cache[pindexPrev];
 
     // Now walk forward and compute the state of descendants of pindexPrev
     while (!vToCompute.empty()) {
@@ -478,12 +478,12 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
     return state;
 }
 
-template<typename Logic>
-int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
+template<typename StateLogic>
+int ThresholdConditionChecker<StateLogic>::GetStateSinceHeightFor(const StateLogic& logic, typename StateLogic::Cache& cache, const CBlockIndex* pindexPrev)
 {
     if (logic.SpecialState()) return 0;
 
-    const typename Logic::State initialState = GetStateFor(logic, cache, pindexPrev);
+    const typename StateLogic::State initialState = GetStateFor(logic, cache, pindexPrev);
 
     if (initialState == logic.GenesisState) {
         return 0;

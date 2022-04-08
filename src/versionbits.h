@@ -65,15 +65,14 @@ public:
         FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
     };
 
-    // A map that caches the state for blocks whose height is a multiple of Period().
+    // A map that caches the state for blocks whose height is a multiple of the period
     // The map is indexed by the block's parent, however, so all keys in the map
-    // will either be nullptr or a block with (height + 1) % Period() == 0.
+    // will either be nullptr or a block with (height + 1) % period == 0.
     using Cache = std::map<const CBlockIndex*, State>;
 
     explicit BIP9DeploymentLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
     const Consensus::BIP9Deployment& Dep() const { return dep; }
-    int Period() const { return dep.period; }
 
     /* State logic */
 
@@ -120,7 +119,7 @@ public:
         if (IsCertain(state)) {
             const int since{GetStateSinceHeightFor(cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
-            if (state == BIP9DeploymentLogic::State::LOCKED_IN) return since + Period();
+            if (state == BIP9DeploymentLogic::State::LOCKED_IN) return since + dep.period;
         }
         return std::nullopt;
     }
@@ -144,7 +143,6 @@ public:
     explicit BIP341DeploymentLogic(const Consensus::BIP341Deployment& dep) : dep{dep} {}
 
     const Consensus::BIP341Deployment& Dep() const { return dep; }
-    int Period() const { return dep.period; }
 
     /* State logic */
 
@@ -194,7 +192,7 @@ public:
             const int since{GetStateSinceHeightFor(cache, pindexPrev)};
             if (state == BIP9DeploymentLogic::State::ACTIVE) return since;
             if (state == BIP9DeploymentLogic::State::LOCKED_IN) {
-                return std::max(since + Period(), dep.min_activation_height);
+                return std::max(since + dep.period, dep.min_activation_height);
             }
         }
         return std::nullopt;
@@ -235,7 +233,6 @@ public:
     explicit BIPBlahDeploymentLogic(const Consensus::BIPBlahDeployment& dep) : dep{dep} {}
 
     const Consensus::BIPBlahDeployment& Dep() const { return dep; }
-    int Period() const { return dep.period; }
 
     /* State logic */
 
