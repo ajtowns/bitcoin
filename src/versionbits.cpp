@@ -53,96 +53,102 @@ public:
     /** Returns the height since when the State has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     static int GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev);
 };
-
 } // anonymous namespace
 
 // BIP 9
 
+class BIP9StateLogic {
+public:
+    const BIP9DeploymentLogic& logic;
+
+    /* implicit */ BIP9StateLogic(const BIP9DeploymentLogic& logic) : logic{logic} { }
+
+    using State = BIP9DeploymentLogic::State;
+    using Cache = BIP9DeploymentLogic::Cache;
+
+    int Period() const { return logic.Period(); }
+    bool Condition(const CBlockIndex* block) const { return logic.Condition(block); }
+
+    /** Configured to be always in the same state */
+    std::optional<State> SpecialState() const
+    {
+        // Check if this deployment is always active.
+        if (logic.Dep().nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
+            return ThresholdState::ACTIVE;
+        }
+
+        // Check if this deployment is never active.
+        if (logic.Dep().nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
+            return ThresholdState::FAILED;
+        }
+
+        return std::nullopt;
+    }
+
+    /* Normal transitions */
+    static constexpr State GenesisState = State::DEFINED;
+
+    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const
+    {
+        if (pindexPrev->GetMedianTimePast() < logic.Dep().nStartTime) {
+            return ThresholdState::DEFINED;
+        }
+
+        return std::nullopt;
+    }
+
+    State NextState(const State state, const CBlockIndex* pindexPrev) const
+    {
+        const int nThreshold{logic.Dep().threshold};
+        const int64_t nTimeStart{logic.Dep().nStartTime};
+        const int64_t nTimeTimeout{logic.Dep().nTimeout};
+
+        switch (state) {
+            case ThresholdState::DEFINED: {
+                if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                    return ThresholdState::FAILED;
+                } else if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
+                    return ThresholdState::STARTED;
+                }
+                break;
+            }
+            case ThresholdState::STARTED: {
+                // If after the timeout, automatic fail
+                if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                    return ThresholdState::FAILED;
+                }
+                // Otherwise, we need to count
+                const int count = Count(*this, pindexPrev);
+                if (count >= nThreshold) {
+                    return ThresholdState::LOCKED_IN;
+                }
+                break;
+            }
+            case ThresholdState::LOCKED_IN: {
+                // Always progresses into ACTIVE
+                return ThresholdState::ACTIVE;
+            }
+            case ThresholdState::FAILED:
+            case ThresholdState::ACTIVE: {
+                // Nothing happens, these are terminal states.
+                break;
+            }
+        }
+        return state;
+    }
+};
+
 BIP9DeploymentLogic::State BIP9DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+    return ThresholdConditionChecker<BIP9StateLogic>::GetStateFor(*this, cache, pindexPrev);
 }
 
 int BIP9DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
 {
-    return ThresholdConditionChecker<BIP9DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
-}
-
-std::optional<ThresholdState> BIP9DeploymentLogic::SpecialState() const
-{
-    // Check if this deployment is always active.
-    if (dep.nStartTime == Consensus::BIP9Deployment::ALWAYS_ACTIVE) {
-        return ThresholdState::ACTIVE;
-    }
-
-    // Check if this deployment is never active.
-    if (dep.nStartTime == Consensus::BIP9Deployment::NEVER_ACTIVE) {
-        return ThresholdState::FAILED;
-    }
-
-    return std::nullopt;
-}
-
-std::optional<ThresholdState> BIP9DeploymentLogic::TrivialState(const CBlockIndex* pindexPrev) const
-{
-    if (pindexPrev->GetMedianTimePast() < dep.nStartTime) {
-        return ThresholdState::DEFINED;
-    }
-
-    return std::nullopt;
-}
-
-ThresholdState BIP9DeploymentLogic::NextState(const ThresholdState state, const CBlockIndex* pindexPrev) const
-{
-    const int nThreshold{dep.threshold};
-    const int64_t nTimeStart{dep.nStartTime};
-    const int64_t nTimeTimeout{dep.nTimeout};
-
-    switch (state) {
-        case ThresholdState::DEFINED: {
-            if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                return ThresholdState::FAILED;
-            } else if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
-                return ThresholdState::STARTED;
-            }
-            break;
-        }
-        case ThresholdState::STARTED: {
-            // If after the timeout, automatic fail
-            if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
-                return ThresholdState::FAILED;
-            }
-            // Otherwise, we need to count
-            const int count = Count(*this, pindexPrev);
-            if (count >= nThreshold) {
-                return ThresholdState::LOCKED_IN;
-            }
-            break;
-        }
-        case ThresholdState::LOCKED_IN: {
-            // Always progresses into ACTIVE
-            return ThresholdState::ACTIVE;
-        }
-        case ThresholdState::FAILED:
-        case ThresholdState::ACTIVE: {
-            // Nothing happens, these are terminal states.
-            break;
-        }
-    }
-    return state;
+    return ThresholdConditionChecker<BIP9StateLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
 }
 
 // BIP 341
-
-BIP341DeploymentLogic::State BIP341DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
-{
-    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
-}
-
-int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
-{
-    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
-}
 
 std::optional<ThresholdState> BIP341DeploymentLogic::SpecialState() const
 {
@@ -208,17 +214,17 @@ ThresholdState BIP341DeploymentLogic::NextState(const ThresholdState state, cons
     return state;
 }
 
+BIP341DeploymentLogic::State BIP341DeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+}
+
+int BIP341DeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIP341DeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+}
+
 // BIP Blah
-
-BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
-{
-    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
-}
-
-int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
-{
-    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
-}
 
 std::optional<BIPBlahDeploymentLogic::State> BIPBlahDeploymentLogic::SpecialState() const
 {
@@ -324,6 +330,18 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
     return std::nullopt;
 }
 
+BIPBlahDeploymentLogic::State BIPBlahDeploymentLogic::GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateFor(*this, cache, pindexPrev);
+}
+
+int BIPBlahDeploymentLogic::GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const
+{
+    return ThresholdConditionChecker<BIPBlahDeploymentLogic>::GetStateSinceHeightFor(*this, cache, pindexPrev);
+}
+
+// generic state transition functions
+
 template<typename Logic>
 typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
 {
@@ -366,6 +384,39 @@ typename Logic::State ThresholdConditionChecker<Logic>::GetStateFor(const Logic&
     return state;
 }
 
+template<typename Logic>
+int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
+{
+    if (logic.SpecialState()) return 0;
+
+    const typename Logic::State initialState = GetStateFor(logic, cache, pindexPrev);
+
+    // BIP 9 about state DEFINED: "The genesis block is by definition in this state for each deployment."
+    if (initialState == logic.GenesisState) {
+        return 0;
+    }
+
+    const int nPeriod{logic.Period()};
+
+    // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
+    // To ease understanding of the following height calculation, it helps to remember that
+    // right now pindexPrev points to the block prior to the block that we are computing for, thus:
+    // if we are computing for the last block of a period, then pindexPrev points to the second to last block of the period, and
+    // if we are computing for the first block of a period, then pindexPrev points to the last block of the previous period.
+    // The parent of the genesis block is represented by nullptr.
+    pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - ((pindexPrev->nHeight + 1) % nPeriod));
+
+    const CBlockIndex* previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
+
+    while (previousPeriodParent != nullptr && GetStateFor(logic, cache, previousPeriodParent) == initialState) {
+        pindexPrev = previousPeriodParent;
+        previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
+    }
+
+    // Adjust the result because right now we point to the parent block.
+    return pindexPrev->nHeight + 1;
+}
+
 VersionBits::Stats VersionBits::GetStateStatisticsFor(const CBlockIndex* pindex, int period, int threshold, const std::function<bool(const CBlockIndex*)>& condition, std::vector<bool>* signalling_blocks)
 {
     if (pindex == nullptr) return VersionBits::Stats{};
@@ -400,38 +451,5 @@ VersionBits::Stats VersionBits::GetStateStatisticsFor(const CBlockIndex* pindex,
     stats.possible = (stats.period - stats.elapsed) >= (stats.threshold - stats.count);
 
     return stats;
-}
-
-template<typename Logic>
-int ThresholdConditionChecker<Logic>::GetStateSinceHeightFor(const Logic& logic, typename Logic::Cache& cache, const CBlockIndex* pindexPrev)
-{
-    if (logic.SpecialState()) return 0;
-
-    const typename Logic::State initialState = GetStateFor(logic, cache, pindexPrev);
-
-    // BIP 9 about state DEFINED: "The genesis block is by definition in this state for each deployment."
-    if (initialState == logic.GenesisState) {
-        return 0;
-    }
-
-    const int nPeriod{logic.Period()};
-
-    // A block's state is always the same as that of the first of its period, so it is computed based on a pindexPrev whose height equals a multiple of nPeriod - 1.
-    // To ease understanding of the following height calculation, it helps to remember that
-    // right now pindexPrev points to the block prior to the block that we are computing for, thus:
-    // if we are computing for the last block of a period, then pindexPrev points to the second to last block of the period, and
-    // if we are computing for the first block of a period, then pindexPrev points to the last block of the previous period.
-    // The parent of the genesis block is represented by nullptr.
-    pindexPrev = pindexPrev->GetAncestor(pindexPrev->nHeight - ((pindexPrev->nHeight + 1) % nPeriod));
-
-    const CBlockIndex* previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
-
-    while (previousPeriodParent != nullptr && GetStateFor(logic, cache, previousPeriodParent) == initialState) {
-        pindexPrev = previousPeriodParent;
-        previousPeriodParent = pindexPrev->GetAncestor(pindexPrev->nHeight - nPeriod);
-    }
-
-    // Adjust the result because right now we point to the parent block.
-    return pindexPrev->nHeight + 1;
 }
 

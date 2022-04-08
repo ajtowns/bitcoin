@@ -80,20 +80,13 @@ public:
     /** Is deployment enabled at all? */
     bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
-    /** Configured to be always in the same state */
-    std::optional<State> SpecialState() const;
-
-    /* Normal transitions */
-    static constexpr State GenesisState = State::DEFINED;
-    std::optional<State> TrivialState(const CBlockIndex* pindexPrev) const;
-    State NextState(const State state, const CBlockIndex* pindexPrev) const;
-
+    /* Get state! */
     State GetStateFor(Cache& cache, const CBlockIndex* pindexPrev) const;
     int GetStateSinceHeightFor(Cache& cache, const CBlockIndex* pindexPrev) const;
 
     /** Determine if deployment is active */
     bool IsActive(State state, const CBlockIndex* pindexPrev) const { return state == State::ACTIVE; }
-    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return GetStateFor(cache, pindexPrev) == State::ACTIVE; }
+    bool IsActive(Cache& cache, const CBlockIndex* pindexPrev) const { return IsActive(GetStateFor(cache, pindexPrev), pindexPrev); }
 
     /** Determine if deployment is certain */
     bool IsCertain(State state) const
