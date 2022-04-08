@@ -22,7 +22,6 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "wallet/fees -> wallet/wallet -> wallet/fees"
     "wallet/wallet -> wallet/walletdb -> wallet/wallet"
     "node/coinstats -> validation -> node/coinstats"
-    "deploymentstatus -> validation -> deploymentstatus"
 )
 
 EXIT_CODE=0

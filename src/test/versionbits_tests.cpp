@@ -46,7 +46,7 @@ public:
         m_dep.min_activation_height = 0;
     }
 
-    void clear() { BIP341DeploymentLogic::ClearCache(m_cache); }
+    void clear() { m_cache.clear(); }
     ThresholdState GetStateFor(const CBlockIndex* pindexPrev) { return BIP341DeploymentLogic::GetStateFor(m_cache, pindexPrev); }
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev) { return BIP341DeploymentLogic::GetStateSinceHeightFor(m_cache, pindexPrev); }
 };

@@ -1878,7 +1878,7 @@ public:
 
     void Clear() {
         for (auto& c : m_cache) {
-            WarningBitsBIP9DeploymentLogic::ClearCache(c);
+            c.clear();
         }
     }
 };

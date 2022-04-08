@@ -22,9 +22,17 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
     return nVersion;
 }
 
+static void ClearCache(std::true_type& t) { }
+
+template<typename State>
+static void ClearCache(std::map<const CBlockIndex*,State>& cache)
+{
+    cache.clear();
+}
+
 void VersionBitsCache::Clear()
 {
     ForEachDeployment(Params().GetConsensus(), [&](auto pos, const auto& logic, auto& cache) {
-        logic.ClearCache(cache);
+        ClearCache(cache);
     });
 }

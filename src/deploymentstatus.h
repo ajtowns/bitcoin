@@ -16,12 +16,10 @@ class BuriedDeploymentLogic
 {
 public:
     using Params = Consensus::BuriedDeployment;
-
-    const Params& m_params;
     using State = bool;
     using Cache = std::true_type;
 
-    static void ClearCache(const Cache& cache) { }
+    const Params& m_params;
 
     BuriedDeploymentLogic(const Params& params) : m_params{params} { }
 
