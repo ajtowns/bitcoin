@@ -24,7 +24,7 @@ public:
     BuriedDeploymentLogic(const Params& params) : m_params{params} { }
 
     uint32_t Mask() const { return 0; }
-    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const { return std::nullopt; }
+    std::optional<int> VersionBitToSet(State state) const { return std::nullopt; }
     bool Enabled() const { return m_params.height != std::numeric_limits<int>::max(); }
     bool IsActive(bool state, const CBlockIndex* pindexPrev) const { return state; }
     State GetStateFor(const Cache& cache, const CBlockIndex* pindexPrev) const { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= m_params.height; }

@@ -1097,7 +1097,7 @@ static void SoftForkDescPushBack(UniValue& rv, const CBlockIndex* blockindex, Co
 
     const typename Logic::State current_state = logic.GetStateFor(cache, blockindex->pprev);
 
-    const std::optional<int> signal_bit = logic.VersionBitToSet(current_state, blockindex->pprev);
+    const std::optional<int> signal_bit = logic.VersionBitToSet(current_state);
 
     const auto& dep = logic.Dep();
 

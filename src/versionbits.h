@@ -82,7 +82,7 @@ public:
     bool Enabled() const { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 
     /** Should we be signalling on a bit? */
-    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
+    std::optional<int> VersionBitToSet(State state) const
     {
         if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
         return std::nullopt;
@@ -156,13 +156,10 @@ public:
     uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
     /** Given current state, should bit be set? */
-    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
+    std::optional<int> VersionBitToSet(State state) const
     {
-        if ((state == State::STARTED) || (state == State::LOCKED_IN)) {
-            return dep.bit;
-        } else {
-            return std::nullopt;
-        }
+        if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
+        return std::nullopt;
     }
 
     /** Does this block count towards the threshold? */
@@ -239,13 +236,10 @@ public:
     uint32_t Mask() const { return ((uint32_t)1) << dep.bit; }
 
     /** Given current state, should bit be set? */
-    std::optional<int> VersionBitToSet(State state, const CBlockIndex* pindexPrev) const
+    std::optional<int> VersionBitToSet(State state) const
     {
-        if ((state.code == StateCode::OPT_IN) || (state.code == StateCode::LOCKED_IN)) {
-            return dep.bit;
-        } else {
-            return std::nullopt;
-        }
+        if ((state.code == StateCode::OPT_IN) || (state.code == StateCode::LOCKED_IN)) return dep.bit;
+        return std::nullopt;
     }
 
     /** Does this block count towards the threshold? */
