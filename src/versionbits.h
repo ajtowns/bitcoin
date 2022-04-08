@@ -48,10 +48,6 @@ class BIP9DeploymentLogic
 public:
     using Params = Consensus::BIP9Deployment;
 
-private:
-    const Params& dep;
-
-public:
     /** BIP 9 defines a finite-state-machine to deploy a softfork in multiple stages.
      *  State transitions happen during retarget period if conditions are met
      *  In case of reorg, transitions can go backward. Without transition, state is
@@ -70,6 +66,10 @@ public:
     // will either be nullptr or a block with (height + 1) % period == 0.
     using Cache = std::map<const CBlockIndex*, State>;
 
+private:
+    const Params& dep;
+
+public:
     explicit BIP9DeploymentLogic(const Consensus::BIP9Deployment& dep) : dep{dep} {}
 
     const Consensus::BIP9Deployment& Dep() const { return dep; }
@@ -97,11 +97,6 @@ public:
     {
         if ((state == State::STARTED) || (state == State::LOCKED_IN)) return dep.bit;
         return std::nullopt;
-    }
-
-    std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
-    {
-        return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
     /** Does this block count towards the threshold? */
@@ -169,11 +164,6 @@ public:
         } else {
             return std::nullopt;
         }
-    }
-
-    std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
-    {
-        return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
     /** Does this block count towards the threshold? */
@@ -259,11 +249,6 @@ public:
         } else {
             return std::nullopt;
         }
-    }
-
-    std::optional<int> VersionBitToSet(Cache& cache, const CBlockIndex* pindexPrev) const
-    {
-        return VersionBitToSet(GetStateFor(cache, pindexPrev), pindexPrev);
     }
 
     /** Does this block count towards the threshold? */
