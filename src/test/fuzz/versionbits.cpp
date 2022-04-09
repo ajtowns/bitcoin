@@ -99,11 +99,24 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     // select deployment parameters: bit, start time, timeout
     const int bit = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, VERSIONBITS_NUM_BITS - 1);
 
-    bool always_active_test = false;
-    bool never_active_test = false;
+    // Early exit if the versions don't signal sensibly for the deployment
+    if (!VersionBits::IsBitSet(bit, ver_signal)) return;
+    if (VersionBits::IsBitSet(bit, ver_nosignal)) return;
+    if (ver_nosignal < 0) return;
+
+    const bool always_test = fuzzed_data_provider.ConsumeBool();
+    const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
+    const bool never_active_test = (always_test ? !always_active_test : false);
+
     int64_t start_time;
     int64_t timeout;
-    if (fuzzed_data_provider.ConsumeBool()) {
+    if (always_active_test) {
+        start_time = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+    } else if (never_active_test) {
+        start_time = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+    } else {
         // pick the timestamp to switch based on a block
         // note states will change *after* these blocks because mediantime lags
         int start_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 3));
@@ -113,42 +126,32 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         timeout = block_start_time + end_block * interval;
 
         // allow for times to not exactly match a block
-        if (fuzzed_data_provider.ConsumeBool()) start_time += interval / 2;
-        if (fuzzed_data_provider.ConsumeBool()) timeout += interval / 2;
-    } else {
-        if (fuzzed_data_provider.ConsumeBool()) {
-            start_time = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-            always_active_test = true;
-        } else {
-            start_time = Consensus::BIP9Deployment::NEVER_ACTIVE;
-            never_active_test = true;
-        }
-        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+        start_time += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
+        timeout += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
     }
     int min_activation = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * max_periods);
 
+    // sanity checks
     assert(period > 0);
     assert(0 <= threshold && threshold <= period);
     assert(0 <= bit && bit < 32 && bit < VERSIONBITS_NUM_BITS);
     assert(0 <= min_activation);
 
-    Consensus::BIP341Deployment dep;
-    dep.bit = bit;
-    dep.nStartTime = start_time;
-    dep.nTimeout = timeout;
-    dep.period = period;
-    dep.threshold = threshold;
-    dep.min_activation_height = min_activation;
+    const auto dep = [&]() {
+        Consensus::BIP341Deployment dep;
+        dep.bit = bit;
+        dep.nStartTime = start_time;
+        dep.nTimeout = timeout;
+        dep.period = period;
+        dep.threshold = threshold;
+        dep.min_activation_height = min_activation;
+        return dep;
+    }();
 
     const BIP341DeploymentLogic logic(dep);
     BIP341DeploymentLogic::Cache cache;
 
-    // Early exit if the versions don't signal sensibly for the deployment
-    if (!VersionBits::IsBitSet(bit, ver_signal)) return;
-    if (VersionBits::IsBitSet(bit, ver_nosignal)) return;
-    if (ver_nosignal < 0) return;
-
-    // TOP_BITS should ensure version will be positive and meet min
+    // IsBitSet should ensure version will be positive and meet min
     // version requirement
     assert(ver_signal > 0);
     assert(ver_signal >= VERSIONBITS_LAST_OLD_BLOCK_VERSION);
