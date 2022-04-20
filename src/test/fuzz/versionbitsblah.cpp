@@ -18,7 +18,7 @@
 #include <memory>
 #include <vector>
 
-using State = BIP9DeploymentLogic::State;
+using StateCode = BIPBlahDeploymentLogic::StateCode;
 
 namespace {
 /** Track blocks mined for test */
@@ -108,14 +108,35 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
     const bool never_active_test = (always_test ? !always_active_test : false);
 
+    const auto dep = [&]() {
+        Consensus::BIPBlahDeployment dep;
+
+        dep.period =
+
+        dep.bit = 
+
+        dep.optin_start    int64_t {NEVER_ACTIVE};
+    optin_timeout{NEVER_ACTIVE}; int64_t 
+    int64_t optin_earliest_activation{MAX}; int64_t 
+        dep.optin_threshold{MAX};
+
+        dep.optout_delay_mins{MAX};
+        dep.optout_delay_activation_mins{MAX};
+        dep.optout_threshold{0};
+
+        dep.optout_block_height{0};
+        dep.optout_block_hash{}; //// hmm
+        return dep;
+    }();
+
     int64_t start_time;
     int64_t timeout;
     if (always_active_test) {
-        start_time = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+        start_time = Consensus::BIPBlahDeployment::ALWAYS_ACTIVE;
+        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIPBlahDeployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
     } else if (never_active_test) {
-        start_time = Consensus::BIP9Deployment::NEVER_ACTIVE;
-        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+        start_time = Consensus::BIPBlahDeployment::NEVER_ACTIVE;
+        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIPBlahDeployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
     } else {
         // pick the timestamp to switch based on a block
         // note states will change *after* these blocks because mediantime lags
@@ -138,7 +159,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     assert(0 <= min_activation);
 
     const auto dep = [&]() {
-        Consensus::BIP341Deployment dep;
+        Consensus::BIPBlahDeployment dep;
         dep.bit = bit;
         dep.nStartTime = start_time;
         dep.nTimeout = timeout;
@@ -148,8 +169,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         return dep;
     }();
 
-    const BIP341DeploymentLogic logic(dep);
-    BIP341DeploymentLogic::Cache cache;
+    const BIPBlahDeploymentLogic logic(dep);
+    BIPBlahDeploymentLogic::Cache cache;
 
     // IsBitSet should ensure version will be positive and meet min
     // version requirement
