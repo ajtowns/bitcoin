@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <arith_uint256.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <consensus/params.h>
@@ -21,13 +22,14 @@
 using State = BIPBlahDeploymentLogic::StateCode;
 
 namespace {
+constexpr size_t MAX_BLOCKS = 2048;
 
 /** Track blocks mined for test */
 class Blocks
 {
 private:
     std::vector<std::unique_ptr<CBlockIndex>> m_blocks;
-    std::vector<std::unique_ptr<uint256>> m_blockhash;
+    std::array<uint256, MAX_BLOCKS> m_blockhash;
     const uint32_t m_start_time;
     const uint32_t m_interval;
     const int32_t m_signal;
@@ -46,18 +48,20 @@ private:
 
     CBlockIndex* MineBlock(bool signal)
     {
+        assert(size() + 1 < MAX_BLOCKS);
+
         CBlockHeader header;
         header.nVersion = signal ? m_signal : m_no_signal;
         header.nTime = m_start_time + m_blocks.size() * m_interval;
         header.nBits = 0x1d00ffff;
-        if (!m_blockhash.empty()) {
-            header.hashPrevBlock = *m_blockhash.back().get();
+        if (size() > 0) {
+            header.hashPrevBlock = m_blockhash.at(size()-1);
         }
 
-        m_blockhash.emplace_back(std::make_unique<uint256>(header.GetHash()));
+        m_blockhash.at(size()) = ArithToUint256(uint64_t{size()});
 
         auto current_block = std::make_unique<CBlockIndex>(header);
-        current_block->phashBlock = m_blockhash.back().get();
+        current_block->phashBlock = &m_blockhash.at(size());
         current_block->pprev = Tip();
         current_block->nHeight = m_blocks.size();
         current_block->BuildSkip();
@@ -70,13 +74,16 @@ public:
     Blocks(const Blocks&) = delete;
 
     Blocks(uint32_t start_time, uint32_t interval, int32_t signal, int32_t no_signal)
-        : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal} {}
+        : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal}
+    {
+        m_blocks.reserve(MAX_BLOCKS);
+    }
 
     size_t size() const { return m_blocks.size(); }
 
-    uint256 GetBlockHash(size_t height) { assert(height < size()); return m_blocks.at(height)->GetBlockHash(); }
+    const uint256& GetBlockHash(size_t height) { assert(height < size()); return m_blockhash.at(height); }
 
-    void MineBlocks(size_t period, size_t max_blocks, FuzzedDataProvider& fuzzed_data_provider)
+    void MineBlocks(size_t period, FuzzedDataProvider& fuzzed_data_provider)
     {
         /* Strategy:
          *  * mine some randomised number of prior periods;
@@ -96,16 +103,18 @@ public:
         while (fuzzed_data_provider.remaining_bytes() > 0) { // early exit; no need for LIMITED_WHILE
             // all blocks in these periods either do or don't signal
             for (size_t b = 0; b < period; ++b) {
+                assert(size()+1 < MAX_BLOCKS);
                 MineBlock(/*signal=*/fuzzed_data_provider.ConsumeBool());
             }
 
             // don't risk exceeding max_blocks or times may wrap around
-            if (size() + 2 * period > max_blocks) break;
+            if (size() + 2 * period >= MAX_BLOCKS) break;
         }
         // NOTE: fuzzed_data_provider may be fully consumed at this point and should not be used further
 
         // mine (period-1) blocks and check state
         for (size_t b = 0; b < period; ++b) {
+            assert(size()+1 < MAX_BLOCKS);
             MineBlock(Signal(size()));
         }
     }
@@ -149,13 +158,13 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
 
     // making period/max_periods larger slows these tests down significantly
-    const int period = 32;
-    const size_t max_periods = 16;
-    const size_t max_blocks = 2 * period * max_periods;
+    constexpr int period = 32;
+    constexpr size_t max_periods = 16;
+    static_assert(MAX_BLOCKS >= period*max_periods);
 
     // too many blocks at 10min each might cause uint32_t time to overflow if
     // block_start_time is at the end of the range above
-    assert(std::numeric_limits<uint32_t>::max() - MAX_START_TIME > interval * max_blocks);
+    assert(std::numeric_limits<uint32_t>::max() - MAX_START_TIME > interval * MAX_BLOCKS);
 
     const int64_t block_start_time = fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(params.GenesisBlock().nTime, MAX_START_TIME);
 
@@ -222,7 +231,7 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
 
     // Now that we have chosen time and versions, setup to mine blocks
     Blocks blocks(block_start_time, interval, ver_signal, ver_nosignal);
-    blocks.MineBlocks(period, max_blocks, fuzzed_data_provider);
+    blocks.MineBlocks(period, fuzzed_data_provider);
     // NOTE: fuzzed_data_provider may be fully consumed at this point and should not be used further
 
     const auto dep = [&]() {
