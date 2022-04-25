@@ -30,19 +30,19 @@ private:
     const uint32_t m_interval;
     const int32_t m_signal;
     const int32_t m_no_signal;
+    uint32_t m_signalling_mask = 0;
 
-public:
-    Blocks(uint32_t start_time, uint32_t interval, int32_t signal, int32_t no_signal)
-        : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal} {}
+    bool Signal(size_t height)
+    {
+        return (m_signalling_mask >> (height % 32)) & 1;
+    }
 
-    size_t size() const { return m_blocks.size(); }
-
-    CBlockIndex* tip() const
+    CBlockIndex* Tip() const
     {
         return m_blocks.empty() ? nullptr : m_blocks.back().get();
     }
 
-    CBlockIndex* mine_block(bool signal)
+    CBlockIndex* MineBlock(bool signal)
     {
         CBlockHeader header;
         header.nVersion = signal ? m_signal : m_no_signal;
@@ -50,11 +50,68 @@ public:
         header.nBits = 0x1d00ffff;
 
         auto current_block = std::make_unique<CBlockIndex>(header);
-        current_block->pprev = tip();
+        current_block->pprev = Tip();
         current_block->nHeight = m_blocks.size();
         current_block->BuildSkip();
 
         return m_blocks.emplace_back(std::move(current_block)).get();
+    }
+
+public:
+    Blocks(uint32_t start_time, uint32_t interval, int32_t signal, int32_t no_signal)
+        : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal} {}
+
+    size_t size() const { return m_blocks.size(); }
+
+    void MineBlocks(size_t period, size_t max_blocks, FuzzedDataProvider& fuzzed_data_provider)
+    {
+        /* Strategy:
+         *  * mine some randomised number of prior periods;
+         *    with either all or no blocks in the period signalling
+         *  * then mine a final period worth of blocks, with
+         *    randomised signalling according to a mask
+         *
+         * We establish the mask first, then consume "bools" until
+         * we run out of fuzz data to work out how many prior periods
+         * there are and which ones will signal.
+         */
+
+        // establish the mask
+        m_signalling_mask = fuzzed_data_provider.ConsumeIntegral<uint32_t>();
+
+        // mine prior periods
+        while (fuzzed_data_provider.remaining_bytes() > 0) { // early exit; no need for LIMITED_WHILE
+            // all blocks in these periods either do or don't signal
+            for (size_t b = 0; b < period; ++b) {
+                MineBlock(/*signal=*/fuzzed_data_provider.ConsumeBool());
+            }
+
+            // don't risk exceeding max_blocks or times may wrap around
+            if (size() + 2 * period > max_blocks) break;
+        }
+        // NOTE: fuzzed_data_provider may be fully consumed at this point and should not be used further
+
+        // mine (period-1) blocks and check state
+        for (size_t b = 0; b < period; ++b) {
+            MineBlock(Signal(size()));
+        }
+    }
+
+    const CBlockIndex* FirstBlockInFinalPeriod(size_t period)
+    {
+        assert(size() > 0);
+        const size_t last = size() - 1;
+        return m_blocks.at(last - (last % period)).get();
+    }
+
+    template<typename Fn>
+    void ForEachBlockFinalPeriod(size_t period, const Fn& fn)
+    {
+        assert(size() > 0);
+        const size_t last = size() - 1;
+        for (size_t i = last - (last % period); i <= last; ++i) {
+            fn(m_blocks.at(i).get(), Signal(i));
+        }
     }
 };
 
@@ -158,46 +215,19 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
     // Now that we have chosen time and versions, setup to mine blocks
     Blocks blocks(block_start_time, interval, ver_signal, ver_nosignal);
-
-    /* Strategy:
-     *  * we will mine a final period worth of blocks, with
-     *    randomised signalling according to a mask
-     *  * but before we mine those blocks, we will mine some
-     *    randomised number of prior periods; with either all
-     *    or no blocks in the period signalling
-     *
-     * We establish the mask first, then consume "bools" until
-     * we run out of fuzz data to work out how many prior periods
-     * there are and which ones will signal.
-     */
-
-    // establish the mask
-    const uint32_t signalling_mask = fuzzed_data_provider.ConsumeIntegral<uint32_t>();
-
-    // mine prior periods
-    while (fuzzed_data_provider.remaining_bytes() > 0) { // early exit; no need for LIMITED_WHILE
-        // all blocks in these periods either do or don't signal
-        bool signal = fuzzed_data_provider.ConsumeBool();
-        for (int b = 0; b < period; ++b) {
-            blocks.mine_block(signal);
-        }
-
-        // don't risk exceeding max_blocks or times may wrap around
-        if (blocks.size() + 2 * period > max_blocks) break;
-    }
+    blocks.MineBlocks(period, max_blocks, fuzzed_data_provider);
     // NOTE: fuzzed_data_provider may be fully consumed at this point and should not be used further
 
-    // now we mine the final period and check that everything looks sane
-
-    // count the number of signalling blocks
-    int blocks_sig = 0;
+    // now we check the final period looks sane
 
     // get the info for the first block of the period
-    CBlockIndex* prev = blocks.tip();
-    const int exp_since = logic.GetStateSinceHeightFor(cache, prev);
-    const State exp_state = logic.GetStateFor(cache, prev);
 
-    // get statistics from end of previous period, then reset
+    CBlockIndex* prev = blocks.FirstBlockInFinalPeriod(period)->pprev;
+
+    const int orig_since = logic.GetStateSinceHeightFor(cache, prev);
+    const State orig_state = logic.GetStateFor(cache, prev);
+
+    // statistics for a null period
     VersionBits::Stats last_stats;
     last_stats.period = period;
     last_stats.threshold = threshold;
@@ -206,23 +236,18 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     std::vector<bool> last_signals{};
 
     int prev_next_height = (prev == nullptr ? 0 : prev->nHeight + 1);
-    assert(exp_since <= prev_next_height);
+    assert(0 <= orig_since && orig_since <= prev_next_height);
 
-    // mine (period-1) blocks and check state
-    for (int b = 1; b < period; ++b) {
-        const bool signal = (signalling_mask >> (b % 32)) & 1;
-        if (signal) ++blocks_sig;
+    // count the number of signalling blocks
+    int blocks_sig = 0;
 
-        CBlockIndex* current_block = blocks.mine_block(signal);
-
+    blocks.ForEachBlockFinalPeriod(period, [&](const CBlockIndex* current_block, bool signal) {
         // verify that signalling attempt was interpreted correctly
         assert(logic.Condition(current_block) == signal);
 
-        // state and since don't change within the period
-        const State state = logic.GetStateFor(cache, current_block);
-        const int since = logic.GetStateSinceHeightFor(cache, current_block);
-        assert(state == exp_state);
-        assert(since == exp_since);
+        if (signal) ++blocks_sig;
+
+        const int in_period = (current_block->nHeight % period) + 1;
 
         // check that after mining this block stats change as expected
         std::vector<bool> signals;
@@ -234,107 +259,95 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
         assert(stats.period == period);
         assert(stats.threshold == threshold);
-        assert(stats.elapsed == b);
+        assert(stats.elapsed == in_period);
+        assert(stats.elapsed == last_stats.elapsed + 1);
         assert(stats.count == last_stats.count + (signal ? 1 : 0));
+        assert(stats.count == blocks_sig);
         assert(stats.possible == (stats.count + period >= stats.elapsed + threshold));
         last_stats = stats;
 
+        assert(signals.size() == (size_t)stats.elapsed && stats.elapsed > 0);
         assert(signals.size() == last_signals.size() + 1);
         assert(signals.back() == signal);
         last_signals.push_back(signal);
         assert(signals == last_signals);
-    }
 
-    if (exp_state == State::STARTED) {
-        // double check that stats.possible is sane
-        if (blocks_sig >= threshold - 1) assert(last_stats.possible);
-    }
-
-    // mine the final block
-    bool signal = (signalling_mask >> (period % 32)) & 1;
-    if (signal) ++blocks_sig;
-    CBlockIndex* current_block = blocks.mine_block(signal);
-    assert(logic.Condition(current_block) == signal);
-
-    const auto stats = logic.GetStateStatisticsFor(current_block);
-    assert(stats.period == period);
-    assert(stats.threshold == threshold);
-    assert(stats.elapsed == period);
-    assert(stats.count == blocks_sig);
-    assert(stats.possible == (stats.count + period >= stats.elapsed + threshold));
-
-    // More interesting is whether the state changed.
-    const State state = logic.GetStateFor(cache, current_block);
-    const int since = logic.GetStateSinceHeightFor(cache, current_block);
-
-    // since is straightforward:
-    assert(since % period == 0);
-    assert(0 <= since && since <= current_block->nHeight + 1);
-    if (state == exp_state) {
-        assert(since == exp_since);
-    } else {
-        assert(since == current_block->nHeight + 1);
-    }
-
-    // state is where everything interesting is
-    switch (state) {
-    case State::DEFINED:
-        assert(since == 0);
-        assert(exp_state == State::DEFINED);
-        assert(current_block->GetMedianTimePast() < dep.nStartTime);
-        break;
-    case State::STARTED:
-        assert(current_block->GetMedianTimePast() >= dep.nStartTime);
-        if (exp_state == State::STARTED) {
-            assert(blocks_sig < threshold);
-            assert(current_block->GetMedianTimePast() < dep.nTimeout);
+        const State state = logic.GetStateFor(cache, current_block);
+        const int since = logic.GetStateSinceHeightFor(cache, current_block);
+        if (in_period != period) {
+            // state and since don't change within the period
+            assert(state == orig_state);
+            assert(since == orig_since);
         } else {
-            assert(exp_state == State::DEFINED);
-        }
-        break;
-    case State::LOCKED_IN:
-        if (exp_state == State::LOCKED_IN) {
-            assert(current_block->nHeight + 1 < min_activation);
-        } else {
-            assert(exp_state == State::STARTED);
-            assert(blocks_sig >= threshold);
-        }
-        break;
-    case State::ACTIVE:
-        assert(always_active_test || min_activation <= current_block->nHeight + 1);
-        assert(exp_state == State::ACTIVE || exp_state == State::LOCKED_IN);
-        break;
-    case State::FAILED:
-        assert(never_active_test || current_block->GetMedianTimePast() >= dep.nTimeout);
-        if (exp_state == State::STARTED) {
-            assert(blocks_sig < threshold);
-        } else {
-            assert(exp_state == State::FAILED);
-        }
-        break;
-    default:
-        assert(false);
-    }
+            // check possible state transition at final block
 
-    if (blocks.size() >= period * max_periods) {
-        // we chose the timeout (and block times) so that by the time we have this many blocks it's all over
-        assert(state == State::ACTIVE || state == State::FAILED);
-    }
+            // since is straightforward:
+            assert(since % period == 0);
+            assert(orig_since <= current_block->nHeight);
+            assert(0 <= since && since <= current_block->nHeight + 1);
+            if (since > 0) {
+                assert(!always_active_test && !never_active_test);
+            }
+            assert(orig_since <= since);
+            if (state == orig_state) {
+                assert(since == orig_since);
+            } else {
+                assert(since == current_block->nHeight + 1);
+            }
+            if (always_active_test || never_active_test) {
+                assert(since == 0);
+            } else {
+                assert((since == 0) == (state == State::DEFINED));
+            }
 
-    if (always_active_test) {
-        // "always active" has additional restrictions
-        assert(state == State::ACTIVE);
-        assert(exp_state == State::ACTIVE);
-        assert(since == 0);
-    } else if (never_active_test) {
-        // "never active" does too
-        assert(state == State::FAILED);
-        assert(exp_state == State::FAILED);
-        assert(since == 0);
-    } else {
-        // for signalled deployments, the initial state is always DEFINED
-        assert(since > 0 || state == State::DEFINED);
-        assert(exp_since > 0 || exp_state == State::DEFINED);
-    }
+            // state is where everything interesting is
+            if (always_active_test) assert(state == State::ACTIVE);
+            if (never_active_test) assert(state == State::FAILED);
+
+            switch (state) {
+            case State::DEFINED:
+                assert(orig_state == State::DEFINED);
+                assert(current_block->GetMedianTimePast() < dep.nStartTime);
+                break;
+            case State::STARTED:
+                assert(current_block->GetMedianTimePast() >= dep.nStartTime);
+                if (orig_state == State::STARTED) {
+                    assert(blocks_sig < threshold);
+                    assert(current_block->GetMedianTimePast() < dep.nTimeout);
+                } else {
+                    assert(orig_state == State::DEFINED);
+                }
+                break;
+            case State::LOCKED_IN:
+                if (orig_state == State::LOCKED_IN) {
+                    assert(current_block->nHeight + 1 < min_activation);
+                } else {
+                    assert(orig_state == State::STARTED);
+                    assert(blocks_sig >= threshold);
+                }
+                break;
+            case State::ACTIVE:
+                assert(always_active_test || min_activation <= current_block->nHeight + 1);
+                assert(orig_state == State::ACTIVE || orig_state == State::LOCKED_IN);
+                break;
+            case State::FAILED:
+                assert(never_active_test || current_block->GetMedianTimePast() >= dep.nTimeout);
+                if (orig_state == State::STARTED) {
+                    assert(blocks_sig < threshold);
+                } else {
+                    assert(orig_state == State::FAILED);
+                }
+                break;
+            default:
+                assert(false);
+            }
+
+            if (blocks.size() >= period * max_periods) {
+                // we chose the timeout (and block times) so that by the time we have this many blocks it's all over
+                assert(state == State::ACTIVE || state == State::FAILED);
+            }
+        }
+    });
+
 }
 } // namespace
