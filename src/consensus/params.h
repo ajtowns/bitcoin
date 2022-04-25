@@ -70,12 +70,12 @@ struct BIPBlahDeployment
     int64_t optin_earliest_activation{MAX};
     int optin_threshold{MAX};
 
+    int optout_block_height{0};
+    uint256 optout_block_hash{};
+
     int optout_delay_mins{MAX};
     int optout_delay_activation_mins{MAX};
     int optout_threshold{0};
-
-    int optout_block_height{0};
-    uint256 optout_block_hash{};
 
     static constexpr int MAX{std::numeric_limits<int>::max()};
     static constexpr int ALWAYS_ACTIVE{-1};

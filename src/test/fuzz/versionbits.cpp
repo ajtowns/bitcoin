@@ -165,6 +165,10 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
     const bool never_active_test = (always_test ? !always_active_test : false);
 
+    auto pick_time = [&](int low_block, int high_block) -> int64_t {
+        return block_start_time + interval * low_block + fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval * (high_block - low_block) + interval/2 - 1);
+    };
+
     int64_t start_time;
     int64_t timeout;
     if (always_active_test) {
@@ -176,15 +180,8 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     } else {
         // pick the timestamp to switch based on a block
         // note states will change *after* these blocks because mediantime lags
-        int start_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 3));
-        int end_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 3));
-
-        start_time = block_start_time + start_block * interval;
-        timeout = block_start_time + end_block * interval;
-
-        // allow for times to not exactly match a block
-        start_time += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
-        timeout += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
+        start_time = pick_time(0, period * (max_periods - 3));
+        timeout = pick_time(0, period * max_periods);
     }
     int min_activation = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * max_periods);
 
