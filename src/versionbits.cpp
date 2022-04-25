@@ -351,7 +351,9 @@ public:
                 if (count >= dep.optin_threshold) {
                     return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
                 } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
-                    if (pindexPrev->nHeight < dep.optout_block_height) {
+                    if (dep.optout_block_height % dep.period == 0
+                        && pindexPrev->nHeight < dep.optout_block_height)
+                    {
                         return {StateCode::OPT_OUT_WAIT, 0};
                     } else {
                         return {StateCode::FAILED, 0};
@@ -409,8 +411,10 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
     if (state.code == StateCode::ACTIVE) return static_cast<int>(state.data);
     if (state.code == StateCode::LOCKED_IN) {
         if (pindexPrev->GetMedianTimePast() >= state.data * 60) {
-            while (pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
+            auto step{dep.period};
+            while (step > 1 && pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
                 pindexPrev = pindexPrev->pprev;
+                --step;
             }
             return pindexPrev->nHeight + dep.period;
         }

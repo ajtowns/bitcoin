@@ -18,14 +18,16 @@
 #include <memory>
 #include <vector>
 
-using State = BIP9DeploymentLogic::State;
+using State = BIPBlahDeploymentLogic::StateCode;
 
 namespace {
+
 /** Track blocks mined for test */
 class Blocks
 {
 private:
     std::vector<std::unique_ptr<CBlockIndex>> m_blocks;
+    std::vector<std::unique_ptr<uint256>> m_blockhash;
     const uint32_t m_start_time;
     const uint32_t m_interval;
     const int32_t m_signal;
@@ -48,8 +50,14 @@ private:
         header.nVersion = signal ? m_signal : m_no_signal;
         header.nTime = m_start_time + m_blocks.size() * m_interval;
         header.nBits = 0x1d00ffff;
+        if (!m_blockhash.empty()) {
+            header.hashPrevBlock = *m_blockhash.back().get();
+        }
+
+        m_blockhash.emplace_back(std::make_unique<uint256>(header.GetHash()));
 
         auto current_block = std::make_unique<CBlockIndex>(header);
+        current_block->phashBlock = m_blockhash.back().get();
         current_block->pprev = Tip();
         current_block->nHeight = m_blocks.size();
         current_block->BuildSkip();
@@ -58,10 +66,15 @@ private:
     }
 
 public:
+    Blocks(Blocks&&) = delete;
+    Blocks(const Blocks&) = delete;
+
     Blocks(uint32_t start_time, uint32_t interval, int32_t signal, int32_t no_signal)
         : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal} {}
 
     size_t size() const { return m_blocks.size(); }
+
+    uint256 GetBlockHash(size_t height) { assert(height < size()); return m_blocks.at(height)->GetBlockHash(); }
 
     void MineBlocks(size_t period, size_t max_blocks, FuzzedDataProvider& fuzzed_data_provider)
     {
@@ -126,7 +139,7 @@ void initialize()
 
 constexpr uint32_t MAX_START_TIME = 4102444800; // 2100-01-01
 
-FUZZ_TARGET_INIT(versionbits, initialize)
+FUZZ_TARGET_INIT(versionbitsblah, initialize)
 {
     const CChainParams& params = *g_params;
     const int64_t interval = params.GetConsensus().nPowTargetSpacing;
@@ -139,9 +152,6 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     const int period = 32;
     const size_t max_periods = 16;
     const size_t max_blocks = 2 * period * max_periods;
-
-    const int threshold = fuzzed_data_provider.ConsumeIntegralInRange(1, period);
-    assert(0 < threshold && threshold <= period); // must be able to both pass and fail threshold!
 
     // too many blocks at 10min each might cause uint32_t time to overflow if
     // block_start_time is at the end of the range above
@@ -161,52 +171,49 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     if (VersionBits::IsBitSet(bit, ver_nosignal)) return;
     if (ver_nosignal < 0) return;
 
+    auto pick_time = [&](int low_block, int high_block) -> int64_t {
+        return block_start_time + interval * low_block + fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval * (high_block - low_block) + interval/2 - 1);
+    };
+
+    // sanity checks
+    assert(period > 0);
+    assert(0 <= bit && bit < 32 && bit < VERSIONBITS_NUM_BITS);
+
     const bool always_test = fuzzed_data_provider.ConsumeBool();
     const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
     const bool never_active_test = (always_test ? !always_active_test : false);
 
-    int64_t start_time;
-    int64_t timeout;
-    if (always_active_test) {
-        start_time = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
-    } else if (never_active_test) {
-        start_time = Consensus::BIP9Deployment::NEVER_ACTIVE;
-        timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIP9Deployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
-    } else {
-        // pick the timestamp to switch based on a block
-        // note states will change *after* these blocks because mediantime lags
-        int start_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 3));
-        int end_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 3));
+    const int optout_block_height = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 2));
+    const bool optout_correct_block = fuzzed_data_provider.ConsumeBool();
 
-        start_time = block_start_time + start_block * interval;
-        timeout = block_start_time + end_block * interval;
+    const auto optin_dep = [&]() {
+        Consensus::BIPBlahDeployment dep;
 
-        // allow for times to not exactly match a block
-        start_time += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
-        timeout += fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(0, interval - 1);
-    }
-    int min_activation = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * max_periods);
-
-    // sanity checks
-    assert(period > 0);
-    assert(0 <= threshold && threshold <= period);
-    assert(0 <= bit && bit < 32 && bit < VERSIONBITS_NUM_BITS);
-    assert(0 <= min_activation);
-
-    const auto dep = [&]() {
-        Consensus::BIP341Deployment dep;
-        dep.bit = bit;
-        dep.nStartTime = start_time;
-        dep.nTimeout = timeout;
         dep.period = period;
-        dep.threshold = threshold;
-        dep.min_activation_height = min_activation;
+        dep.bit = bit;
+        dep.optin_threshold = fuzzed_data_provider.ConsumeIntegralInRange(0, period + 1);
+        dep.optout_threshold = fuzzed_data_provider.ConsumeIntegralInRange(0, period + 1);
+
+        if (always_active_test) {
+            dep.optin_start = Consensus::BIPBlahDeployment::ALWAYS_ACTIVE;
+            dep.optin_timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIPBlahDeployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+        } else if (never_active_test) {
+            dep.optin_start = Consensus::BIPBlahDeployment::NEVER_ACTIVE;
+            dep.optin_timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIPBlahDeployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
+        } else {
+            // pick the timestamp to switch
+            dep.optin_start = pick_time(0, period * (max_periods - 3));
+            dep.optin_timeout = pick_time(0, period * (max_periods - 2));
+            dep.optin_earliest_activation = pick_time(0, period * max_periods);
+
+            dep.optout_block_height = 0;
+            dep.optout_block_hash = uint256::ZERO;
+            int available_mins = (interval * (period * (max_periods - 2) - optout_block_height) + interval)/60;
+            dep.optout_delay_mins = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, available_mins);
+            dep.optout_delay_activation_mins = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, available_mins - dep.optout_delay_mins);
+        }
         return dep;
     }();
-
-    const BIP341DeploymentLogic logic(dep);
-    BIP341DeploymentLogic::Cache cache;
 
     // IsBitSet should ensure version will be positive and meet min
     // version requirement
@@ -218,21 +225,35 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     blocks.MineBlocks(period, max_blocks, fuzzed_data_provider);
     // NOTE: fuzzed_data_provider may be fully consumed at this point and should not be used further
 
+    const auto dep = [&]() {
+        Consensus::BIPBlahDeployment dep{optin_dep};
+        dep.optout_block_height = optout_block_height;
+        if (optout_correct_block && optout_block_height < (int)blocks.size()) {
+            dep.optout_block_hash = blocks.GetBlockHash(optout_block_height);
+        } else {
+            dep.optout_block_hash = uint256::ZERO;
+        }
+        return dep;
+    }();
+
+    const BIPBlahDeploymentLogic logic(dep), optin_logic(optin_dep);
+    BIPBlahDeploymentLogic::Cache cache, optin_cache;
+
     // now we check the final period looks sane
 
     // get the info for the first block of the period
 
-    CBlockIndex* prev = blocks.FirstBlockInFinalPeriod(period)->pprev;
+    const CBlockIndex* prev = blocks.FirstBlockInFinalPeriod(period)->pprev;
 
     const int orig_since = logic.GetStateSinceHeightFor(cache, prev);
-    const State orig_state = logic.GetStateFor(cache, prev);
+    const auto orig_state = logic.GetStateFor(cache, prev);
 
     // statistics for a null period
     VersionBits::Stats last_stats;
     last_stats.period = period;
-    last_stats.threshold = threshold;
+    last_stats.threshold = dep.optin_threshold;
     last_stats.count = last_stats.elapsed = 0;
-    last_stats.possible = (period >= threshold);
+    last_stats.possible = (last_stats.period >= last_stats.threshold);
     std::vector<bool> last_signals{};
 
     int prev_next_height = (prev == nullptr ? 0 : prev->nHeight + 1);
@@ -250,20 +271,33 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         const int in_period = (current_block->nHeight % period) + 1;
 
         // check that after mining this block stats change as expected
+        const auto state = logic.GetStateFor(cache, current_block);
+        const int since = logic.GetStateSinceHeightFor(cache, current_block);
         std::vector<bool> signals;
-        const auto stats = logic.GetStateStatisticsFor(current_block, &signals);
-        const auto stats_no_signals = logic.GetStateStatisticsFor(current_block);
+        const auto stats = logic.GetStateStatisticsFor(current_block, state, &signals);
+        const auto stats_no_signals = logic.GetStateStatisticsFor(current_block, state);
         assert(stats.period == stats_no_signals.period && stats.threshold == stats_no_signals.threshold
                && stats.elapsed == stats_no_signals.elapsed && stats.count == stats_no_signals.count
                && stats.possible == stats_no_signals.possible);
 
         assert(stats.period == period);
-        assert(stats.threshold == threshold);
+        if (state.code == State::OPT_OUT || state.code == State::OPT_OUT_WAIT) {
+            assert(stats.threshold == dep.optout_threshold);
+        } else {
+            assert(stats.threshold == dep.optin_threshold);
+        }
+
         assert(stats.elapsed == in_period);
         assert(stats.elapsed == last_stats.elapsed + 1);
         assert(stats.count == last_stats.count + (signal ? 1 : 0));
         assert(stats.count == blocks_sig);
-        assert(stats.possible == (stats.count + period >= stats.elapsed + threshold));
+
+        if (stats.threshold > stats.period) {
+            assert(!stats.possible);
+        } else {
+            assert(stats.possible == (stats.elapsed - stats.count <= stats.period - stats.threshold));
+        }
+
         last_stats = stats;
 
         assert(signals.size() == (size_t)stats.elapsed && stats.elapsed > 0);
@@ -272,13 +306,42 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         last_signals.push_back(signal);
         assert(signals == last_signals);
 
-        const State state = logic.GetStateFor(cache, current_block);
-        const int since = logic.GetStateSinceHeightFor(cache, current_block);
         if (in_period != period) {
             // state and since don't change within the period
             assert(state == orig_state);
             assert(since == orig_since);
         } else {
+            // check consitency with optin-only deployment params
+            const auto optin_state = optin_logic.GetStateFor(optin_cache, current_block);
+            const int optin_since = optin_logic.GetStateSinceHeightFor(optin_cache, current_block);
+            std::vector<bool> optin_signals;
+            const auto optin_stats = optin_logic.GetStateStatisticsFor(current_block, optin_state, &optin_signals);
+
+            assert(stats.period == optin_stats.period
+                   && stats.elapsed == optin_stats.elapsed && stats.count == optin_stats.count);
+            if (optin_stats.threshold > optin_stats.period) {
+                assert(!optin_stats.possible);
+            } else {
+                assert(optin_stats.possible == (optin_stats.elapsed - optin_stats.count <= optin_stats.period - optin_stats.threshold));
+            }
+            if (optin_state.code == state.code) {
+                assert(optin_state.data == state.data);
+                if (state.code == State::FAILED) {
+                    assert(optin_since <= since);
+                } else {
+                    assert(optin_since == since);
+                }
+                assert(optin_stats.threshold == stats.threshold);
+                assert(state.code != State::OPT_OUT_WAIT && state.code != State::OPT_OUT);
+            } else {
+                assert(optin_state.code == State::FAILED);
+                assert(optin_state.data == 0);
+                assert(optin_since <= since);
+                assert(state.code == State::OPT_OUT_WAIT || state.code == State::OPT_OUT || state.code == State::LOCKED_IN || state.code == State::ACTIVE);
+                assert(optin_stats.threshold == optin_dep.optin_threshold);
+            }
+            assert(optin_signals == signals);
+
             // check possible state transition at final block
 
             // since is straightforward:
@@ -297,45 +360,95 @@ FUZZ_TARGET_INIT(versionbits, initialize)
             if (always_active_test || never_active_test) {
                 assert(since == 0);
             } else {
-                assert((since == 0) == (state == State::DEFINED));
+                assert((since == 0) == (state.code == State::DEFINED));
             }
 
             // state is where everything interesting is
-            if (always_active_test) assert(state == State::ACTIVE);
-            if (never_active_test) assert(state == State::FAILED);
+            if (always_active_test) assert(state.code == State::ACTIVE);
+            if (never_active_test) assert(state.code == State::FAILED);
 
-            switch (state) {
+            // state data only changes when state code does
+            if (state.code == orig_state.code) {
+                assert(state.data == orig_state.data);
+            }
+
+            switch (state.code) {
             case State::DEFINED:
-                assert(orig_state == State::DEFINED);
-                assert(current_block->GetMedianTimePast() < dep.nStartTime);
+                assert(state.data == 0);
+                assert(orig_state.code == State::DEFINED);
+                assert(current_block->GetMedianTimePast() < dep.optin_start);
                 break;
-            case State::STARTED:
-                assert(current_block->GetMedianTimePast() >= dep.nStartTime);
-                if (orig_state == State::STARTED) {
-                    assert(blocks_sig < threshold);
-                    assert(current_block->GetMedianTimePast() < dep.nTimeout);
+            case State::OPT_IN:
+                assert(state.data == 0);
+                assert(current_block->GetMedianTimePast() >= dep.optin_start);
+                if (orig_state.code == State::OPT_IN) {
+                    assert(blocks_sig < dep.optin_threshold);
+                    assert(current_block->GetMedianTimePast() < dep.optin_timeout);
                 } else {
-                    assert(orig_state == State::DEFINED);
+                    assert(orig_state.code == State::DEFINED);
                 }
                 break;
-            case State::LOCKED_IN:
-                if (orig_state == State::LOCKED_IN) {
-                    assert(current_block->nHeight + 1 < min_activation);
+            case State::OPT_OUT_WAIT:
+                assert(dep.optout_block_height % period == 0); // unreachable otherwise
+                assert(state.data == 0);
+                assert(current_block->nHeight < dep.optout_block_height);
+                if (orig_state.code == State::OPT_IN) {
+                    assert(blocks_sig < dep.optin_threshold);
+                    assert(current_block->GetMedianTimePast() >= dep.optin_timeout);
                 } else {
-                    assert(orig_state == State::STARTED);
-                    assert(blocks_sig >= threshold);
+                    assert(orig_state.code == State::OPT_OUT_WAIT);
                 }
                 break;
-            case State::ACTIVE:
-                assert(always_active_test || min_activation <= current_block->nHeight + 1);
-                assert(orig_state == State::ACTIVE || orig_state == State::LOCKED_IN);
+            case State::OPT_OUT: // count if first block in period has MTP greater than data
+                assert(dep.optout_block_height % period == 0 && optout_correct_block); // unreachable otherwise
+                assert(dep.optout_block_height <= current_block->nHeight);
+                assert(dep.optout_block_hash == blocks.GetBlockHash(dep.optout_block_height));
+                if (orig_state.code == State::OPT_OUT) {
+                    const CBlockIndex* first_block = current_block->GetAncestor(current_block->nHeight + 1 - period);
+                    assert(first_block->GetMedianTimePast() < state.data * 60);
+                } else {
+                    assert(orig_state.code == State::OPT_OUT_WAIT);
+                    assert(current_block->nHeight + 1 == dep.optout_block_height + period);
+                }
+                break;
+            case State::LOCKED_IN: // switch to ACTIVE when MTP greater than data
+                if (orig_state.code == State::LOCKED_IN) {
+                    assert(current_block->GetMedianTimePast() < state.data * 60);
+                } else {
+                    if (orig_state.code == State::OPT_IN) {
+                        assert(blocks_sig >= dep.optin_threshold);
+                    } else {
+                        assert(orig_state.code == State::OPT_OUT);
+                        assert(blocks_sig < dep.optout_threshold);
+                    }
+                }
+                break;
+            case State::ACTIVE: // data = period + (height of first block greater than LOCKED_IN data)
+                if (orig_state.code == State::LOCKED_IN) {
+                    assert(current_block->GetMedianTimePast() >= orig_state.data);
+                    assert(state.data > current_block->nHeight);
+                } else {
+                    assert(orig_state.code == State::ACTIVE);
+                    assert(state.data >= 0 && state.data <= current_block->nHeight);
+                }
                 break;
             case State::FAILED:
-                assert(never_active_test || current_block->GetMedianTimePast() >= dep.nTimeout);
-                if (orig_state == State::STARTED) {
-                    assert(blocks_sig < threshold);
+                assert(state.data == 0);
+                assert(never_active_test || current_block->GetMedianTimePast() >= dep.optin_timeout);
+                if (orig_state.code == State::OPT_IN) {
+                    assert(blocks_sig < dep.optin_threshold);
+                } else if (orig_state.code == State::OPT_OUT) {
+                    const CBlockIndex* first_block = current_block->GetAncestor(current_block->nHeight + 1 - period);
+                    assert(first_block->GetMedianTimePast() >= state.data * 60);
+                    assert(blocks_sig >= dep.optout_threshold);
+                } else if (orig_state.code == State::OPT_OUT_WAIT) {
+                    assert(dep.optout_block_height % period == 0); // would not have entered WAIT otherwise
+                    assert(dep.optout_block_height <= current_block->nHeight); // should still be WAITing otherwise
+                    assert(dep.optout_block_hash != blocks.GetBlockHash(dep.optout_block_height));
+                         // should not have FAILED
+                    assert(!optout_correct_block); // test case bug?
                 } else {
-                    assert(orig_state == State::FAILED);
+                    assert(orig_state.code == State::FAILED);
                 }
                 break;
             default:
@@ -344,10 +457,9 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
             if (blocks.size() >= period * max_periods) {
                 // we chose the timeout (and block times) so that by the time we have this many blocks it's all over
-                assert(state == State::ACTIVE || state == State::FAILED);
+                assert(state.code == State::ACTIVE || state.code == State::FAILED);
             }
         }
     });
-
 }
 } // namespace
