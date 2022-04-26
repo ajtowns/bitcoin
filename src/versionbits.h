@@ -191,7 +191,7 @@ public:
         DEFINED,
         OPT_IN,
         OPT_OUT_WAIT,
-        OPT_OUT,      // count if first block in period has MTP greater than data
+        OPT_OUT,
         LOCKED_IN,    // switch to ACTIVE when MTP greater than data
         ACTIVE,       // data = period + (height of first block greater than LOCKED_IN data)
         FAILED,

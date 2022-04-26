@@ -67,20 +67,22 @@ struct BIPBlahDeployment
     int bit{28};
     int64_t optin_start{NEVER_ACTIVE};
     int64_t optin_timeout{NEVER_ACTIVE};
-    int64_t optin_earliest_activation{MAX};
+    int64_t optin_earliest_activation{MAX64};
     int optin_threshold{MAX};
 
+    /* height and hash of the final OPT_IN block */
     int optout_block_height{0};
     uint256 optout_block_hash{};
 
-    int optout_delay_mins{MAX};
-    int optout_delay_activation_mins{MAX};
+    int64_t optout_start{MAX64};
+    int64_t optout_earliest_activation{MAX64};
     int optout_threshold{0};
 
-    static constexpr int MAX{std::numeric_limits<int>::max()};
     static constexpr int ALWAYS_ACTIVE{-1};
     static constexpr int NEVER_ACTIVE{-2};
-    static constexpr int64_t NO_TIMEOUT{std::numeric_limits<int64_t>::max()};
+    static constexpr int MAX{std::numeric_limits<int>::max()};
+    static constexpr int64_t MAX64{std::numeric_limits<int64_t>::max()};
+    static constexpr int64_t NO_TIMEOUT{MAX64};
 };
 
 enum DeploymentPos {

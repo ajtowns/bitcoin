@@ -58,7 +58,7 @@ private:
             header.hashPrevBlock = m_blockhash.at(size()-1);
         }
 
-        m_blockhash.at(size()) = ArithToUint256(uint64_t{size()});
+        m_blockhash.at(size()) = ArithToUint256(uint64_t{65536 + size()});
 
         auto current_block = std::make_unique<CBlockIndex>(header);
         current_block->phashBlock = &m_blockhash.at(size());
@@ -196,7 +196,7 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
     const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
     const bool never_active_test = (always_test ? !always_active_test : false);
 
-    const int optout_block_height = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 4) + period/2);
+    const int optout_block_height = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * max_periods);
     const bool optout_correct_block = fuzzed_data_provider.ConsumeBool();
 
     const auto optin_dep = [&]() {
@@ -221,11 +221,8 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
 
             dep.optout_block_height = 0;
             dep.optout_block_hash = uint256::ZERO;
-            const int64_t optout_block_time = block_start_time + interval * optout_block_height;
-            const int64_t target_optout_signal = pick_time(optout_block_height, period * (max_periods - 3));
-            const int64_t target_optout_active = fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(target_optout_signal, block_start_time + interval * period * (max_periods - 2));
-            dep.optout_delay_mins = (target_optout_signal - optout_block_time)/60;
-            dep.optout_delay_activation_mins = (target_optout_active - target_optout_signal)/60;
+            dep.optout_start = pick_time(0, period * (max_periods - 3));
+            dep.optout_earliest_activation = pick_time(0, period * (max_periods - 1));
         }
         return dep;
     }();
@@ -404,27 +401,24 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
                 }
                 break;
             case State::OPT_OUT_WAIT:
-                assert(dep.optout_block_height % period == 0); // unreachable otherwise
                 assert(state.data == 0);
-                assert(current_block->nHeight < dep.optout_block_height);
+                assert((dep.optout_block_height + 1) % period == 0); // unreachable otherwise
+                assert(optout_correct_block); // unreachable otherwise
                 if (orig_state.code == State::OPT_IN) {
+                    assert(dep.optout_block_height == current_block->nHeight);
                     assert(blocks_sig < dep.optin_threshold);
                     assert(current_block->GetMedianTimePast() >= dep.optin_timeout);
                 } else {
+                    assert(dep.optout_block_height < current_block->nHeight);
                     assert(orig_state.code == State::OPT_OUT_WAIT);
+                    assert(current_block->GetMedianTimePast() < dep.optout_start);
                 }
                 break;
             case State::OPT_OUT: // count if first block in period has MTP greater than data
-                assert(dep.optout_block_height % period == 0 && optout_correct_block); // unreachable otherwise
-                assert(dep.optout_block_height <= current_block->nHeight);
-                assert(dep.optout_block_hash == blocks.GetBlockHash(dep.optout_block_height));
-                if (orig_state.code == State::OPT_OUT) {
-                    const CBlockIndex* first_block = current_block->GetAncestor(current_block->nHeight + 1 - period);
-                    assert(first_block->GetMedianTimePast() < state.data * 60);
-                } else {
-                    assert(orig_state.code == State::OPT_OUT_WAIT);
-                    assert(current_block->nHeight + 1 == dep.optout_block_height + period);
-                }
+                assert(state.data == 0);
+                assert((dep.optout_block_height + 1) % period == 0); // unreachable otherwise
+                assert(optout_correct_block); // unreachable otherwise
+                assert(orig_state.code == State::OPT_OUT_WAIT);
                 break;
             case State::LOCKED_IN: // switch to ACTIVE when MTP greater than data
                 if (orig_state.code == State::LOCKED_IN) {
@@ -442,9 +436,14 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
                 if (orig_state.code == State::LOCKED_IN) {
                     assert(current_block->GetMedianTimePast() >= orig_state.data);
                     assert(state.data > current_block->nHeight);
+                    assert(state.data <= current_block->nHeight + period);
                 } else {
                     assert(orig_state.code == State::ACTIVE);
                     assert(state.data >= 0 && state.data <= current_block->nHeight);
+                }
+                assert(logic.ActivationHeight(state, current_block) == state.data);
+                if (!always_active_test) {
+                    assert(logic.ActivationHeight(cache, current_block->GetAncestor(state.data - period)) == state.data);
                 }
                 break;
             case State::FAILED:
@@ -453,15 +452,7 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
                 if (orig_state.code == State::OPT_IN) {
                     assert(blocks_sig < dep.optin_threshold);
                 } else if (orig_state.code == State::OPT_OUT) {
-                    const CBlockIndex* first_block = current_block->GetAncestor(current_block->nHeight + 1 - period);
-                    assert(first_block->GetMedianTimePast() >= state.data * 60);
                     assert(blocks_sig >= dep.optout_threshold);
-                } else if (orig_state.code == State::OPT_OUT_WAIT) {
-                    assert(dep.optout_block_height % period == 0); // would not have entered WAIT otherwise
-                    assert(dep.optout_block_height <= current_block->nHeight); // should still be WAITing otherwise
-                    assert(dep.optout_block_hash != blocks.GetBlockHash(dep.optout_block_height));
-                         // should not have FAILED
-                    assert(!optout_correct_block); // test case bug?
                 } else {
                     assert(orig_state.code == State::FAILED);
                 }

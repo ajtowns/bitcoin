@@ -351,8 +351,8 @@ public:
                 if (count >= dep.optin_threshold) {
                     return {StateCode::LOCKED_IN, dep.optin_earliest_activation/60};
                 } else if (pindexPrev->GetMedianTimePast() >= dep.optin_timeout) {
-                    if (dep.optout_block_height % dep.period == 0
-                        && pindexPrev->nHeight < dep.optout_block_height)
+                    if (dep.optout_block_height == pindexPrev->nHeight
+                        && pindexPrev->GetBlockHash() == dep.optout_block_hash)
                     {
                         return {StateCode::OPT_OUT_WAIT, 0};
                     } else {
@@ -362,28 +362,18 @@ public:
                 break;
             }
             case StateCode::OPT_OUT_WAIT: {
-               if (pindexPrev->nHeight + 1 == dep.optout_block_height + dep.period) {
-                   const CBlockIndex* pindexFlag = pindexPrev->GetAncestor(dep.optout_block_height);
-                   if (pindexFlag->GetBlockHash() != dep.optout_block_hash) {
-                       return {StateCode::FAILED, 0};
-                   } else {
-                       return {StateCode::OPT_OUT, pindexFlag->GetMedianTimePast()/60 + dep.optout_delay_mins};
-                   }
+               if (pindexPrev->GetMedianTimePast() >= dep.optout_start) {
+                   return {StateCode::OPT_OUT, 0};
                }
                break;
             }
             case StateCode::OPT_OUT: {
-                if (pindexPrev->GetMedianTimePast() < state.data * 60) break;
-                const CBlockIndex* pindexStart = pindexPrev->GetAncestor(pindexPrev->nHeight - (dep.period - 1));
-                const int64_t start_mtp = pindexStart->GetMedianTimePast();
-                if (start_mtp < state.data * 60) break;
-
                 // We need to count
                 const int count = Count(*this, pindexPrev);
                 if (count >= dep.optout_threshold) {
                     return {StateCode::FAILED, 0};
                 } else {
-                    return {StateCode::LOCKED_IN, start_mtp/60 + dep.optout_delay_activation_mins};
+                    return {StateCode::LOCKED_IN, dep.optout_earliest_activation/60};
                 }
                 break;
             }
@@ -411,8 +401,8 @@ std::optional<int> BIPBlahDeploymentLogic::ActivationHeight(BIPBlahDeploymentLog
     if (state.code == StateCode::ACTIVE) return static_cast<int>(state.data);
     if (state.code == StateCode::LOCKED_IN) {
         if (pindexPrev->GetMedianTimePast() >= state.data * 60) {
-            auto step{dep.period};
-            while (step > 1 && pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
+            auto step{pindexPrev->nHeight % dep.period};
+            while (step > 0 && pindexPrev->pprev != nullptr && pindexPrev->pprev->GetMedianTimePast() >= state.data * 60) {
                 pindexPrev = pindexPrev->pprev;
                 --step;
             }
