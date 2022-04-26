@@ -137,21 +137,25 @@ public:
     }
 };
 
-std::unique_ptr<const CChainParams> g_params;
+
+int64_t g_genesis_time = 0;
+int64_t g_interval = 600;
 
 void initialize()
 {
+    std::unique_ptr<const CChainParams> g_params;
     // this is actually comparatively slow, so only do it once
     g_params = CreateChainParams(ArgsManager{}, CBaseChainParams::MAIN);
     assert(g_params != nullptr);
+    g_genesis_time = g_params->GenesisBlock().nTime;
+    g_interval = g_params->GetConsensus().nPowTargetSpacing;
 }
 
 constexpr uint32_t MAX_START_TIME = 4102444800; // 2100-01-01
 
 FUZZ_TARGET_INIT(versionbitsblah, initialize)
 {
-    const CChainParams& params = *g_params;
-    const int64_t interval = params.GetConsensus().nPowTargetSpacing;
+    const int64_t interval = g_interval;
     assert(interval > 1); // need to be able to halve it
     assert(interval < std::numeric_limits<int32_t>::max());
 
@@ -166,7 +170,7 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
     // block_start_time is at the end of the range above
     assert(std::numeric_limits<uint32_t>::max() - MAX_START_TIME > interval * MAX_BLOCKS);
 
-    const int64_t block_start_time = fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(params.GenesisBlock().nTime, MAX_START_TIME);
+    const int64_t block_start_time = fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(g_genesis_time, MAX_START_TIME);
 
     // what values for version will we use to signal / not signal?
     const int32_t ver_signal = fuzzed_data_provider.ConsumeIntegral<int32_t>();
@@ -192,7 +196,7 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
     const bool always_active_test = (always_test ? fuzzed_data_provider.ConsumeBool() : false);
     const bool never_active_test = (always_test ? !always_active_test : false);
 
-    const int optout_block_height = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 2));
+    const int optout_block_height = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * (max_periods - 4) + period/2);
     const bool optout_correct_block = fuzzed_data_provider.ConsumeBool();
 
     const auto optin_dep = [&]() {
@@ -211,15 +215,17 @@ FUZZ_TARGET_INIT(versionbitsblah, initialize)
             dep.optin_timeout = fuzzed_data_provider.ConsumeBool() ? Consensus::BIPBlahDeployment::NO_TIMEOUT : fuzzed_data_provider.ConsumeIntegral<int64_t>();
         } else {
             // pick the timestamp to switch
-            dep.optin_start = pick_time(0, period * (max_periods - 3));
-            dep.optin_timeout = pick_time(0, period * (max_periods - 2));
-            dep.optin_earliest_activation = pick_time(0, period * max_periods);
+            dep.optin_start = pick_time(0, period * (max_periods - 5));
+            dep.optin_timeout = pick_time(0, period * (max_periods - 4));
+            dep.optin_earliest_activation = pick_time(0, period * (max_periods - 1));
 
             dep.optout_block_height = 0;
             dep.optout_block_hash = uint256::ZERO;
-            int available_mins = (interval * (period * (max_periods - 2) - optout_block_height) + interval)/60;
-            dep.optout_delay_mins = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, available_mins);
-            dep.optout_delay_activation_mins = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, available_mins - dep.optout_delay_mins);
+            const int64_t optout_block_time = block_start_time + interval * optout_block_height;
+            const int64_t target_optout_signal = pick_time(optout_block_height, period * (max_periods - 3));
+            const int64_t target_optout_active = fuzzed_data_provider.ConsumeIntegralInRange<int64_t>(target_optout_signal, block_start_time + interval * period * (max_periods - 2));
+            dep.optout_delay_mins = (target_optout_signal - optout_block_time)/60;
+            dep.optout_delay_activation_mins = (target_optout_active - target_optout_signal)/60;
         }
         return dep;
     }();
