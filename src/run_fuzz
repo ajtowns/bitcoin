@@ -1,0 +1,7 @@
+#!/bin/sh
+
+make -j12 test/fuzz/fuzz
+
+export UBSAN_OPTIONS="suppressions=$(cd ..; pwd)/test/sanitizer_suppressions/ubsan:print_stacktrace=1:halt_on_error=1:report_error_type=1"
+
+exec nice $*
