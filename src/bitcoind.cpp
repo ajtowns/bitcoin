@@ -162,6 +162,10 @@ static bool AppInit(NodeContext& node, int argc, char* argv[])
         } catch (const std::exception& e) {
             return InitError(Untranslated(strprintf("%s\n", e.what())));
         }
+        // Disallow mainnet/testnet operation
+        if (Params().NetworkIDString() == CBaseChainParams::MAIN || Params().NetworkIDString() == CBaseChainParams::TESTNET) {
+            return InitError(Untranslated(strprintf("Selected network '%s' is unsupported for this client, select -regtest or -signet instead.\n", Params().NetworkIDString())));
+        }
 
         // Error out when loose non-argument tokens are encountered on command line
         for (int i = 1; i < argc; i++) {

@@ -621,6 +621,11 @@ int GuiMain(int argc, char* argv[])
         QMessageBox::critical(nullptr, PACKAGE_NAME, QObject::tr("Error: %1").arg(e.what()));
         return EXIT_FAILURE;
     }
+    // Disallow mainnet/testnet operation
+    if (Params().NetworkIDString() == CBaseChainParams::MAIN || Params().NetworkIDString() == CBaseChainParams::TESTNET) {
+        return InitError(Untranslated(strprintf("Selected network '%s' is unsupported for this client, select -regtest or -signet instead.\n", Params().NetworkIDString())));
+    }
+
 #ifdef ENABLE_WALLET
     // Parse URIs on command line
     PaymentServer::ipcParseCommandLine(argc, argv);
