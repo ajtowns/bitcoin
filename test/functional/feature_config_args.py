@@ -144,11 +144,11 @@ class ConfArgsTest(BitcoinTestFramework):
                 conf.write("wallet=foo\n")
             self.nodes[0].assert_start_raises_init_error(expected_msg=f'Error: Config setting for -wallet only applied on {self.chain} network when in [{self.chain}] section.')
 
-        main_conf_file_path = self.nodes[0].datadir_path / "bitcoin_main.conf"
-        util.write_config(main_conf_file_path, n=0, chain='', extra_config=f'includeconf={inc_conf_file_path}\n')
-        with open(inc_conf_file_path, 'w', encoding='utf-8') as conf:
-            conf.write('acceptnonstdtxn=1\n')
-        self.nodes[0].assert_start_raises_init_error(extra_args=[f"-conf={main_conf_file_path}", "-allowignoredconf"], expected_msg='Error: acceptnonstdtxn is not currently supported for main chain')
+        #main_conf_file_path = self.nodes[0].datadir_path / "bitcoin_main.conf"
+        #util.write_config(main_conf_file_path, n=0, chain='', extra_config=f'includeconf={inc_conf_file_path}\n')
+        #with open(inc_conf_file_path, 'w', encoding='utf-8') as conf:
+        #    conf.write('acceptnonstdtxn=1\n')
+        #self.nodes[0].assert_start_raises_init_error(extra_args=[f"-conf={main_conf_file_path}", "-allowignoredconf"], expected_msg='Error: acceptnonstdtxn is not currently supported for main chain')
 
         with open(inc_conf_file_path, 'w', encoding='utf-8') as conf:
             conf.write('nono\n')
@@ -465,7 +465,7 @@ class ConfArgsTest(BitcoinTestFramework):
     def test_acceptstalefeeestimates_arg_support(self):
         self.log.info("Test -acceptstalefeeestimates option support")
         conf_file = self.nodes[0].datadir_path / "bitcoin.conf"
-        for chain, chain_name in {("main", ""), ("test", "testnet3"), ("signet", "signet"), ("testnet4", "testnet4")}:
+        for chain, chain_name in {("signet", "signet")}:
             util.write_config(conf_file, n=0, chain=chain_name, extra_config='acceptstalefeeestimates=1\n')
             self.nodes[0].assert_start_raises_init_error(expected_msg=f'Error: acceptstalefeeestimates is not supported on {chain} chain.')
         util.write_config(conf_file, n=0, chain="regtest")  # Reset to regtest
@@ -507,7 +507,7 @@ class ConfArgsTest(BitcoinTestFramework):
         self.test_ignored_conf()
         self.test_ignored_default_conf()
         self.test_acceptstalefeeestimates_arg_support()
-        self.test_testnet3_deprecation_msg()
+        #self.test_testnet3_deprecation_msg()
 
         # Remove the -datadir argument so it doesn't override the config file
         self.nodes[0].args = [arg for arg in self.nodes[0].args if not arg.startswith("-datadir")]
