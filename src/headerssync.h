@@ -117,6 +117,9 @@ public:
     /** Return the current state of our download */
     State GetState() const { return m_download_state; }
 
+    /** Return the current height seen in the INITIAL_DOWNLOAD phase */
+    int64_t GetCurrentHeight() const { return m_current_height; }
+
     /** Construct a HeadersSyncState object representing a headers sync via this
      *  download-twice mechanism).
      *
