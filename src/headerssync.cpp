@@ -298,10 +298,12 @@ std::vector<CBlockHeader> HeadersSyncState::PopHeadersReadyForAcceptance()
     return ret;
 }
 
-CBlockLocator HeadersSyncState::MakeNextHeadersRequest(const CBlockIndex* tip) const
+CBlockLocator HeadersSyncState::MakeNextHeadersRequest(const CBlockIndex* tip)
 {
     Assume(m_download_state != State::FINAL);
     if (m_download_state == State::FINAL) return {};
+
+    m_last_tip = tip;
 
     // Start with locator entries built from the provided tip.
     auto entries = LocatorEntries(tip != nullptr ? tip : m_chain_start);

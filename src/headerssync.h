@@ -163,7 +163,7 @@ public:
      * that tip. This permits the remote party to help us "skip ahead" if our global state has
      * progressed past where this sync object currently is (because another sync peer was faster,
      * perhaps). */
-    CBlockLocator MakeNextHeadersRequest(const CBlockIndex* tip) const;
+    CBlockLocator MakeNextHeadersRequest(const CBlockIndex* tip);
 
 private:
     /** Clear out all download state that might be in progress (freeing any used
@@ -200,6 +200,9 @@ private:
 
     /** Store the last block in our block index that the peer's chain builds from */
     const CBlockIndex* m_chain_start{nullptr};
+
+    /** Store the last tip that we suggested */
+    const CBlockIndex* m_last_tip{nullptr};
 
     /** Minimum work that we're looking for on this chain. */
     arith_uint256 m_minimum_required_work;
