@@ -620,7 +620,7 @@ private:
     bool IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfrom, const
                                       std::vector<CBlockHeader>& headers,
                                       std::vector<CBlockHeader>& previously_downloaded_headers,
-                                      const CBlockIndex* headers_tip);
+                                      const CBlockIndex* headers_tip)
         EXCLUSIVE_LOCKS_REQUIRED(peer.m_headers_sync_mutex);
     /** Check work on a headers chain to be processed, and if insufficient,
      * initiate our anti-DoS headers sync mechanism.
@@ -2736,7 +2736,7 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     }
 
     // Consider fetching more headers if we are not using our headers-sync mechanism.
-    if (nCount == MAX_HEADERS_RESULTS && !peer.m_headers_sync) {
+    if (nCount == MAX_HEADERS_RESULTS && WITH_LOCK(peer.m_headers_sync_mutex, return peer.m_headers_sync == nullptr)) {
         // Headers message had its maximum size; the peer may have more headers.
         if (MaybeSendGetHeaders(pfrom, m_chainman.ActiveChain().GetLocator(pindexLast), peer)) {
             LogPrint(BCLog::NET, "more getheaders (%d) to end to peer=%d (startheight:%d)\n",
