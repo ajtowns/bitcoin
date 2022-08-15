@@ -2409,6 +2409,7 @@ bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfro
     if (peer.m_headers_sync) {
         auto result = peer.m_headers_sync->ProcessNextHeaders(headers, headers.size() == MAX_HEADERS_RESULTS);
         if (result.request_more) {
+            assert(result.success);
             // Use the parent of the best known header as tip to mix into the locator to send out.
             // This matches the behavior of the initial getheaders locator sent, for the same
             // reason: making sure we always get information back we can use to prime headers
@@ -2434,6 +2435,7 @@ bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfro
 
         if (peer.m_headers_sync->GetState() == HeadersSyncState::State::FINAL) {
             peer.m_headers_sync.reset(nullptr);
+            if (!result.success) return true; // don't continue processing if we failed badly
         }
 
         previously_downloaded_headers.swap(result.pow_validated_headers);
@@ -2684,15 +2686,29 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     bool already_validated_work = false;
 
     // If we're in the middle of headers sync, let it do its magic.
+    bool abort_syncing = false;
     {
         LOCK(peer.m_headers_sync_mutex);
         if (IsContinuationOfLowWorkHeadersSync(peer, pfrom, headers, previously_downloaded_headers, headers_tip)) {
-            return;
+            if (!peer.m_headers_sync) {
+                abort_syncing = true; // lock ordering is annoying
+            } else {
+                return;
+            }
         } else if (!previously_downloaded_headers.empty()) {
             // Headers sync may have returned headers for processing.
             headers_to_process = &previously_downloaded_headers;
-            already_validated_work =true;
+            already_validated_work = true;
         }
+    }
+    if (abort_syncing) {
+        LOCK(cs_main);
+        CNodeState* state = State(peer.m_id);
+        if (state->fSyncStarted) {
+            state->fSyncStarted = false;
+            --nSyncStarted;
+        }
+        return;
     }
 
     // Do these headers connect to something in our block index?
@@ -3512,6 +3528,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                             pfrom.GetId());
                 }
                 if (!state.fSyncStarted) {
+                    state.fSyncStarted = true;
+                    ++nSyncStarted;
                     peer->m_inv_triggered_getheaders_before_sync = true;
                     // Update the last block hash that triggered a new headers
                     // sync, so that we don't turn on headers sync with more
