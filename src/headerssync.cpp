@@ -60,6 +60,27 @@ void HeadersSyncState::Finalize()
     m_download_state = State::FINAL;
 }
 
+/** Check the next commitment was satisfied */
+bool HeadersSyncState::CheckCommitment(int64_t next_height, const uint256& hash)
+{
+    bool commitment = m_hasher(hash) & 1;
+    if (m_header_commitments.size() == 0) {
+        LogPrint(BCLog::HEADERSSYNC, "Initial headers sync aborted with peer=%d: commitment overrun at height=%i (redownload phase)\n", m_id, next_height);
+        // Somehow our peer managed to feed us a different chain and
+        // we've run out of commitments.
+        return false;
+    }
+    bool expected_commitment = m_header_commitments.front();
+    m_header_commitments.pop_front();
+    if (commitment != expected_commitment) {
+        LogPrint(BCLog::HEADERSSYNC, "Initial headers sync aborted with peer=%d: commitment mismatch at height=%i (redownload phase)\n", m_id, next_height);
+        return false;
+    }
+
+    return true;
+}
+
+
 /** Process the next batch of headers received from our peer.
  *  Validate and store commitments, and compare total chainwork to our target to
  *  see if we can switch to REDOWNLOAD mode.  */
@@ -93,18 +114,59 @@ HeadersSyncState::ProcessingResult HeadersSyncState::ProcessNextHeaders(const
             }
         }
     } else if (m_download_state == State::REDOWNLOAD) {
-        // During REDOWNLOAD, we compare our stored commitments to what we
-        // receive, and add headers to our redownload buffer. When the buffer
-        // gets big enough (meaning that we've checked enough commitments),
-        // we'll return a batch of headers to the caller for processing.
         ret.success = true;
-        for (const auto& hdr : received_headers) {
-            if (!ValidateAndStoreRedownloadedHeader(hdr)) {
-                // Something went wrong -- the peer gave us an unexpected chain.
-                // We could consider looking at the reason for failure and
-                // punishing the peer, but for now just give up on sync.
-                ret.success = false;
+
+        const auto& first_hdr = received_headers.front();
+        if (first_hdr.hashPrevBlock != m_redownload_buffer_last_hash) {
+            // We skipped headers that were in the last tip already knew about, so catch up
+            const CBlockIndex* tip = m_last_tip;
+            while (ret.success) {
+                if (!tip || tip->nHeight <= m_redownload_buffer_last_height) {
+                    LogPrint(BCLog::HEADERSSYNC, "Initial headers sync aborted with peer=%d: non-connecting headers message at height=%i (redownload phase)\n", m_id, m_redownload_buffer_last_height);
+                    ret.success = false;
+                    break;
+                }
+                if (tip->GetBlockHash() != first_hdr.hashPrevBlock) {
+                    tip = tip->pprev;
+                    continue;
+                }
+                // found the header anchor point!
+
+                // check any skipped commitments
+                for (int64_t next_height = m_redownload_buffer_last_height + 1; next_height <= tip->nHeight; ++next_height) {
+                    if (next_height % HEADER_COMMITMENT_PERIOD == m_commit_offset) {
+                        if (!CheckCommitment(next_height, tip->GetAncestor(next_height)->GetBlockHash())) {
+                            ret.success = false;
+                            break;
+                        }
+                    }
+                }
+
+                // commitments were all fine, so catch up as if we'd
+                // downloaded from this peer directly
+                LogPrint(BCLog::HEADERSSYNC, "Catch up with peer=%d: skipped headers from height=%i to %i, but it's all good (redownload phase)\n", m_id, m_redownload_buffer_last_height, tip->nHeight);
+
+                m_redownload_buffer_last_height = tip->nHeight;
+                m_redownload_buffer_last_hash = tip->GetBlockHash();
+                m_redownload_chain_work = tip->nChainWork;
                 break;
+            }
+        }
+
+        if (ret.success) {
+            // During REDOWNLOAD, we compare our stored commitments to what we
+            // receive, and add headers to our redownload buffer. When the buffer
+            // gets big enough (meaning that we've checked enough commitments),
+            // we'll return a batch of headers to the caller for processing.
+
+            for (const auto& hdr : received_headers) {
+                if (!ValidateAndStoreRedownloadedHeader(hdr)) {
+                    // Something went wrong -- the peer gave us an unexpected chain.
+                    // We could consider looking at the reason for failure and
+                    // punishing the peer, but for now just give up on sync.
+                    ret.success = false;
+                    break;
+                }
             }
         }
 
@@ -259,19 +321,9 @@ bool HeadersSyncState::ValidateAndStoreRedownloadedHeader(const CBlockHeader& he
     // our second, and we don't want to return failure after we've seen our
     // target blockhash just because we ran out of commitments.
     if (!m_process_all_remaining_headers && next_height % HEADER_COMMITMENT_PERIOD == m_commit_offset) {
-         bool commitment = m_hasher(header.GetHash()) & 1;
-         if (m_header_commitments.size() == 0) {
-            LogPrint(BCLog::HEADERSSYNC, "Initial headers sync aborted with peer=%d: commitment overrun at height=%i (redownload phase)\n", m_id, next_height);
-            // Somehow our peer managed to feed us a different chain and
-            // we've run out of commitments.
-            return false;
-        }
-        bool expected_commitment = m_header_commitments.front();
-        m_header_commitments.pop_front();
-        if (commitment != expected_commitment) {
-            LogPrint(BCLog::HEADERSSYNC, "Initial headers sync aborted with peer=%d: commitment mismatch at height=%i (redownload phase)\n", m_id, next_height);
-            return false;
-        }
+         if (!CheckCommitment(next_height, header.GetHash())) {
+             return false;
+         }
     }
 
     // Store this header for later processing.

@@ -191,6 +191,9 @@ private:
     /** Return a set of headers that satisfy our proof-of-work threshold */
     std::vector<CBlockHeader> PopHeadersReadyForAcceptance();
 
+    /** Check the next commitment was satisfied */
+    bool CheckCommitment(int64_t next_height, const uint256& hash);
+
 private:
     /** NodeId of the peer (used for log messages) **/
     const NodeId m_id;
