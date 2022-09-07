@@ -42,6 +42,8 @@ typedef std::vector<unsigned char> valtype;
 // In script_tests.cpp
 UniValue read_json(const std::string& jsondata);
 
+#define SCRIPT_VERIFY_NAME(x) {std::string(#x), (unsigned int)SCRIPT_VERIFY_##x}
+
 static std::map<std::string, unsigned int> mapFlagNames = {
     {std::string("P2SH"), (unsigned int)SCRIPT_VERIFY_P2SH},
     {std::string("STRICTENC"), (unsigned int)SCRIPT_VERIFY_STRICTENC},
@@ -64,6 +66,8 @@ static std::map<std::string, unsigned int> mapFlagNames = {
     {std::string("DISCOURAGE_UPGRADABLE_PUBKEYTYPE"), (unsigned int)SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE},
     {std::string("DISCOURAGE_OP_SUCCESS"), (unsigned int)SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS},
     {std::string("DISCOURAGE_UPGRADABLE_TAPROOT_VERSION"), (unsigned int)SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_TAPROOT_VERSION},
+    SCRIPT_VERIFY_NAME(ANYPREVOUT),
+    SCRIPT_VERIFY_NAME(DISCOURAGE_ANYPREVOUT),
 };
 
 unsigned int ParseScriptFlags(std::string strFlags)
