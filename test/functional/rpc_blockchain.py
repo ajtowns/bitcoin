@@ -226,6 +226,7 @@ class BlockchainTest(BitcoinTestFramework):
                 'height': 0,
                 'active': True
             }
+            'anyprevout': {'type': 'buried', 'active': True, 'height': 0}
           }
         })
 
