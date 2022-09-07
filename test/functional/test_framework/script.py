@@ -787,6 +787,7 @@ def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index = 0, scriptpat
     out_type = SIGHASH_ALL if hash_type == SIGHASH_DEFAULT else hash_type & SIGHASH_OUTMASK
     in_type = hash_type & SIGHASH_INMASK
     spk = spent_utxos[input_index].scriptPubKey
+
     ss = bytes([0, hash_type]) # epoch, hash_type
     ss += struct.pack("<i", txTo.nVersion)
     ss += struct.pack("<I", txTo.nLockTime)
@@ -814,7 +815,7 @@ def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index = 0, scriptpat
         ss += ser_string(spk)
         ss += struct.pack("<I", txTo.vin[input_index].nSequence)
     elif in_type == SIGHASH_ANYPREVOUTANYSCRIPT:
-        ss += struct.pack("<I", txTo.vin[input_index].nSequence) 
+        ss += struct.pack("<I", txTo.vin[input_index].nSequence)
     else:
         ss += struct.pack("<I", input_index)
     if (spend_type & 1):
@@ -830,10 +831,13 @@ def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index = 0, scriptpat
         ss += bytes([key_ver])
         ss += struct.pack("<i", codeseparator_pos)
 
-    if in_type in [SIGHASH_ANYPREVOUT, SIGHASH_ANYPREVOUTANYSCRIPT]:
-        pass # TODO: what should len(ss) be?
-    else: 
-        assert len(ss) ==  175 - (in_type == SIGHASH_ANYONECANPAY) * 49 - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32 + (annex is not None) * 32 + scriptpath * 37
+    assert len(ss) == (175 - (in_type == SIGHASH_ANYONECANPAY) * 49
+                           - (in_type == SIGHASH_ANYPREVOUT) * 85
+                           - (in_type == SIGHASH_ANYPREVOUTANYSCRIPT) * 128
+                           - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32
+                           + (annex is not None) * 32
+                           + scriptpath * 37
+                           - (scriptpath and in_type == SIGHASH_ANYPREVOUTANYSCRIPT) * 32)
     return ss
 
 def TaprootSignatureHash(*args, **kwargs):
