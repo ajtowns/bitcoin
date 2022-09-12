@@ -976,7 +976,8 @@ bool MemPoolAccept::PolicyScriptChecks(const ATMPArgs& args, Workspace& ws)
     const CTransaction& tx = *ws.m_ptx;
     TxValidationState& state = ws.m_state;
 
-    constexpr unsigned int scriptVerifyFlags = STANDARD_SCRIPT_VERIFY_FLAGS;
+    const bool apo_active = DeploymentActiveAfter(m_active_chainstate.m_chain.Tip(), args.m_chainparams.GetConsensus(), Consensus::DEPLOYMENT_ANYPREVOUT);
+    const unsigned int scriptVerifyFlags = STANDARD_SCRIPT_VERIFY_FLAGS | (apo_active ? SCRIPT_VERIFY_NONE : SCRIPT_VERIFY_DISCOURAGE_ANYPREVOUT);
 
     // Check input scripts and signatures.
     // This is done last to help prevent CPU exhaustion denial-of-service attacks.
@@ -1854,6 +1855,11 @@ unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consensus::Par
     // Enforce Taproot (BIP340-BIP342)
     if (DeploymentActiveAt(*pindex, consensusparams, Consensus::DEPLOYMENT_TAPROOT)) {
         flags |= SCRIPT_VERIFY_TAPROOT;
+
+        // Enforce ANYPREVOUT (BIP118)
+        if (DeploymentActiveAt(*pindex, consensusparams, Consensus::DEPLOYMENT_ANYPREVOUT)) {
+            flags |= SCRIPT_VERIFY_ANYPREVOUT;
+        }
     }
 
     // Enforce BIP147 NULLDUMMY (activated simultaneously with segwit)
