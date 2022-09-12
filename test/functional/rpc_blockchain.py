@@ -188,6 +188,7 @@ class BlockchainTest(BitcoinTestFramework):
           "hash": blockhash,
           "height": height,
           "deployments": {
+            'bip16': {'type': 'buried', 'active': True, 'height': 0},
             'bip34': {'type': 'buried', 'active': True, 'height': 2},
             'bip66': {'type': 'buried', 'active': True, 'height': 3},
             'bip65': {'type': 'buried', 'active': True, 'height': 4},
