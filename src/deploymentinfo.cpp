@@ -21,6 +21,8 @@ std::string DeploymentName(Consensus::BuriedDeployment dep)
     switch (dep) {
     case Consensus::DEPLOYMENT_HEIGHTINCB:
         return "bip34";
+    case Consensus::DEPLOYMENT_P2SH:
+        return "bip16";
     case Consensus::DEPLOYMENT_CLTV:
         return "bip65";
     case Consensus::DEPLOYMENT_DERSIG:
@@ -44,6 +46,8 @@ bool BuriedException(Consensus::BuriedDeployment dep, uint32_t flags)
     case Consensus::DEPLOYMENT_CSV:
     case Consensus::DEPLOYMENT_SEGWIT:
         break;
+    case Consensus::DEPLOYMENT_P2SH:
+        return (flags & SCRIPT_VERIFY_P2SH) == 0;
     case Consensus::DEPLOYMENT_TAPROOT:
         return (flags & SCRIPT_VERIFY_TAPROOT) == 0;
     } // no default case, so the compiler can warn about missing cases

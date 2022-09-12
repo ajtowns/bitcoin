@@ -21,6 +21,7 @@ namespace Consensus {
 enum BuriedDeployment : int16_t {
     // buried deployments get negative values to avoid overlap with DeploymentPos
     DEPLOYMENT_HEIGHTINCB = std::numeric_limits<int16_t>::min(),
+    DEPLOYMENT_P2SH,
     DEPLOYMENT_CLTV,
     DEPLOYMENT_DERSIG,
     DEPLOYMENT_CSV,
@@ -136,6 +137,8 @@ struct Params {
         switch (dep) {
         case DEPLOYMENT_HEIGHTINCB:
             return BIP34Height;
+        case DEPLOYMENT_P2SH:
+            return 0;
         case DEPLOYMENT_CLTV:
             return BIP65Height;
         case DEPLOYMENT_DERSIG:
