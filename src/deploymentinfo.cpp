@@ -5,6 +5,7 @@
 #include <deploymentinfo.h>
 
 #include <consensus/params.h>
+#include <script/interpreter.h>
 
 const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] = {
     {
@@ -34,3 +35,29 @@ std::string DeploymentName(Consensus::BuriedDeployment dep)
     } // no default case, so the compiler can warn about missing cases
     return "";
 }
+
+#define FLAG_NAME(flag) {std::string(#flag), (uint32_t)SCRIPT_VERIFY_##flag},
+const std::map<std::string, uint32_t> g_verify_flag_names{
+    FLAG_NAME(P2SH)
+    FLAG_NAME(STRICTENC)
+    FLAG_NAME(DERSIG)
+    FLAG_NAME(LOW_S)
+    FLAG_NAME(SIGPUSHONLY)
+    FLAG_NAME(MINIMALDATA)
+    FLAG_NAME(NULLDUMMY)
+    FLAG_NAME(DISCOURAGE_UPGRADABLE_NOPS)
+    FLAG_NAME(CLEANSTACK)
+    FLAG_NAME(MINIMALIF)
+    FLAG_NAME(NULLFAIL)
+    FLAG_NAME(CHECKLOCKTIMEVERIFY)
+    FLAG_NAME(CHECKSEQUENCEVERIFY)
+    FLAG_NAME(WITNESS)
+    FLAG_NAME(DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM)
+    FLAG_NAME(WITNESS_PUBKEYTYPE)
+    FLAG_NAME(CONST_SCRIPTCODE)
+    FLAG_NAME(TAPROOT)
+    FLAG_NAME(DISCOURAGE_UPGRADABLE_PUBKEYTYPE)
+    FLAG_NAME(DISCOURAGE_OP_SUCCESS)
+    FLAG_NAME(DISCOURAGE_UPGRADABLE_TAPROOT_VERSION)
+};
+#undef FLAG_NAME
