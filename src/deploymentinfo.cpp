@@ -37,6 +37,19 @@ std::string DeploymentName(Consensus::BuriedDeployment dep)
     return "";
 }
 
+bool BuriedException(Consensus::BuriedDeployment dep, uint32_t flags)
+{
+    switch (dep) {
+    case Consensus::DEPLOYMENT_HEIGHTINCB:
+    case Consensus::DEPLOYMENT_CLTV:
+    case Consensus::DEPLOYMENT_DERSIG:
+    case Consensus::DEPLOYMENT_CSV:
+    case Consensus::DEPLOYMENT_SEGWIT:
+        break;
+    } // no default case, so the compiler can warn about missing cases
+    return false;
+}
+
 #define FLAG_NAME(flag) {std::string(#flag), (uint32_t)SCRIPT_VERIFY_##flag},
 const std::map<std::string, uint32_t> g_verify_flag_names{
     FLAG_NAME(P2SH)

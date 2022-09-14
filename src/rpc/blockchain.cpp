@@ -1120,6 +1120,29 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
 
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "buried");
+
+    UniValue exceptions(UniValue::VARR);
+    for (const auto& [height, blockflags] : chainman.GetConsensus().script_flag_exceptions) {
+        if (BuriedException(dep, blockflags.flags)) {
+            UniValue exc(UniValue::VOBJ);
+            exc.pushKV("height", height);
+            exc.pushKV("hash", blockflags.hash.ToString());
+            if (blockindex != nullptr && blockindex->nHeight >= height) {
+                const bool applied = (blockflags.hash == *Assert(blockindex->GetAncestor(height)->phashBlock));
+                exc.pushKV("applied", applied);
+                if (applied && blockindex->nHeight == height) {
+                    exc.pushKV("thisblock", true);
+                }
+            }
+            exceptions.push_back(exc);
+        }
+    }
+    if (!exceptions.empty()) {
+        UniValue buried(UniValue::VOBJ);
+        buried.pushKV("exceptions", exceptions);
+        rv.pushKV("buried", buried);
+    }
+
     // getdeploymentinfo reports the softfork as active from when the chain height is
     // one below the activation height
     rv.pushKV("active", DeploymentActiveAfter(blockindex, chainman, dep));
@@ -1272,6 +1295,19 @@ const std::vector<RPCResult> RPCHelpForDeployment{
     {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
     {RPCResult::Type::NUM, "height", /*optional=*/true, "height of the first block which the rules are or will be enforced (only for \"buried\" type, or \"bip9\" type with \"active\" status)"},
     {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block"},
+    {RPCResult::Type::OBJ, "buried", /*optional=*/true, "status of buried softforks (only for \"buried\" type)",
+    {
+        {RPCResult::Type::ARR, "exceptions", /*optional=*/true, "blocks where the rule does not apply",
+        {
+            {RPCResult::Type::OBJ, "", "details of exception",
+            {
+                {RPCResult::Type::NUM, "height", "height of exception"},
+                {RPCResult::Type::STR_HEX, "hash", "block hash"},
+                {RPCResult::Type::BOOL, "applied", /*optional=*/true, "if the excepton was applied"},
+                {RPCResult::Type::BOOL, "thisblock", /*optional=*/true, "if the excepton applied to this block"},
+            }},
+        }},
+    }},
     {RPCResult::Type::OBJ, "bip9", /*optional=*/true, "status of bip9 softforks (only for \"bip9\" type)",
     {
         {RPCResult::Type::NUM, "bit", /*optional=*/true, "the bit (0-28) in the block version field used to signal this softfork (only for \"started\" and \"locked_in\" status)"},
