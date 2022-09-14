@@ -1933,9 +1933,9 @@ unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Chainstat
     // For simplicity, always leave P2SH+WITNESS+TAPROOT on except for the two
     // violating blocks.
     uint32_t flags{SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS | SCRIPT_VERIFY_TAPROOT};
-    const auto it{consensusparams.script_flag_exceptions.find(*Assert(block_index.phashBlock))};
-    if (it != consensusparams.script_flag_exceptions.end()) {
-        flags = it->second;
+    const auto it{consensusparams.script_flag_exceptions.find(block_index.nHeight)};
+    if (it != consensusparams.script_flag_exceptions.end() && it->second.hash == *Assert(block_index.phashBlock)) {
+        flags = it->second.flags;
     }
 
     // Enforce the DERSIG (BIP66) rule

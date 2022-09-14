@@ -10,7 +10,7 @@
 
 #include <chrono>
 #include <limits>
-#include <map>
+#include <unordered_map>
 
 namespace Consensus {
 
@@ -79,7 +79,11 @@ struct Params {
      * - buried in the chain, and
      * - fail if the default script verify flags are applied.
      */
-    std::map<uint256, uint32_t> script_flag_exceptions;
+    struct BlockScriptFlagExceptions {
+        uint256 hash;
+        uint32_t flags;
+    };
+    std::unordered_map<int64_t, BlockScriptFlagExceptions> script_flag_exceptions;
     /** Block height and hash at which BIP34 becomes active */
     int BIP34Height;
     uint256 BIP34Hash;
