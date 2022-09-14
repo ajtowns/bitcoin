@@ -6,6 +6,7 @@
 
 #include <consensus/params.h>
 #include <script/interpreter.h>
+#include <tinyformat.h>
 
 const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_BITS_DEPLOYMENTS] = {
     {
@@ -61,3 +62,23 @@ const std::map<std::string, uint32_t> g_verify_flag_names{
     FLAG_NAME(DISCOURAGE_UPGRADABLE_TAPROOT_VERSION)
 };
 #undef FLAG_NAME
+
+std::string FormatScriptFlags(uint32_t flags)
+{
+    if (flags == 0) return "";
+
+    std::string res = "";
+    uint32_t leftover = flags;
+    for (const auto& [name, flag] : g_verify_flag_names) {
+        if ((flags & flag) != 0) {
+            if (!res.empty()) res += ",";
+            res += name;
+            leftover &= ~flag;
+        }
+    }
+    if (leftover != 0) {
+        if (!res.empty()) res += ",";
+        res += strprintf("0x%08x", leftover);
+    }
+    return res;
+}

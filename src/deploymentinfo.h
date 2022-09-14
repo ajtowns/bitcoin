@@ -29,4 +29,6 @@ inline std::string DeploymentName(Consensus::DeploymentPos pos)
 
 extern const std::map<std::string, uint32_t> g_verify_flag_names;
 
+std::string FormatScriptFlags(uint32_t flags);
+
 #endif // BITCOIN_DEPLOYMENTINFO_H

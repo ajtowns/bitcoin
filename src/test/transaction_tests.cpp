@@ -74,22 +74,6 @@ bool CheckMapFlagNames()
     return standard_flags_missing == 0;
 }
 
-std::string FormatScriptFlags(unsigned int flags)
-{
-    if (flags == 0) {
-        return "";
-    }
-    std::string ret;
-    std::map<std::string, unsigned int>::const_iterator it = mapFlagNames.begin();
-    while (it != mapFlagNames.end()) {
-        if (flags & it->second) {
-            ret += it->first + ",";
-        }
-        it++;
-    }
-    return ret.substr(0, ret.size() - 1);
-}
-
 /*
 * Check that the input scripts of a transaction are valid/invalid as expected.
 */
