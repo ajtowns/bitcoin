@@ -145,6 +145,7 @@ BITCOIN_CORE_H = \
   consensus/tx_verify.h \
   core_io.h \
   core_memusage.h \
+  cs_main.h \
   cuckoocache.h \
   dbwrapper.h \
   deploymentinfo.h \
@@ -629,6 +630,7 @@ libbitcoin_common_a_SOURCES = \
   compressor.cpp \
   core_read.cpp \
   core_write.cpp \
+  cs_main.cpp \
   deploymentinfo.cpp \
   external_signer.cpp \
   init/common.cpp \
@@ -886,6 +888,7 @@ libbitcoinkernel_la_SOURCES = \
   consensus/tx_check.cpp \
   consensus/tx_verify.cpp \
   core_read.cpp \
+  cs_main.cpp \
   dbwrapper.cpp \
   deploymentinfo.cpp \
   deploymentstatus.cpp \
