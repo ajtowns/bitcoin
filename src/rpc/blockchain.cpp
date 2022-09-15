@@ -1128,8 +1128,12 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
             exc.pushKV("height", height);
             exc.pushKV("hash", blockflags.hash.ToString());
             if (blockindex != nullptr && blockindex->nHeight >= height) {
-                const bool applied = (blockflags.hash == *Assert(blockindex->GetAncestor(height)->phashBlock));
+                const CBlockIndex* ancestor = Assert(blockindex->GetAncestor(height));
+                const bool applied = (blockflags.hash == *Assert(ancestor->phashBlock));
                 exc.pushKV("applied", applied);
+                if (applied) {
+                    exc.pushKV("script_flags", FormatScriptFlags(GetBlockScriptFlags(*ancestor, chainman)));
+                }
                 if (applied && blockindex->nHeight == height) {
                     exc.pushKV("thisblock", true);
                 }
@@ -1304,6 +1308,7 @@ const std::vector<RPCResult> RPCHelpForDeployment{
                 {RPCResult::Type::NUM, "height", "height of exception"},
                 {RPCResult::Type::STR_HEX, "hash", "block hash"},
                 {RPCResult::Type::BOOL, "applied", /*optional=*/true, "if the excepton was applied"},
+                {RPCResult::Type::STR, "script_flags", /*optional=*/true, "script verify flags for the block"},
                 {RPCResult::Type::BOOL, "thisblock", /*optional=*/true, "if the excepton applied to this block"},
             }},
         }},
