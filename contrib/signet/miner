@@ -159,35 +159,31 @@ def generate_psbt(tmpl, reward_spk, *, blocktime=None):
 
 #### where should the block reward go?
 
-def get_reward_address(args, height):
-    if args.address is not None:
-        return args.address
-
-    if '*' not in args.descriptor:
-        addr = json.loads(args.bcli("deriveaddresses", args.descriptor))[0]
-        args.address = addr
-        return addr
-
-    remove = [k for k in args.derived_addresses.keys() if k+20 <= height]
-    for k in remove:
-        del args.derived_addresses[k]
-
-    addr = args.derived_addresses.get(height, None)
-    if addr is None:
-        addrs = json.loads(args.bcli("deriveaddresses", args.descriptor, "[%d,%d]" % (height, height+20)))
-        addr = addrs[0]
-        for k, a in enumerate(addrs):
-            args.derived_addresses[height+k] = a
-
-    return addr
-
 def get_reward_addr_spk(args, height):
-    assert args.address is not None or args.descriptor is not None
-
     if hasattr(args, "reward_spk"):
         return args.address, args.reward_spk
 
-    reward_addr = get_reward_address(args, height)
+    if args.address is not None:
+        reward_addr = args.address
+    elif args.descriptor is not None:
+        if '*' not in args.descriptor:
+            # doesn't vary, so cache the result
+            reward_addr = args.address = json.loads(args.bcli("deriveaddresses", args.descriptor))[0]
+        else:
+            # does vary, so cache results in args.derived_addresses
+            remove = [k for k in args.derived_addresses.keys() if k+20 <= height]
+            for k in remove:
+                del args.derived_addresses[k]
+
+            reward_addr = args.derived_addresses.get(height, None)
+            if reward_addr is None:
+                addrs = json.loads(args.bcli("deriveaddresses", args.descriptor, "[%d,%d]" % (height, height+20)))
+                reward_addr = addrs[0]
+                for k, a in enumerate(addrs):
+                    args.derived_addresses[height+k] = a
+    else:
+        assert args.address is not None or args.descriptor is not None
+
     reward_spk = bytes.fromhex(json.loads(args.bcli("getaddressinfo", reward_addr))["scriptPubKey"])
     if args.address is not None:
         # will always be the same, so cache
