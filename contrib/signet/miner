@@ -392,6 +392,11 @@ def do_generate(args):
 
     ultimate_target = nbits_to_target(int(args.nbits,16))
 
+    if args.prefer_gbt_cli is not None:
+        gbtcli = lambda *a, input=b"", **kwargs: bitcoin_cli(args.prefer_gbt_cli.split(" "), list(a), input=input, **kwargs)
+    else:
+        gbtcli = None
+
     gen = Generate(multiminer=my_blocks, ultimate_target=ultimate_target, do_poisson=args.poisson)
 
     mined_blocks = 0
@@ -440,6 +445,24 @@ def do_generate(args):
         reward_addr, reward_spk = get_reward_addr_spk(args, bci["blocks"])
 
         done = False
+
+        if gbtcli is not None:
+            # get template using prefered bcli
+            tmpl = gen.gbt(gbtcli, bci["bestblockhash"], now)
+            if tmpl is not None:
+                logging.debug("Prefered GBT template: %s", tmpl)
+
+                # mine block
+                logging.debug("Mining block delta=%s start=%s mine=%s", seconds_to_hms(gen.mine_time-bestheader["time"]), gen.mine_time, gen.is_mine)
+                block = gen.mine(args.bcli, args.grind_cmd, tmpl, reward_spk)
+
+                # submit block
+                r = args.bcli("-stdin", "submitblock", input=block.serialize().hex().encode('utf8'))
+
+                if r is None:
+                    done = True
+                else:
+                    logging.warning("submitblock of prefered template returned %s" % (r,))
 
         if not done:
             # get template using primary bcli
@@ -540,6 +563,7 @@ def main():
     generate.add_argument("--multiminer", default=None, type=str, help="Specify which set of blocks to mine (eg: 1-40/100 for the first 40%%, 2/3 for the second 3rd)")
     generate.add_argument("--backup-delay", default=300, type=int, help="Seconds to delay before mining blocks reserved for other miners (default=300)")
     generate.add_argument("--standby-delay", default=0, type=int, help="Seconds to delay before mining blocks (default=0)")
+    generate.add_argument("--prefer-gbt-cli", default=None, type=str, help="Alternative bitcoin-cli invocation for getblocktemplate (optional)")
 
     calibrate = cmds.add_parser("calibrate", help="Calibrate difficulty")
     calibrate.set_defaults(fn=do_calibrate)
