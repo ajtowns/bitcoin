@@ -419,7 +419,7 @@ const fs::path& ArgsManager::GetBlocksDirPath() const
         path = GetDataDirBase();
     }
 
-    path /= fs::PathFromString(BaseParams().DataDir());
+    path /= fs::PathFromString(kernel::BaseParams().DataDir());
     path /= "blocks";
     fs::create_directories(path);
     return path;
@@ -449,8 +449,8 @@ const fs::path& ArgsManager::GetDataDir(bool net_specific) const
         fs::create_directories(path / "wallets");
     }
 
-    if (net_specific && !BaseParams().DataDir().empty()) {
-        path /= fs::PathFromString(BaseParams().DataDir());
+    if (net_specific && !kernel::BaseParams().DataDir().empty()) {
+        path /= fs::PathFromString(kernel::BaseParams().DataDir());
         if (!fs::exists(path)) {
             fs::create_directories(path / "wallets");
         }

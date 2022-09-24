@@ -389,10 +389,10 @@ void SetupServerArgs(ArgsManager& argsman)
 
     init::AddLoggingArgs(argsman);
 
-    const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
-    const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
-    const auto signetBaseParams = CreateBaseChainParams(CBaseChainParams::SIGNET);
-    const auto regtestBaseParams = CreateBaseChainParams(CBaseChainParams::REGTEST);
+    const auto defaultBaseParams = kernel::CreateBaseChainParams(CBaseChainParams::MAIN);
+    const auto testnetBaseParams = kernel::CreateBaseChainParams(CBaseChainParams::TESTNET);
+    const auto signetBaseParams = kernel::CreateBaseChainParams(CBaseChainParams::SIGNET);
+    const auto regtestBaseParams = kernel::CreateBaseChainParams(CBaseChainParams::REGTEST);
     const auto defaultChainParams = CreateChainParams(argsman, CBaseChainParams::MAIN);
     const auto testnetChainParams = CreateChainParams(argsman, CBaseChainParams::TESTNET);
     const auto signetChainParams = CreateChainParams(argsman, CBaseChainParams::SIGNET);
@@ -1684,7 +1684,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             const std::string network_type = bind_arg.substr(index + 1);
             if (network_type == "onion") {
                 const std::string truncated_bind_arg = bind_arg.substr(0, index);
-                if (Lookup(truncated_bind_arg, bind_addr, BaseParams().OnionServiceTargetPort(), false)) {
+                if (Lookup(truncated_bind_arg, bind_addr, kernel::BaseParams().OnionServiceTargetPort(), false)) {
                     connOptions.onion_binds.push_back(bind_addr);
                     continue;
                 }

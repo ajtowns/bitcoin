@@ -25,6 +25,6 @@ void SetupChainParamsBaseOptions(ArgsManager& argsman)
 
 void SelectBaseParams(const std::string& chain)
 {
-    SetGlobalBaseParams(chain);
+    kernel::SetGlobalBaseParams(chain);
     gArgs.SelectConfigNetwork(chain);
 }

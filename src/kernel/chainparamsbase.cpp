@@ -11,6 +11,8 @@ const std::string CBaseChainParams::TESTNET = "test";
 const std::string CBaseChainParams::SIGNET = "signet";
 const std::string CBaseChainParams::REGTEST = "regtest";
 
+namespace kernel {
+
 /**
  * Port numbers for incoming Tor connections (8334, 18334, 38334, 18445) have
  * been chosen arbitrarily to keep ranges of used ports tight.
@@ -41,3 +43,5 @@ const CBaseChainParams& BaseParams()
     assert(globalChainBaseParams);
     return *globalChainBaseParams;
 }
+
+} // namespace kernel

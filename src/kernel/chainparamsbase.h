@@ -37,6 +37,8 @@ private:
     std::string strDataDir;
 };
 
+namespace kernel {
+
 /**
  * Creates and returns a std::unique_ptr<CBaseChainParams> of the chosen chain.
  * @returns a CBaseChainParams* of the chosen chain.
@@ -54,5 +56,6 @@ void SetGlobalBaseParams(const std::string& chain);
  * startup, except for unit tests.
  */
 const CBaseChainParams& BaseParams();
+} // namespace kernel
 
 #endif // BITCOIN_KERNEL_CHAINPARAMSBASE_H
