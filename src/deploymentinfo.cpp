@@ -17,20 +17,34 @@ const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_B
     },
 };
 
+static const std::map<Consensus::BuriedDeployment, std::string> g_buried_deployment_names = {
+    {Consensus::DEPLOYMENT_HEIGHTINCB, "bip34"},
+    {Consensus::DEPLOYMENT_CLTV, "bip65"},
+    {Consensus::DEPLOYMENT_DERSIG, "bip66"},
+    {Consensus::DEPLOYMENT_CSV, "csv"},
+    {Consensus::DEPLOYMENT_SEGWIT, "segwit"},
+};
+
+std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string& depname)
+{
+    for (const auto& [dep, name] : g_buried_deployment_names) {
+        if (name == depname) return dep;
+    }
+    // special cases for compat
+    if (depname == "dersig") {
+        return Consensus::DEPLOYMENT_DERSIG;
+    } else if (depname == "cltv") {
+        return Consensus::DEPLOYMENT_CLTV;
+    }
+
+    // unknown
+    return std::nullopt;
+}
+
 std::string DeploymentName(Consensus::BuriedDeployment dep)
 {
     assert(ValidDeployment(dep));
-    switch (dep) {
-    case Consensus::DEPLOYMENT_HEIGHTINCB:
-        return "bip34";
-    case Consensus::DEPLOYMENT_CLTV:
-        return "bip65";
-    case Consensus::DEPLOYMENT_DERSIG:
-        return "bip66";
-    case Consensus::DEPLOYMENT_CSV:
-        return "csv";
-    case Consensus::DEPLOYMENT_SEGWIT:
-        return "segwit";
-    } // no default case, so the compiler can warn about missing cases
+    const auto& it = g_buried_deployment_names.find(dep);
+    if (it != g_buried_deployment_names.end()) return it->second;
     return "";
 }

@@ -163,19 +163,11 @@ struct VersionBitsParameters {
     int min_activation_height;
 };
 
-enum class Activations {
-    SEGWIT,
-    BIP34,
-    DERSIG,
-    CLTV,
-    CSV,
-};
-
 class RegTestOptions
 {
 public:
     std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters{};
-    std::unordered_map<Activations, int> activation_heights{};
+    std::unordered_map<Consensus::BuriedDeployment, int> activation_heights{};
     bool fast_prune{false};
 };
 

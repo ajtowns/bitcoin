@@ -431,24 +431,19 @@ public:
         m_assumed_blockchain_size = 0;
         m_assumed_chain_state_size = 0;
 
-        for (const auto& [name, height] : opts.activation_heights) {
-            switch (name) {
-            case Activations::SEGWIT:
-                consensus.SegwitHeight = int{height};
-                break;
-            case Activations::BIP34:
-                consensus.BIP34Height = int{height};
-                break;
-            case Activations::DERSIG:
-                consensus.BIP66Height = int{height};
-                break;
-            case Activations::CLTV:
-                consensus.BIP65Height = int{height};
-                break;
-            case Activations::CSV:
-                consensus.CSVHeight = int{height};
-                break;
-            }
+        for (const auto& [dep, height] : opts.activation_heights) {
+            switch(dep) {
+            case Consensus::DEPLOYMENT_HEIGHTINCB:
+                consensus.BIP34Height = height; break;
+            case Consensus::DEPLOYMENT_CLTV:
+                consensus.BIP65Height = height; break;
+            case Consensus::DEPLOYMENT_DERSIG:
+                consensus.BIP66Height = height; break;
+            case Consensus::DEPLOYMENT_CSV:
+                consensus.CSVHeight = height; break;
+            case Consensus::DEPLOYMENT_SEGWIT:
+                consensus.SegwitHeight = height; break;
+            } // no default case, so the compiler can warn about missing cases
         }
 
         for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {

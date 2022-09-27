@@ -43,24 +43,9 @@ const CChainParams &Params() {
     return *globalChainParams;
 }
 
-std::optional<CChainParams::Activations> name4namestr(const std::string& name_str) {
-    if (name_str == "segwit") {
-        return CChainParams::Activations::SEGWIT;
-    } else if (name_str == "bip34") {
-        return CChainParams::Activations::BIP34;
-    } else if (name_str == "dersig") {
-        return CChainParams::Activations::DERSIG;
-    } else if (name_str == "cltv") {
-        return CChainParams::Activations::CLTV;
-    } else if (name_str == "csv") {
-        return CChainParams::Activations::CSV;
-    }
-    return std::nullopt;
-}
-
 CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args)
 {
-    std::unordered_map<CChainParams::Activations, int> activation_heights;
+    std::unordered_map<Consensus::BuriedDeployment, int> activation_heights;
 
     for (const std::string& arg : args.GetArgs("-testactivationheight"))
     {
@@ -69,9 +54,8 @@ CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args)
             throw std::runtime_error(strprintf("Invalid format (%s) for -testactivationheight=name@height.", arg));
         }
 
-        const auto name_str{arg.substr(0, found)};
-        std::optional<CChainParams::Activations> maybe_name{name4namestr(name_str)};
-        if (!maybe_name.has_value()) {
+        const auto maybe_dep = GetBuriedDeployment(arg.substr(0, found));
+        if (!maybe_dep.has_value()) {
             throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
         }
 
@@ -81,7 +65,7 @@ CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args)
             throw std::runtime_error(strprintf("Invalid height value (%s) for -testactivationheight=name@height.", arg));
         }
 
-        activation_heights.insert_or_assign(*maybe_name, height);
+        activation_heights.insert_or_assign(*maybe_dep, height);
     }
 
     std::unordered_map<Consensus::DeploymentPos, CChainParams::VersionBitsParameters> version_bits_parameters;
