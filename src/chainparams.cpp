@@ -28,7 +28,7 @@ CChainParams::SigNetOptions GetSigNetOptions(const ArgsManager& args)
         }
         return CChainParams::SigNetOptions{ParseHex(signet_challenge[0]), seeds};
     } else {
-        auto opts = CChainParams::SigNetOptions::GetDefaults();
+        auto opts = CChainParams::SigNetOptions::GlobalDefaults;
         if (!seeds.empty()) {
             opts.seeds = seeds;
         }

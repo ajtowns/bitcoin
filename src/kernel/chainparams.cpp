@@ -272,20 +272,14 @@ public:
     }
 };
 
-const std::vector<uint8_t> SIGNET_DEFAULT_CHALLENGE = ParseHex("512103ad5e0edad18cb1f0fc0d28a3d4f1f3e445640337489abb10404f2d1e086be430210359ef5021964fe22d6f8e05b2463c9540ce96883fe3b278760f048f5189f2e6c452ae");
-const std::vector<std::string> SIGNET_DEFAULT_SEEDS{
-    "seed.signet.bitcoin.sprovoost.nl.",
-    "178.128.221.177",
-    "v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333"
+const CChainParams::SigNetOptions CChainParams::SigNetOptions::GlobalDefaults = {
+    .challenge = ParseHex("512103ad5e0edad18cb1f0fc0d28a3d4f1f3e445640337489abb10404f2d1e086be430210359ef5021964fe22d6f8e05b2463c9540ce96883fe3b278760f048f5189f2e6c452ae"),
+    .seeds = {
+        "seed.signet.bitcoin.sprovoost.nl.",
+        "178.128.221.177",
+        "v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333"
+    },
 };
-
-CChainParams::SigNetOptions CChainParams::SigNetOptions::GetDefaults()
-{
-    return {
-        SIGNET_DEFAULT_CHALLENGE,
-        SIGNET_DEFAULT_SEEDS,
-    };
-}
 
 /**
  * Signet: test network with an additional consensus parameter (see BIP325).
@@ -297,7 +291,7 @@ public:
         std::vector<uint8_t> bin{options.challenge};
         vSeeds = options.seeds;
 
-        if (bin == SIGNET_DEFAULT_CHALLENGE) {
+        if (bin == SigNetOptions::GlobalDefaults.challenge) {
             consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000001291fc22898");
             consensus.defaultAssumeValid = uint256S("0x000000d1a0e224fa4679d2fb2187ba55431c284fa1b74cbc8cfda866fd4d2c09"); // 105495
             m_assumed_blockchain_size = 1;
