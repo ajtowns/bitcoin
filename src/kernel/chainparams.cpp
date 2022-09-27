@@ -432,18 +432,7 @@ public:
         m_assumed_chain_state_size = 0;
 
         for (const auto& [dep, height] : opts.activation_heights) {
-            switch(dep) {
-            case Consensus::DEPLOYMENT_HEIGHTINCB:
-                consensus.BIP34Height = height; break;
-            case Consensus::DEPLOYMENT_CLTV:
-                consensus.BIP65Height = height; break;
-            case Consensus::DEPLOYMENT_DERSIG:
-                consensus.BIP66Height = height; break;
-            case Consensus::DEPLOYMENT_CSV:
-                consensus.CSVHeight = height; break;
-            case Consensus::DEPLOYMENT_SEGWIT:
-                consensus.SegwitHeight = height; break;
-            } // no default case, so the compiler can warn about missing cases
+            consensus.SetDeploymentHeight(dep, height);
         }
 
         for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {

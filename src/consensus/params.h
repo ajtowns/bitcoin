@@ -127,21 +127,35 @@ struct Params {
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
 
+    void SetDeploymentHeight(BuriedDeployment dep, int height)
+    {
+        int* p = _DeploymentHeight<int>(this, dep);
+        if (p != nullptr) *p = height;
+    }
+
     int DeploymentHeight(BuriedDeployment dep) const
+    {
+        const int* p = _DeploymentHeight<const int>(this, dep);
+        return (p != nullptr ? *p : std::numeric_limits<int>::max());
+    }
+
+private:
+    template<typename R, typename T>
+    static R* _DeploymentHeight(T* t, BuriedDeployment dep)
     {
         switch (dep) {
         case DEPLOYMENT_HEIGHTINCB:
-            return BIP34Height;
+            return &t->BIP34Height;
         case DEPLOYMENT_CLTV:
-            return BIP65Height;
+            return &t->BIP65Height;
         case DEPLOYMENT_DERSIG:
-            return BIP66Height;
+            return &t->BIP66Height;
         case DEPLOYMENT_CSV:
-            return CSVHeight;
+            return &t->CSVHeight;
         case DEPLOYMENT_SEGWIT:
-            return SegwitHeight;
+            return &t->SegwitHeight;
         } // no default case, so the compiler can warn about missing cases
-        return std::numeric_limits<int>::max();
+        return nullptr;
     }
 };
 
