@@ -15,7 +15,7 @@
 
 #include <assert.h>
 
-SigNetOptions GetSigNetOptions(const ArgsManager& args)
+CChainParams::SigNetOptions GetSigNetOptions(const ArgsManager& args)
 {
     std::vector<std::string> seeds{};
     if (args.IsArgSet("-signetseednode")) {
@@ -26,9 +26,9 @@ SigNetOptions GetSigNetOptions(const ArgsManager& args)
         if (signet_challenge.size() != 1) {
             throw std::runtime_error(strprintf("%s: -signetchallenge cannot be multiple values.", __func__));
         }
-        return SigNetOptions{ParseHex(signet_challenge[0]), seeds};
+        return CChainParams::SigNetOptions{ParseHex(signet_challenge[0]), seeds};
     } else {
-        auto opts = GetDefaultSigNetOptions();
+        auto opts = CChainParams::SigNetOptions::GetDefaults();
         if (!seeds.empty()) {
             opts.seeds = seeds;
         }
@@ -43,24 +43,24 @@ const CChainParams &Params() {
     return *globalChainParams;
 }
 
-std::optional<Activations> name4namestr(const std::string& name_str) {
+std::optional<CChainParams::Activations> name4namestr(const std::string& name_str) {
     if (name_str == "segwit") {
-        return Activations::SEGWIT;
+        return CChainParams::Activations::SEGWIT;
     } else if (name_str == "bip34") {
-        return Activations::BIP34;
+        return CChainParams::Activations::BIP34;
     } else if (name_str == "dersig") {
-        return Activations::DERSIG;
+        return CChainParams::Activations::DERSIG;
     } else if (name_str == "cltv") {
-        return Activations::CLTV;
+        return CChainParams::Activations::CLTV;
     } else if (name_str == "csv") {
-        return Activations::CSV;
+        return CChainParams::Activations::CSV;
     }
     return std::nullopt;
 }
 
-RegTestOptions GetRegTestOptions(const ArgsManager& args)
+CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args)
 {
-    std::unordered_map<Activations, int> activation_heights;
+    std::unordered_map<CChainParams::Activations, int> activation_heights;
 
     for (const std::string& arg : args.GetArgs("-testactivationheight"))
     {
@@ -70,7 +70,7 @@ RegTestOptions GetRegTestOptions(const ArgsManager& args)
         }
 
         const auto name_str{arg.substr(0, found)};
-        std::optional<Activations> maybe_name{name4namestr(name_str)};
+        std::optional<CChainParams::Activations> maybe_name{name4namestr(name_str)};
         if (!maybe_name.has_value()) {
             throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
         }
@@ -84,14 +84,14 @@ RegTestOptions GetRegTestOptions(const ArgsManager& args)
         activation_heights.insert_or_assign(*maybe_name, height);
     }
 
-    std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters;
+    std::unordered_map<Consensus::DeploymentPos, CChainParams::VersionBitsParameters> version_bits_parameters;
 
     for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
         std::vector<std::string> vDeploymentParams = SplitString(strDeployment, ':');
         if (vDeploymentParams.size() < 3 || 4 < vDeploymentParams.size()) {
             throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end[:min_activation_height]");
         }
-        VersionBitsParameters vbparams{};
+        CChainParams::VersionBitsParameters vbparams{};
         if (!ParseInt64(vDeploymentParams[1], &vbparams.start_time)) {
             throw std::runtime_error(strprintf("Invalid nStartTime (%s)", vDeploymentParams[1]));
         }
@@ -120,19 +120,19 @@ RegTestOptions GetRegTestOptions(const ArgsManager& args)
     }
 
     uint64_t prune_after_height = args.GetBoolArg("-fastprune", false) ? 100 : 1000;
-    return RegTestOptions{version_bits_parameters, activation_heights, prune_after_height};
+    return CChainParams::RegTestOptions{version_bits_parameters, activation_heights, prune_after_height};
 }
 
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
 {
     if (chain == CBaseChainParams::MAIN) {
-        return CreateMainChainParams();
+        return CChainParams::Main();
     } else if (chain == CBaseChainParams::TESTNET) {
-        return CreateTestNetChainParams();
+        return CChainParams::TestNet();
     } else if (chain == CBaseChainParams::SIGNET) {
-        return CreateSigNetChainParams(GetSigNetOptions(args));
+        return CChainParams::SigNet(GetSigNetOptions(args));
     } else if (chain == CBaseChainParams::REGTEST) {
-        return CreateRegTestChainParams(GetRegTestOptions(args));
+        return CChainParams::RegTest(GetRegTestOptions(args));
     }
     throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }

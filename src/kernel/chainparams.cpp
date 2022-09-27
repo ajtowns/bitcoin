@@ -279,7 +279,7 @@ const std::vector<std::string> SIGNET_DEFAULT_SEEDS{
     "v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333"
 };
 
-SigNetOptions GetDefaultSigNetOptions()
+CChainParams::SigNetOptions CChainParams::SigNetOptions::GetDefaults()
 {
     return {
         SIGNET_DEFAULT_CHALLENGE,
@@ -381,7 +381,7 @@ public:
     }
 };
 
-std::unique_ptr<const CChainParams> CreateSigNetChainParams(const SigNetOptions& options)
+std::unique_ptr<const CChainParams> CChainParams::SigNet(const CChainParams::SigNetOptions& options)
 {
     return std::make_unique<const SigNetParams>(options);
 }
@@ -511,17 +511,17 @@ public:
 };
 
 
-std::unique_ptr<const CChainParams> CreateRegTestChainParams(const RegTestOptions& options)
+std::unique_ptr<const CChainParams> CChainParams::RegTest(const CChainParams::RegTestOptions& options)
 {
     return std::make_unique<CRegTestParams>(options);
 }
 
-std::unique_ptr<const CChainParams> CreateMainChainParams()
+std::unique_ptr<const CChainParams> CChainParams::Main()
 {
     return std::unique_ptr<CChainParams>(new CMainParams());
 }
 
-std::unique_ptr<const CChainParams> CreateTestNetChainParams()
+std::unique_ptr<const CChainParams> CChainParams::TestNet()
 {
     return std::unique_ptr<CChainParams>(new CTestNetParams());
 }

@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
 
     // SETUP: Misc Globals
     kernel::SetGlobalBaseParams(CBaseChainParams::MAIN);
-    auto chainparams_ptr = CreateMainChainParams();
+    auto chainparams_ptr = CChainParams::Main();
     const CChainParams& chainparams = *chainparams_ptr;
 
     kernel::Context kernel_context{};

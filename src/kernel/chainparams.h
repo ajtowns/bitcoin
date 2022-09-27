@@ -145,16 +145,18 @@ protected:
     CCheckpointData checkpointData;
     MapAssumeutxo m_assumeutxo_data;
     ChainTxData chainTxData;
-};
 
-struct SigNetOptions {
+public:
+
+class SigNetOptions
+{
+public:
     const std::vector<uint8_t> challenge;
     std::vector<std::string> seeds;
+
+    static SigNetOptions GetDefaults();
 };
 
-SigNetOptions GetDefaultSigNetOptions();
-
-std::unique_ptr<const CChainParams> CreateSigNetChainParams(const SigNetOptions& options = GetDefaultSigNetOptions());
 
 struct VersionBitsParameters {
     int64_t start_time;
@@ -170,15 +172,21 @@ enum class Activations {
     CSV,
 };
 
-struct RegTestOptions {
+class RegTestOptions
+{
+public:
     std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters{};
     std::unordered_map<Activations, int> activation_heights{};
     uint64_t prune_after_height{1000};
+
+    static RegTestOptions GetDefaults() { return {}; }
 };
 
-std::unique_ptr<const CChainParams> CreateRegTestChainParams(const RegTestOptions& options = RegTestOptions{});
 
-std::unique_ptr<const CChainParams> CreateMainChainParams();
-std::unique_ptr<const CChainParams> CreateTestNetChainParams();
+static std::unique_ptr<const CChainParams> Main();
+static std::unique_ptr<const CChainParams> TestNet();
+static std::unique_ptr<const CChainParams> SigNet(const SigNetOptions& options = SigNetOptions::GetDefaults());
+static std::unique_ptr<const CChainParams> RegTest(const RegTestOptions& options = RegTestOptions::GetDefaults());
+};
 
 #endif // BITCOIN_KERNEL_CHAINPARAMS_H

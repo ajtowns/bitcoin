@@ -26,14 +26,14 @@
  * @returns SigNetOptions
  * @throws a std::runtime_error if multiple signet challenges are passed in through the args.
  */
-SigNetOptions GetSigNetOptions(const ArgsManager& args);
+CChainParams::SigNetOptions GetSigNetOptions(const ArgsManager& args);
 
 /**
  * Creates and returns a RegTestOptions for constructing a regtest CChainParams
  * @return RegTestOptions
  * @throws a std::runtime_error if the -testactivationheight or -vbparams is set, but malformed.
  */
-RegTestOptions GetRegTestOptions(const ArgsManager& args);
+CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args);
 
 /**
  * Creates and returns a std::unique_ptr<CChainParams> of the chosen chain.
