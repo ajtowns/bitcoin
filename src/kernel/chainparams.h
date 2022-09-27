@@ -176,7 +176,7 @@ class RegTestOptions
 public:
     std::unordered_map<Consensus::DeploymentPos, VersionBitsParameters> version_bits_parameters{};
     std::unordered_map<Activations, int> activation_heights{};
-    uint64_t prune_after_height{1000};
+    bool fast_prune{false};
 };
 
 

@@ -119,8 +119,8 @@ CChainParams::RegTestOptions GetRegTestOptions(const ArgsManager& args)
         }
     }
 
-    uint64_t prune_after_height = args.GetBoolArg("-fastprune", false) ? 100 : 1000;
-    return CChainParams::RegTestOptions{version_bits_parameters, activation_heights, prune_after_height};
+    bool fast_prune = args.GetBoolArg("-fastprune", false);
+    return CChainParams::RegTestOptions{version_bits_parameters, activation_heights, fast_prune};
 }
 
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
