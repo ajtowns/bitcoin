@@ -152,9 +152,9 @@ struct SigNetOptions {
     std::vector<std::string> seeds;
 };
 
-SigNetOptions GetDefaultSignetOptions();
+SigNetOptions GetDefaultSigNetOptions();
 
-std::unique_ptr<const CChainParams> CreateSignetChainParams(const SigNetOptions& options = GetDefaultSignetOptions());
+std::unique_ptr<const CChainParams> CreateSigNetChainParams(const SigNetOptions& options = GetDefaultSigNetOptions());
 
 struct VersionBitsParameters {
     int64_t start_time;

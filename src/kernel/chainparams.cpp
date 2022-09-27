@@ -279,7 +279,7 @@ const std::vector<std::string> SIGNET_DEFAULT_SEEDS{
     "v7ajjeirttkbnt32wpy3c6w3emwnfr3fkla7hpxcfokr3ysd3kqtzmqd.onion:38333"
 };
 
-SigNetOptions GetDefaultSignetOptions()
+SigNetOptions GetDefaultSigNetOptions()
 {
     return {
         SIGNET_DEFAULT_CHALLENGE,
@@ -381,7 +381,7 @@ public:
     }
 };
 
-std::unique_ptr<const CChainParams> CreateSignetChainParams(const SigNetOptions& options)
+std::unique_ptr<const CChainParams> CreateSigNetChainParams(const SigNetOptions& options)
 {
     return std::make_unique<const SigNetParams>(options);
 }

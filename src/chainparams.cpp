@@ -15,7 +15,7 @@
 
 #include <assert.h>
 
-std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& args)
+SigNetOptions GetSigNetOptions(const ArgsManager& args)
 {
     std::vector<std::string> seeds{};
     if (args.IsArgSet("-signetseednode")) {
@@ -26,13 +26,13 @@ std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& a
         if (signet_challenge.size() != 1) {
             throw std::runtime_error(strprintf("%s: -signetchallenge cannot be multiple values.", __func__));
         }
-        return CreateSignetChainParams(SigNetOptions{ParseHex(signet_challenge[0]), seeds});
+        return SigNetOptions{ParseHex(signet_challenge[0]), seeds};
     } else {
-        auto opts = GetDefaultSignetOptions();
+        auto opts = GetDefaultSigNetOptions();
         if (!seeds.empty()) {
             opts.seeds = seeds;
         }
-        return CreateSignetChainParams(opts);
+        return opts;
     }
 }
 
@@ -58,7 +58,7 @@ std::optional<Activations> name4namestr(const std::string& name_str) {
     return std::nullopt;
 }
 
-std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& args)
+RegTestOptions GetRegTestOptions(const ArgsManager& args)
 {
     std::unordered_map<Activations, int> activation_heights;
 
@@ -120,7 +120,7 @@ std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& 
     }
 
     uint64_t prune_after_height = args.GetBoolArg("-fastprune", false) ? 100 : 1000;
-    return CreateRegTestChainParams(RegTestOptions{version_bits_parameters, activation_heights, prune_after_height});
+    return RegTestOptions{version_bits_parameters, activation_heights, prune_after_height};
 }
 
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
@@ -130,9 +130,9 @@ std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, c
     } else if (chain == CBaseChainParams::TESTNET) {
         return CreateTestNetChainParams();
     } else if (chain == CBaseChainParams::SIGNET) {
-        return CreateSignetChainParams(args);
+        return CreateSigNetChainParams(GetSigNetOptions(args));
     } else if (chain == CBaseChainParams::REGTEST) {
-        return CreateRegTestChainParams(args);
+        return CreateRegTestChainParams(GetRegTestOptions(args));
     }
     throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }

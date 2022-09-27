@@ -22,18 +22,18 @@
 #include <vector>
 
 /**
- * Creates and returns a std::unique_ptr<CChainParams> for signet.
- * @returns std::unique_ptr<const CChainParams>.
+ * Creates and returns a SigNetOptions for constructing a signet CChainParams.
+ * @returns SigNetOptions
  * @throws a std::runtime_error if multiple signet challenges are passed in through the args.
  */
-std::unique_ptr<const CChainParams> CreateSignetChainParams(const ArgsManager& args);
+SigNetOptions GetSigNetOptions(const ArgsManager& args);
 
 /**
- * Creates and returns a std::unique_ptr<CChainParams> for regtest.
- * @return std::unique_ptr<const CChainParams>
+ * Creates and returns a RegTestOptions for constructing a regtest CChainParams
+ * @return RegTestOptions
  * @throws a std::runtime_error if the -testactivationheight or -vbparams is set, but malformed.
  */
-std::unique_ptr<const CChainParams> CreateRegTestChainParams(const ArgsManager& args);
+RegTestOptions GetRegTestOptions(const ArgsManager& args);
 
 /**
  * Creates and returns a std::unique_ptr<CChainParams> of the chosen chain.
