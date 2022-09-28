@@ -54,4 +54,6 @@ const CChainParams &Params();
  */
 void SelectParams(const std::string& chain);
 
+void RegisterChainParamsOptions(ArgsManager& args);
+
 #endif // BITCOIN_CHAINPARAMS_H

@@ -151,7 +151,7 @@ public:
 class SigNetOptions
 {
 public:
-    const std::vector<uint8_t> challenge;
+    std::vector<uint8_t> challenge;
     std::vector<std::string> seeds;
 
     static const SigNetOptions GlobalDefaults;

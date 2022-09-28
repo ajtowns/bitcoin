@@ -290,7 +290,7 @@ public:
     {
         vSeeds = options.seeds;
 
-        if (options.challenge == SigNetOptions::GlobalDefaults.challenge) {
+        if (options.challenge.empty()) {
             consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000001291fc22898");
             consensus.defaultAssumeValid = uint256S("0x000000d1a0e224fa4679d2fb2187ba55431c284fa1b74cbc8cfda866fd4d2c09"); // 105495
             m_assumed_blockchain_size = 1;
@@ -301,6 +301,7 @@ public:
                 .nTxCount = 1903567,
                 .dTxRate  = 0.02336701143027275,
             };
+            consensus.signet_challenge.assign(CChainParams::SigNetOptions::GlobalDefaults.challenge.begin(), CChainParams::SigNetOptions::GlobalDefaults.challenge.end());
         } else {
             consensus.nMinimumChainWork = uint256{};
             consensus.defaultAssumeValid = uint256{};
@@ -312,11 +313,11 @@ public:
                 0,
             };
             LogPrintf("Signet with challenge %s\n", HexStr(options.challenge));
+            consensus.signet_challenge.assign(options.challenge.begin(), options.challenge.end());
         }
 
         strNetworkID = CBaseChainParams::SIGNET;
         consensus.signet_blocks = true;
-        consensus.signet_challenge.assign(options.challenge.begin(), options.challenge.end());
         consensus.nSubsidyHalvingInterval = 210000;
         consensus.BIP34Height = 1;
         consensus.BIP34Hash = uint256{};
