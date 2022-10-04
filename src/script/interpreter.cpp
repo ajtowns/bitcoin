@@ -396,17 +396,16 @@ static bool EvalChecksigTapscript(const valtype& sig, const valtype& pubkey, Scr
         if (success && !checker.CheckSchnorrSignature(sig, KeyVersion::TAPROOT, pubkey, sigversion, execdata, serror)) {
             return false; // serror is set
         }
-    } else if ((pubkey.size() == 1 || pubkey.size() == 33) && pubkey[0] == 0x01) {
+    } else if ((pubkey.size() == 1 || pubkey.size() == 33) && pubkey[0] == BIP118_PUBKEY_PREFIX) {
         if ((flags & SCRIPT_VERIFY_DISCOURAGE_ANYPREVOUT) != 0) {
             return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_PUBKEYTYPE);
         } else if ((flags & SCRIPT_VERIFY_ANYPREVOUT) == 0) {
             return true;
         } else if (pubkey.size() == 1) {
-            assert(execdata.m_internal_key);
             if (success && !checker.CheckSchnorrSignature(sig, KeyVersion::ANYPREVOUT, *execdata.m_internal_key, sigversion, execdata, serror)) {
                 return false; // serror is set
             }
-        } else { // pubkey_in.size() == 33
+        } else { // pubkey.size() == 33
             if (success && !checker.CheckSchnorrSignature(sig, KeyVersion::ANYPREVOUT, Span(pubkey).subspan(1), sigversion, execdata, serror)) {
                 return false; // serror is set
             }
@@ -1951,7 +1950,7 @@ bool GenericTransactionSignatureChecker<T>::CheckECDSASignature(const std::vecto
 }
 
 template <class T>
-bool GenericTransactionSignatureChecker<T>::CheckSchnorrSignature(Span<const unsigned char> sig, KeyVersion pubkeyver, Span<const unsigned char> pubkey_in, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror) const
+bool GenericTransactionSignatureChecker<T>::CheckSchnorrSignature(Span<const unsigned char> sig, KeyVersion pubkeyver, Span<const unsigned char> pubkey, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror) const
 {
     assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
     // Note that in Tapscript evaluation, empty signatures are treated specially (invalid signature that does not
@@ -1960,7 +1959,7 @@ bool GenericTransactionSignatureChecker<T>::CheckSchnorrSignature(Span<const uns
     // size different from 64 or 65.
     if (sig.size() != 64 && sig.size() != 65) return set_error(serror, SCRIPT_ERR_SCHNORR_SIG_SIZE);
 
-    XOnlyPubKey pubkey{pubkey_in};
+    XOnlyPubKey pubkey_xonly{pubkey};
 
     uint8_t hashtype = SIGHASH_DEFAULT;
     if (sig.size() == 65) {
@@ -1972,7 +1971,7 @@ bool GenericTransactionSignatureChecker<T>::CheckSchnorrSignature(Span<const uns
     if (!SignatureHashSchnorr(sighash, execdata, *txTo, nIn, hashtype, sigversion, pubkeyver, *this->txdata, m_mdb)) {
         return set_error(serror, SCRIPT_ERR_SCHNORR_SIG_HASHTYPE);
     }
-    if (!VerifySchnorrSignature(sig, pubkey, sighash)) return set_error(serror, SCRIPT_ERR_SCHNORR_SIG);
+    if (!VerifySchnorrSignature(sig, pubkey_xonly, sighash)) return set_error(serror, SCRIPT_ERR_SCHNORR_SIG);
     return true;
 }
 

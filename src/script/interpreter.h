@@ -279,6 +279,8 @@ static constexpr size_t TAPROOT_CONTROL_NODE_SIZE = 32;
 static constexpr size_t TAPROOT_CONTROL_MAX_NODE_COUNT = 128;
 static constexpr size_t TAPROOT_CONTROL_MAX_SIZE = TAPROOT_CONTROL_BASE_SIZE + TAPROOT_CONTROL_NODE_SIZE * TAPROOT_CONTROL_MAX_NODE_COUNT;
 
+static constexpr uint8_t BIP118_PUBKEY_PREFIX = 0x01;
+
 extern const CHashWriter HASHER_TAPSIGHASH; //!< Hasher with tag "TapSighash" pre-fed to it.
 extern const CHashWriter HASHER_TAPLEAF;    //!< Hasher with tag "TapLeaf" pre-fed to it.
 extern const CHashWriter HASHER_TAPBRANCH;  //!< Hasher with tag "TapBranch" pre-fed to it.
@@ -294,7 +296,7 @@ public:
         return false;
     }
 
-    virtual bool CheckSchnorrSignature(Span<const unsigned char> sig, KeyVersion pubkeyver, Span<const unsigned char> pubkey_in, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror = nullptr) const
+    virtual bool CheckSchnorrSignature(Span<const unsigned char> sig, KeyVersion pubkeyver, Span<const unsigned char> pubkey, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror = nullptr) const
     {
         return false;
     }
