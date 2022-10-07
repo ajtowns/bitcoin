@@ -78,6 +78,12 @@ def random_real_outputs_and_script(n, nIn=0, nVin=1, vin_override=None):
     )
     return outputs, script
 
+def many_inputs_for_output(nVin=100, nVout=1):
+    outputs = [CTxOut((x + 1) * 1000, random_p2sh()) for x in range(nVout)]
+    scripts = []
+    for i in range(nVin):
+        scripts.append(CScript([template_hash_for_outputs(outputs, i, nVin), OP_CHECKTEMPLATEVERIFY]))
+    return outputs, scripts
 
 def random_secure_tree(depth):
     leaf_nodes = [
@@ -126,9 +132,10 @@ def create_transaction_to_script(node, wallet, txid, script, *, amount_sats):
 
 class CheckTemplateVerifyTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 1
+        self.num_nodes = 2
         self.extra_args = [
-            ["-par=1"]
+            ["-par=1"],
+            ["-par=8"]
         ]  # Use only one script thread to get the exact reject reason for testing
         self.setup_clean_chain = True
         self.rpc_timeout = 120
@@ -187,7 +194,7 @@ class CheckTemplateVerifyTest(BitcoinTestFramework):
         wallet = MiniWallet(self.nodes[0], mode=MiniWalletMode.RAW_P2PK)
         self.nodes[0].add_p2p_connection(P2PInterface())
 
-        BLOCKS = 115
+        BLOCKS = 315
         self.log.info("Mining %d blocks for mature coinbases", BLOCKS)
         # Drop the last 100 as they're unspendable!
         coinbase_txids = [
@@ -729,6 +736,20 @@ class CheckTemplateVerifyTest(BitcoinTestFramework):
         check_template_verify_tx_specific_scriptSigs_position_2.rehash()
         self.add_block([check_template_verify_tx_specific_scriptSigs_position_2])
 
+
+        outputs, scripts = many_inputs_for_output(100)
+        amount_sats = sum(out.nValue for out in outputs) + 200 * 500
+        amount_sats = (amount_sats // len(outputs)) + 100
+        funding_txs = []
+        for s in scripts:
+            tx = create_transaction_to_script(self.nodes[0], wallet, get_coinbase(), s, amount_sats=amount_sats)
+            tx.rehash()
+            funding_txs.append(tx)
+        spending_tx = CTransaction()
+        spending_tx.nVersion = 2
+        spending_tx.vin = [CTxIn(COutPoint(int(tx.rehash(), 16), 0), CScript()) for tx in funding_txs]
+        spending_tx.vout = outputs
+        self.add_block(funding_txs + [spending_tx])
 
 if __name__ == "__main__":
     CheckTemplateVerifyTest().main()
