@@ -7,6 +7,7 @@ add_subdirectory(util)
 add_executable(fuzz
   addition_overflow.cpp
   addrman.cpp
+  anyprevout.cpp
   asmap.cpp
   asmap_direct.cpp
   autofile.cpp
