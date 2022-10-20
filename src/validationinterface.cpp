@@ -12,6 +12,8 @@
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <scheduler.h>
+#include <shutdown.h>
+#include <util/time.h>
 
 #include <future>
 #include <unordered_map>
@@ -166,11 +168,14 @@ void SyncWithValidationInterfaceQueue()
 {
     AssertLockNotHeld(cs_main);
     // Block until the validation queue drains
-    std::promise<void> promise;
-    CallFunctionInValidationInterfaceQueue([&promise] {
-        promise.set_value();
+    auto promise = std::make_shared<std::promise<void>>();
+    CallFunctionInValidationInterfaceQueue([promise] {
+        promise->set_value();
     });
-    promise.get_future().wait();
+    std::future_status status;
+    do {
+        status = promise->get_future().wait_for(10s);
+    } while (status != std::future_status::ready && !ShutdownRequested());
 }
 
 // Use a macro instead of a function for conditional logging to prevent
