@@ -8,7 +8,7 @@
 #include <sync.h>
 #include <tinyformat.h>
 #include <util/syscall_sandbox.h>
-#include <util/threadnames.h>
+#include <util/thread.h>
 
 #include <algorithm>
 #include <iterator>
@@ -16,6 +16,11 @@
 
 template <typename T>
 class CCheckQueueControl;
+
+inline void TraceThreadStr(std::string&& name, std::function<void()> Fn)
+{
+    util::TraceThread(name.c_str(), Fn);
+}
 
 /**
  * Queue for verifications that have to be performed.
@@ -145,13 +150,16 @@ public:
             nTotal = 0;
             fAllOk = true;
         }
+
         assert(m_worker_threads.empty());
         for (int n = 0; n < threads_num; ++n) {
-            m_worker_threads.emplace_back([this, n]() {
-                util::ThreadRename(strprintf("scriptch.%i", n));
-                SetSyscallSandboxPolicy(SyscallSandboxPolicy::VALIDATION_SCRIPT_CHECK);
-                Loop(false /* worker thread */);
-            });
+            std::string thread_name = strprintf("scriptch.%i", n);
+            m_worker_threads.emplace_back(std::thread(
+                &TraceThreadStr, thread_name,
+                [this, thread_name] {
+                    SetSyscallSandboxPolicy(SyscallSandboxPolicy::VALIDATION_SCRIPT_CHECK);
+                    Loop(false /* worker thread */);
+                }));
         }
     }
 
