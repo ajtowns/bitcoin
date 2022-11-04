@@ -19,6 +19,7 @@
 #include <util/moneystr.h>
 #include <util/overflow.h>
 #include <util/result.h>
+#include <util/rbf.h>
 #include <util/system.h>
 #include <util/time.h>
 #include <util/trace.h>
@@ -609,6 +610,9 @@ void CTxMemPool::removeConflicts(const CTransaction &tx)
             const CTransaction &txConflict = *it->second;
             if (txConflict != tx)
             {
+                LogPrint(BCLog::MEMPOOL, "removing conflicting tx %s wtx %s (%s) in favour of tx %s wtx %s (%s)\n",
+                     txConflict.GetHash().ToString(), txConflict.GetWitnessHash().ToString(), (SignalsOptInRBF(txConflict) ? "rbf" : "norbf"),
+                     tx.GetHash().ToString(), tx.GetWitnessHash().ToString(), (SignalsOptInRBF(tx) ? "rbf" : "norbf"));
                 ClearPrioritisation(txConflict.GetHash());
                 removeRecursive(txConflict, MemPoolRemovalReason::CONFLICT);
             }

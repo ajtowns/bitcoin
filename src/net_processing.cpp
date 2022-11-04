@@ -4055,10 +4055,19 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
             pfrom.m_last_tx_time = GetTime<std::chrono::seconds>();
 
-            LogPrint(BCLog::MEMPOOL, "AcceptToMemoryPool: peer=%d: accepted %s (poolsz %u txn, %u kB)\n",
+            double feerate = -1;
+            {
+                LOCK(m_mempool.cs);
+                CTxMemPool::txiter it = m_mempool.mapTx.find(tx.GetHash());
+                if (it != m_mempool.mapTx.end()) {
+                    const CTxMemPoolEntry &e = *it;
+                    feerate = (double)e.GetModifiedFee() / (double)e.GetTxSize();
+                }
+            }
+            LogPrint(BCLog::MEMPOOL, "AcceptToMemoryPool: peer=%d: accepted %s (poolsz %u txn, %u kB) feerate=%.2f\n",
                 pfrom.GetId(),
                 tx.GetHash().ToString(),
-                m_mempool.size(), m_mempool.DynamicMemoryUsage() / 1000);
+                m_mempool.size(), m_mempool.DynamicMemoryUsage() / 1000, feerate);
 
             for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
                 AddToCompactExtraTransactions(removedTx);
@@ -4426,6 +4435,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                     it->second.first != pfrom.GetId()) {
                 LogPrint(BCLog::NET, "Peer %d sent us block transactions for block we weren't expecting\n", pfrom.GetId());
                 return;
+            }
+
+            for (const auto& t : resp.txn) {
+                LogPrint(BCLog::CMPCTBLOCK, "  blocktxn peer=%d tx=%s\n", pfrom.GetId(), t->GetHash().ToString());
             }
 
             PartiallyDownloadedBlock& partialBlock = *it->second.second->partialBlock;
