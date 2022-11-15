@@ -583,6 +583,8 @@ private:
 
     void ProcessTx(CNode& node, PeerRef& peer, CDataStream& vRecv)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
+    void ProcessTxFlood(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, cs_main);
 
     /**
      * Reconsider orphan transactions after a parent has been accepted to the mempool.
@@ -3086,6 +3088,13 @@ void PeerManagerImpl::ProcessTx(CNode& pfrom, PeerRef& peer, CDataStream& vRecv)
         return;
     }
 
+    ProcessTxFlood(pfrom, peer, std::move(ptx));
+}
+
+
+void PeerManagerImpl::ProcessTxFlood(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
+{
+    const CTransaction& tx = *ptx;
     const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx);
     const TxValidationState& state = result.m_state;
 
