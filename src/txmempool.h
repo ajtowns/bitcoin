@@ -28,6 +28,7 @@
 #include <primitives/transaction.h>
 #include <random.h>
 #include <sync.h>
+#include <txstempool.h>
 #include <util/epochguard.h>
 #include <util/hasher.h>
 #include <util/result.h>
@@ -404,6 +405,8 @@ public:
      */
     mutable RecursiveMutex cs;
     indexed_transaction_set mapTx GUARDED_BY(cs);
+
+    TxStemPool m_stempool GUARDED_BY(cs);
 
     using txiter = indexed_transaction_set::nth_index<0>::type::const_iterator;
     std::vector<std::pair<uint256, txiter>> vTxHashes GUARDED_BY(cs); //!< All tx witness hashes/entries in mapTx, in random order
