@@ -8,10 +8,12 @@ Test transaction download behavior
 
 from test_framework.messages import (
     CInv,
+    MSG_BLOCK,
     MSG_TX,
     MSG_TYPE_MASK,
     MSG_WTX,
     msg_inv,
+    msg_getdata,
     msg_notfound,
     tx_from_hex,
 )
@@ -32,6 +34,9 @@ class TestP2PConn(P2PInterface):
     def __init__(self, wtxidrelay=True):
         super().__init__(wtxidrelay=wtxidrelay)
         self.tx_getdata_count = 0
+
+    def on_notfound(self, message):
+        print("notfound %d" % (len(message.vec)))
 
     def on_getdata(self, message):
         for i in message.inv:
@@ -254,8 +259,46 @@ class TxDownloadTest(BitcoinTestFramework):
         self.log.info('Check that spurious notfound is ignored')
         self.nodes[0].p2ps[0].send_message(msg_notfound(vec=[CInv(MSG_TX, 1)]))
 
+    def send_messages(self, peer, messages):
+        tmsgs = b''
+        for message in messages:
+            tmsgs += peer.build_message(message)
+            peer._log_message("send", message)
+        return peer.send_raw_message(tmsgs)
+
+    def test_hack(self):
+        self.log.info('Test getdata -> notfound')
+        peer = self.nodes[0].add_p2p_connection(TestP2PConn())
+        self.send_messages(peer, [
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(10)] +
+                         [CInv(t=MSG_BLOCK, h=9999)] +
+                         [CInv(t=MSG_WTX, h=wtxid) for wtxid in range(30,40)] +
+                         [CInv(t=MSG_BLOCK, h=9998)] +
+                         [CInv(t=MSG_WTX, h=wtxid) for wtxid in range(20,30)])])
+        time.sleep(2)
+        print("----- master: 10, 10, 10 // 26486: same // desired: 30 ----")
+
+        self.send_messages(peer, [
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(10)] +
+                         [CInv(t=MSG_BLOCK, h=9999)] +
+                         [CInv(t=MSG_WTX, h=wtxid) for wtxid in range(20,30)]),
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(30,40)])])
+        time.sleep(2)
+        print("----- master: 10, 10, 10 // 26486: 10, 20 ? // desired: 30 ----")
+
+        self.send_messages(peer, [
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(1)]),
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(1,2)]),
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(3,13)]),
+             msg_getdata([CInv(t=MSG_WTX, h=wtxid) for wtxid in range(20,30)])])
+        time.sleep(2)
+        print("----- master: 1, 1, 10, 10 // 26486: same // desired: 22 ----")
+
     def run_test(self):
         # Run tests without mocktime that only need one peer-connection first, to avoid restarting the nodes
+        self.test_hack()
+        return
+
         self.test_expiry_fallback()
         self.test_disconnect_fallback()
         self.test_notfound_fallback()

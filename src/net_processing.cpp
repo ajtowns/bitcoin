@@ -319,6 +319,7 @@ struct Peer {
 
     /** A vector of notfounds to send to the peer, limited to MAX_PEER_TX_ANNOUNCEMENTS. */
     std::vector<CInv> m_notfounds_to_send GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    std::chrono::microseconds m_last_notfounds_to_send GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
 
     /** Probabilistic filter to track recent addr messages relayed with this
      *  peer. Used to avoid relaying redundant addresses to this peer.
@@ -1012,7 +1013,7 @@ private:
 
     void AddAddressKnown(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
     void PushAddress(Peer& peer, const CAddress& addr, FastRandomContext& insecure_rand) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
-    void PushNotFound(Peer& peer, CNode& node, const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+    void PushNotFound(Peer& peer, CNode& node, std::chrono::microseconds now, const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -1044,7 +1045,7 @@ void PeerManagerImpl::AddAddressKnown(Peer& peer, const CAddress& addr)
     peer.m_addr_known->insert(addr.GetKey());
 }
 
-void PeerManagerImpl::PushNotFound(Peer& peer, CNode& node, const CInv& inv)
+void PeerManagerImpl::PushNotFound(Peer& peer, CNode& node, std::chrono::microseconds now, const CInv& inv)
 {
     if (peer.m_notfounds_to_send.size() >= MAX_GETDATA_SZ) {
         const CNetMsgMaker msg_maker(node.GetCommonVersion());
@@ -1052,6 +1053,7 @@ void PeerManagerImpl::PushNotFound(Peer& peer, CNode& node, const CInv& inv)
         peer.m_notfounds_to_send.clear();
     }
     peer.m_notfounds_to_send.push_back(inv);
+    peer.m_last_notfounds_to_send = now;
 }
 
 void PeerManagerImpl::PushAddress(Peer& peer, const CAddress& addr, FastRandomContext& insecure_rand)
@@ -2331,7 +2333,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
             // In normal operation, we often send NOTFOUND messages for parents of
             // transactions that we relay; if a peer is missing a parent, they may
             // assume we have them and request the parents from us.
-            PushNotFound(peer, pfrom, inv);
+            PushNotFound(peer, pfrom, now, inv);
         }
     }
 
@@ -5834,7 +5836,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
 
         // Message: notfound
-        if (!peer->m_notfounds_to_send.empty()) {
+        if (!peer->m_notfounds_to_send.empty() && current_time > peer->m_last_notfounds_to_send + 300ms) {
             m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::NOTFOUND, peer->m_notfounds_to_send));
             peer->m_notfounds_to_send.clear();
         }
