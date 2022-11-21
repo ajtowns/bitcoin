@@ -2002,6 +2002,10 @@ void CConnman::ThreadMessageHandler()
         bool fMoreWork = false;
 
         {
+            // We do up to one unit of non-peer-specific work prior to
+            // working on any peers
+            fMoreWork |= m_msgproc->ScheduledActions();
+
             // Randomize the order in which we process messages from/to our peers.
             // This prevents attacks in which an attacker exploits having multiple
             // consecutive connections in the m_nodes list.

@@ -153,6 +153,7 @@ static constexpr auto INBOUND_INVENTORY_BROADCAST_INTERVAL{5s};
 static constexpr auto OUTBOUND_INVENTORY_BROADCAST_INTERVAL{2s};
 /** Maximum rate of inventory items to send per second.
  *  Limits the impact of low-fee transaction floods. */
+static constexpr auto STEM_DELAY_INTERVAL{180s};
 static constexpr unsigned int INVENTORY_BROADCAST_PER_SECOND = 7;
 /** Maximum number of inventory items to send per transmission. */
 static constexpr unsigned int INVENTORY_BROADCAST_MAX = INVENTORY_BROADCAST_PER_SECOND * count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL);
@@ -585,6 +586,20 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
     void ProcessTxFlood(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, cs_main);
+
+    void ProcessTxStem(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, cs_main);
+    void ProcessTxInvalid(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx, const MempoolAcceptResult& result)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, cs_main);
+
+    void MaybeFloodStemTx(const CTransactionRef& ptx)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, g_msgproc_mutex, cs_main, m_mempool.cs);
+    void MaybeTrickleStemTx(NodeId nodeid, const CTransactionRef& ptx)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, g_msgproc_mutex, cs_main, m_mempool.cs);
+
+    bool ScheduledActions() override
+        LOCKS_EXCLUDED(cs_main)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, g_msgproc_mutex, !m_mempool.cs);
 
     /**
      * Reconsider orphan transactions after a parent has been accepted to the mempool.
@@ -3088,17 +3103,80 @@ void PeerManagerImpl::ProcessTx(CNode& pfrom, PeerRef& peer, CDataStream& vRecv)
         return;
     }
 
-    ProcessTxFlood(pfrom, peer, std::move(ptx));
+    if (m_mempool.m_stempool_max_size_bytes > 0 && pfrom.IsInboundConn()) {
+        ProcessTxStem(pfrom, peer, std::move(ptx));
+    } else {
+        ProcessTxFlood(pfrom, peer, std::move(ptx));
+    }
 }
 
+void PeerManagerImpl::ProcessTxStem(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
+{
+    LOCK(m_mempool.cs);
+    if (m_mempool.m_stempool.HaveTx(ptx->GetHash(), ptx->GetWitnessHash(), peer->m_id)) {
+        // already have this txid; if wtxid matched, added peer already
+        return;
+    }
+
+    // XXX handle in-stempool dependencies / package stemming
+    // m_orphanage.AddChildrenToWorkSet(tx, peer->m_orphan_work_set); ?
+
+    const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx, /*test_accept=*/true);
+    if (result.m_result_type != MempoolAcceptResult::ResultType::VALID) {
+        ProcessTxInvalid(pfrom, peer, std::move(ptx), result);
+        return;
+    }
+
+    // XXX we don't need to tell m_txrequest to ForgetTxHash here, right?
+
+    // add to stempool for stemming
+    const uint256& txhash = ptx->GetHash();
+    std::vector<std::tuple<uint64_t, NodeId>> send_order;
+    send_order.reserve(MAX_OUTBOUND_FULL_RELAY_CONNECTIONS);
+    const CSipHasher hasher{m_connman.GetDeterministicRandomizer(RANDOMIZER_ID_ADDRESS_RELAY).Write(txhash.begin(), txhash.size())};
+    m_connman.ForEachNode([&](CNode* pnode) {
+        if (!pnode->IsFullOutboundConn() || pnode->fDisconnect) return;
+        PeerRef obpeer = GetPeerRef(pnode->GetId());
+        if (!obpeer || !obpeer->GetTxRelay()) return;
+
+        uint64_t priority = CSipHasher(hasher).Write(pnode->GetId()).Finalize();
+        send_order.emplace_back(priority, pnode->GetId());
+    });
+    if (send_order.empty()) {
+        // no outbounds?? go straight to flooding
+        return ProcessTxFlood(pfrom, peer, std::move(ptx));
+    }
+    std::sort(send_order.begin(), send_order.end());
+
+    const auto now = NodeClock::now();
+    std::chrono::microseconds delay{0};
+    std::vector<std::tuple<NodeClock::time_point, NodeId>> outbounds;
+    outbounds.reserve(send_order.size() + 1);
+    for (auto [pri, obid] : send_order) {
+        outbounds.emplace_back(now + delay, obid);
+        delay = GetExponentialRand(delay, STEM_DELAY_INTERVAL);
+    }
+    // XXX: if (is_my_tx) delay += 2*STEM_DELAY_INTERVAL
+    outbounds.emplace_back(now + delay, STEMPOOL_FLOOD_NODEID);
+
+    m_mempool.m_stempool.AddTx(std::move(ptx), /*spaminess=*/0, outbounds);
+
+    pfrom.m_last_tx_time = GetTime<std::chrono::seconds>();
+    LogPrint(BCLog::MEMPOOL, "AcceptToStemPool: peer=%d: accepted %s (poolsz %u txn, %u kB)\n",
+        pfrom.GetId(),
+        ptx->GetHash().ToString(),
+        m_mempool.m_stempool.size(), m_mempool.m_stempool.DynamicMemoryUsage() / 1000);
+}
 
 void PeerManagerImpl::ProcessTxFlood(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx)
 {
+    WITH_LOCK(m_mempool.cs, m_mempool.m_stempool.DropWtx(ptx->GetWitnessHash()));
+
     const CTransaction& tx = *ptx;
     const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx);
-    const TxValidationState& state = result.m_state;
 
     if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        WITH_LOCK(m_mempool.cs, m_mempool.m_stempool.DropTx(ptx->GetHash()));
         // As this version of the transaction was acceptable, we can forget about any
         // requests for it.
         m_txrequest.ForgetTxHash(tx.GetHash());
@@ -3116,8 +3194,17 @@ void PeerManagerImpl::ProcessTxFlood(CNode& pfrom, PeerRef& peer, CTransactionRe
         for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
             AddToCompactExtraTransactions(removedTx);
         }
+    } else {
+        ProcessTxInvalid(pfrom, peer, std::move(ptx), result);
     }
-    else if (state.GetResult() == TxValidationResult::TX_MISSING_INPUTS)
+}
+
+void PeerManagerImpl::ProcessTxInvalid(CNode& pfrom, PeerRef& peer, CTransactionRef&& ptx, const MempoolAcceptResult& result)
+{
+    const CTransaction& tx = *ptx;
+    const TxValidationState& state = result.m_state;
+
+    if (state.GetResult() == TxValidationResult::TX_MISSING_INPUTS)
     {
         bool fRejectedParents = false; // It may be the case that the orphans parents have all been rejected
 
@@ -4855,11 +4942,98 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
-bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)
+void PeerManagerImpl::MaybeFloodStemTx(const CTransactionRef& ptx)
+{
+    if (!Assume(ptx)) return;
+
+    // No longer trying to hide that we know about this tx, so
+    // unconditionally forget about any requests for it.
+    m_txrequest.ForgetTxHash(ptx->GetHash());
+    m_txrequest.ForgetTxHash(ptx->GetWitnessHash());
+
+    const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx);
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        RelayTransaction(ptx->GetHash(), ptx->GetWitnessHash());
+        // XXX m_orphanage.AddChildrenToWorkSet(*ptx, peer->m_orphan_work_set);
+
+        LogPrint(BCLog::MEMPOOL, "AcceptToMemoryPool: stem-timeout: accepted %s (poolsz %u txn, %u kB)\n",
+            ptx->GetHash().ToString(),
+            m_mempool.size(), m_mempool.DynamicMemoryUsage() / 1000);
+
+        for (const CTransactionRef& removedTx : result.m_replaced_transactions.value()) {
+            AddToCompactExtraTransactions(removedTx);
+        }
+    } else {
+        // XXX LogPrint about failed ATMP of stempool tx?
+    }
+}
+
+void PeerManagerImpl::MaybeTrickleStemTx(NodeId nodeid, const CTransactionRef& ptx)
+{
+    if (!Assume(ptx)) return;
+
+    PeerRef peer = GetPeerRef(nodeid);
+    if (!peer) return; // probably means peer has disconnected since being queued
+
+    auto tx_relay = peer->GetTxRelay();
+    if (!tx_relay) return; // double check we actually relay txs to this peer
+
+    const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx, /*test_accept=*/true);
+    if (result.m_result_type != MempoolAcceptResult::ResultType::VALID) {
+        // LogPrint about failed ATMP of stempool tx?
+        m_mempool.m_stempool.DropTx(ptx->GetHash());
+
+        // we're rejecting this tx now, so no need to continue to request it
+        m_txrequest.ForgetTxHash(ptx->GetHash());
+        m_txrequest.ForgetTxHash(ptx->GetWitnessHash());
+
+        // XXX probably not worth adding to compactextratransactions?
+        return;
+    }
+
+    const uint256& hash{peer->m_wtxid_relay ? ptx->GetWitnessHash() : ptx->GetHash()};
+    LOCK(tx_relay->m_tx_inventory_mutex);
+    if (!tx_relay->m_tx_inventory_known_filter.contains(hash)) {
+        tx_relay->m_tx_inventory_to_send.insert(hash);
+    }
+}
+
+bool PeerManagerImpl::ScheduledActions()
 {
     AssertLockHeld(g_msgproc_mutex);
 
-    bool fMoreWork = false;
+    const auto now = NodeClock::now();
+    LOCK(cs_main); // :(
+    LOCK(m_mempool.cs);
+
+    bool did_anything = false;
+
+    {
+        auto txs = m_mempool.m_stempool.ExtractFloodTxs(now, m_mempool.m_stempool_max_size_bytes);
+        for (auto& ptx : txs) {
+            MaybeFloodStemTx(ptx);
+            did_anything = true;
+        }
+    }
+
+    // we shouldn't have many of these, so only do one per cycle.
+    // that way, if we do somehow have lots of them, we don't slow
+    // real processing down due to excessive repeated test ATMP runs.
+    if (!did_anything) {
+        auto [peer, ptx] = m_mempool.m_stempool.ExtractTrickleTx(now);
+        if (ptx != nullptr) {
+            MaybeTrickleStemTx(peer, ptx);
+            did_anything = true;
+        }
+    }
+
+    return did_anything;
+}
+
+bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)
+{
+    AssertLockHeld(g_msgproc_mutex);
 
     PeerRef peer = GetPeerRef(pfrom->GetId());
     if (peer == nullptr) return false;
@@ -4887,6 +5061,8 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
 
     // Don't bother if send buffer is too full to respond anyway
     if (pfrom->fPauseSend) return false;
+
+    bool fMoreWork = false;
 
     std::list<CNetMessage> msgs;
     {
@@ -5307,6 +5483,7 @@ class CompareInvMempoolOrder
     CTxMemPool* mp;
     bool m_wtxid_relay;
 public:
+    // XXX needs to check the stempool as well (and pass the peer id in? or do we just assume that's okay?)
     explicit CompareInvMempoolOrder(CTxMemPool *_mempool, bool use_wtxid)
     {
         mp = _mempool;

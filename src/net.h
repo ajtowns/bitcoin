@@ -635,6 +635,9 @@ public:
     /** Handle removal of a peer (clear state) */
     virtual void FinalizeNode(const CNode& node) = 0;
 
+
+    virtual bool ScheduledActions() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex) = 0;
+
     /**
     * Process protocol messages received from a given node
     *
