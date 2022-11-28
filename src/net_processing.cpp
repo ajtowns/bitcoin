@@ -3159,7 +3159,7 @@ void PeerManagerImpl::ProcessTxStem(CNode& pfrom, PeerRef& peer, CTransactionRef
     // XXX: if (is_my_tx) delay += 2*STEM_DELAY_INTERVAL
     outbounds.emplace_back(now + delay, STEMPOOL_FLOOD_NODEID);
 
-    m_mempool.m_stempool.AddTx(std::move(ptx), /*spaminess=*/0, outbounds);
+    m_mempool.m_stempool.AddTx(std::move(ptx), /*spaminess=*/0, outbounds, *result.m_base_fees);
 
     pfrom.m_last_tx_time = GetTime<std::chrono::seconds>();
     LogPrint(BCLog::MEMPOOL, "AcceptToStemPool: peer=%d: accepted %s (poolsz %u txn, %u kB)\n",
@@ -5497,6 +5497,41 @@ public:
         return mp->CompareDepthAndScore(*b, *a, m_wtxid_relay);
     }
 };
+
+class MempoolHeap
+{
+private:
+    std::vector<std::set<uint256>::iterator> m_hash_setiter;
+    CompareInvMempoolOrder m_compare;
+
+public:
+    explicit MempoolHeap(std::set<uint256>& hash_set, CTxMemPool& mempool, bool by_wtxid)
+      : m_compare(&mempool, by_wtxid)
+    {
+        m_hash_setiter.reserve(hash_set.size());
+        for (std::set<uint256>::iterator it = hash_set.begin(); it != hash_set.end(); ++it) {
+            m_hash_setiter.push_back(it);
+        }
+
+        // Topologically and fee-rate sort the inventory we send for privacy and priority reasons.
+        // A heap is used so that not all items need sorting if only a few are being sent.
+        std::make_heap(m_hash_setiter.begin(), m_hash_setiter.end(), m_compare);
+    }
+
+    bool empty() const
+    {
+        return m_hash_setiter.empty();
+    }
+
+    std::set<uint256>::iterator pop()
+    {
+        // Fetch the top element from the heap
+        std::pop_heap(m_hash_setiter.begin(), m_hash_setiter.end(), m_compare);
+        std::set<uint256>::iterator it = m_hash_setiter.back();
+        m_hash_setiter.pop_back();
+        return it;
+    }
+};
 } // namespace
 
 bool PeerManagerImpl::RejectIncomingTxs(const CNode& peer) const
@@ -5825,26 +5860,17 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
 
                 // Determine transactions to relay
                 if (fSendTrickle) {
-                    // Produce a vector with all candidates for sending
-                    std::vector<std::set<uint256>::iterator> vInvTx;
-                    vInvTx.reserve(tx_relay->m_tx_inventory_to_send.size());
-                    for (std::set<uint256>::iterator it = tx_relay->m_tx_inventory_to_send.begin(); it != tx_relay->m_tx_inventory_to_send.end(); it++) {
-                        vInvTx.push_back(it);
-                    }
                     const CFeeRate filterrate{tx_relay->m_fee_filter_received.load()};
-                    // Topologically and fee-rate sort the inventory we send for privacy and priority reasons.
-                    // A heap is used so that not all items need sorting if only a few are being sent.
-                    CompareInvMempoolOrder compareInvMempoolOrder(&m_mempool, peer->m_wtxid_relay);
-                    std::make_heap(vInvTx.begin(), vInvTx.end(), compareInvMempoolOrder);
+
+                    // Produce a vector with all candidates for sending
+                    MempoolHeap vInvTx{tx_relay->m_tx_inventory_to_send, m_mempool, peer->m_wtxid_relay};
+
                     // No reason to drain out at many times the network's capacity,
                     // especially since we have many peers and some will draw much shorter delays.
                     unsigned int nRelayedTransactions = 0;
                     LOCK(tx_relay->m_bloom_filter_mutex);
                     while (!vInvTx.empty() && nRelayedTransactions < INVENTORY_BROADCAST_MAX) {
-                        // Fetch the top element from the heap
-                        std::pop_heap(vInvTx.begin(), vInvTx.end(), compareInvMempoolOrder);
-                        std::set<uint256>::iterator it = vInvTx.back();
-                        vInvTx.pop_back();
+                        std::set<uint256>::iterator it = vInvTx.pop();
                         uint256 hash = *it;
                         CInv inv(peer->m_wtxid_relay ? MSG_WTX : MSG_TX, hash);
                         // Remove it from the to-be-sent set
@@ -5853,11 +5879,13 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                         if (tx_relay->m_tx_inventory_known_filter.contains(hash)) {
                             continue;
                         }
-                        // Not in the mempool anymore? don't bother sending it.
                         auto txinfo = m_mempool.info(ToGenTxid(inv));
                         if (!txinfo.tx) {
-                            continue;
+                            LOCK(m_mempool.cs);
+                            txinfo = m_mempool.m_stempool.info(ToGenTxid(inv));
                         }
+                        // Not in the mempool anymore? don't bother sending it.
+                        if (!txinfo.tx) continue;
                         auto txid = txinfo.tx->GetHash();
                         auto wtxid = txinfo.tx->GetWitnessHash();
                         // Peer told you to not send transactions at that feerate? Don't bother sending it.

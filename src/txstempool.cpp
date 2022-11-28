@@ -5,6 +5,7 @@
 #include <txstempool.h>
 
 #include <memusage.h>
+#include <consensus/validation.h>
 #include <core_memusage.h>
 #include <util/hasher.h>
 
@@ -22,9 +23,10 @@ class Entry
 public:
     CTransactionRef tx;
     NodeClock::time_point added_time;
-    uint64_t spaminess;
+    uint64_t spaminess{0};
     std::set<NodeId> stemmed_to;
-    size_t tx_usage;
+    int64_t tx_weight{0};
+    size_t tx_usage{0};
 
     Entry(CTransactionRef&& ptx, NodeClock::time_point time, uint64_t spaminess) : tx{ptx}, added_time{time}, spaminess{spaminess}, tx_usage{RecursiveDynamicUsage(tx)} { }
     Entry(const Entry&) = delete;
@@ -114,8 +116,10 @@ bool TxStemPool::HaveTx(const uint256& txid, const uint256& wtxid, NodeId peer)
     return false;
 }
 
-void TxStemPool::AddTx(CTransactionRef&& ptx, uint64_t spaminess, const std::vector<std::tuple<NodeClock::time_point, NodeId>>& outbounds)
+void TxStemPool::AddTx(CTransactionRef&& ptx, uint64_t spaminess, const std::vector<std::tuple<NodeClock::time_point, NodeId>>& outbounds, CAmount fees)
 {
+    int64_t weight = GetTransactionWeight(*ptx);
+    assert(weight >= 0);
     return;
 }
 
@@ -137,6 +141,17 @@ void TxStemPool::DropWtx(const uint256& wtxid)
 void TxStemPool::DropTx(const uint256& txid)
 {
     return;
+}
+
+TxMempoolInfo TxStemPool::info(const GenTxid& gentxid) const
+{
+    TxMempoolInfo result{.tx=nullptr};
+    // CTransactionRef tx;
+    // std::chrono::seconds m_time;
+    // CAmount fee;
+    // size_t vsize;
+    // int64_t nFeeDelta;
+    return result;
 }
 
 size_t TxStemPool::size() const

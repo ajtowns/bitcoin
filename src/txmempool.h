@@ -205,27 +205,6 @@ struct index_by_wtxid {};
 
 class CBlockPolicyEstimator;
 
-/**
- * Information about a mempool transaction.
- */
-struct TxMempoolInfo
-{
-    /** The transaction itself */
-    CTransactionRef tx;
-
-    /** Time the transaction entered the mempool. */
-    std::chrono::seconds m_time;
-
-    /** Fee of the transaction. */
-    CAmount fee;
-
-    /** Virtual size of the transaction. */
-    size_t vsize;
-
-    /** The fee delta. */
-    int64_t nFeeDelta;
-};
-
 /** Reason why a transaction was removed from the mempool,
  * this is passed to the notification signal.
  */
