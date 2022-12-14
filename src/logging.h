@@ -12,6 +12,7 @@
 #include <util/string.h>
 
 #include <atomic>
+#include <bitset>
 #include <cstdint>
 #include <functional>
 #include <list>
@@ -35,41 +36,45 @@ struct LogCategory {
 };
 
 namespace BCLog {
-    enum LogFlags : uint32_t {
-        NONE        = 0,
-        NET         = (1 <<  0),
-        TOR         = (1 <<  1),
-        MEMPOOL     = (1 <<  2),
-        HTTP        = (1 <<  3),
-        BENCH       = (1 <<  4),
-        ZMQ         = (1 <<  5),
-        WALLETDB    = (1 <<  6),
-        RPC         = (1 <<  7),
-        ESTIMATEFEE = (1 <<  8),
-        ADDRMAN     = (1 <<  9),
-        SELECTCOINS = (1 << 10),
-        REINDEX     = (1 << 11),
-        CMPCTBLOCK  = (1 << 12),
-        RAND        = (1 << 13),
-        PRUNE       = (1 << 14),
-        PROXY       = (1 << 15),
-        MEMPOOLREJ  = (1 << 16),
-        LIBEVENT    = (1 << 17),
-        COINDB      = (1 << 18),
-        QT          = (1 << 19),
-        LEVELDB     = (1 << 20),
-        VALIDATION  = (1 << 21),
-        I2P         = (1 << 22),
-        IPC         = (1 << 23),
+    enum LogFlags {
+        NET,
+        TOR,
+        MEMPOOL,
+        HTTP,
+        BENCH,
+        ZMQ,
+        WALLETDB,
+        RPC,
+        ESTIMATEFEE,
+        ADDRMAN,
+        SELECTCOINS,
+        REINDEX,
+        CMPCTBLOCK,
+        RAND,
+        PRUNE,
+        PROXY,
+        MEMPOOLREJ,
+        LIBEVENT,
+        COINDB,
+        QT,
+        LEVELDB,
+        VALIDATION,
+        I2P,
+        IPC,
 #ifdef DEBUG_LOCKCONTENTION
-        LOCK        = (1 << 24),
+        LOCK,
 #endif
-        UTIL        = (1 << 25),
-        BLOCKSTORE  = (1 << 26),
-        TXRECONCILIATION = (1 << 27),
-        SCAN        = (1 << 28),
-        ALL         = ~(uint32_t)0,
+        UTIL,
+        BLOCKSTORE,
+        TXRECONCILIATION,
+        SCAN,
+        // Add new entries before this line.
+
+        // The following have no representation in m_categories:
+        ALL, // this is also the size of the bitset
+        NONE,
     };
+    using LogFlagsBitset = std::bitset<ALL>;
     enum class Level {
         Trace = 0, // High-volume or detailed logging for development/debugging
         Debug,     // Reasonably noisy logging, but still usable in production
@@ -104,7 +109,7 @@ namespace BCLog {
         std::atomic<Level> m_log_level{DEFAULT_LOG_LEVEL};
 
         /** Log categories bitfield. */
-        std::atomic<uint32_t> m_categories{0};
+        LogFlagsBitset m_categories GUARDED_BY(m_cs);
 
         std::string LogTimestampStr(const std::string& str);
 
@@ -171,7 +176,11 @@ namespace BCLog {
         void SetLogLevel(Level level) { m_log_level = level; }
         bool SetLogLevel(const std::string& level);
 
-        uint32_t GetCategoryMask() const { return m_categories.load(); }
+        LogFlagsBitset GetCategoryMask() const
+        {
+            StdLockGuard scoped_lock(m_cs);
+            return m_categories;
+        }
 
         void EnableCategory(LogFlags flag);
         bool EnableCategory(const std::string& str);

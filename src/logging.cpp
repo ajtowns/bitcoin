@@ -5,6 +5,7 @@
 
 #include <fs.h>
 #include <logging.h>
+#include <util/check.h>
 #include <util/string.h>
 #include <util/threadnames.h>
 #include <util/time.h>
@@ -95,7 +96,9 @@ void BCLog::Logger::DisconnectTestLogger()
 
 void BCLog::Logger::EnableCategory(BCLog::LogFlags flag)
 {
-    m_categories |= flag;
+    if (flag == BCLog::NONE) return;
+    StdLockGuard scoped_lock(m_cs);
+    (flag == BCLog::ALL) ? m_categories.set() : m_categories.set(flag);
 }
 
 bool BCLog::Logger::EnableCategory(const std::string& str)
@@ -108,7 +111,9 @@ bool BCLog::Logger::EnableCategory(const std::string& str)
 
 void BCLog::Logger::DisableCategory(BCLog::LogFlags flag)
 {
-    m_categories &= ~flag;
+    if (flag == BCLog::NONE) return;
+    StdLockGuard scoped_lock(m_cs);
+    (flag == BCLog::ALL) ? m_categories.reset() : m_categories.reset(flag);
 }
 
 bool BCLog::Logger::DisableCategory(const std::string& str)
@@ -121,7 +126,10 @@ bool BCLog::Logger::DisableCategory(const std::string& str)
 
 bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
 {
-    return (m_categories.load(std::memory_order_relaxed) & category) != 0;
+    if (category == BCLog::NONE) return false;
+    StdLockGuard scoped_lock(m_cs);
+    if (category == BCLog::ALL) return m_categories.any();
+    return Assume(category < m_categories.size()) && m_categories.test(category);
 }
 
 bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level level) const
@@ -139,7 +147,8 @@ bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level 
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const
 {
-    return m_categories == BCLog::NONE;
+    StdLockGuard scoped_lock(m_cs);
+    return m_categories.none();
 }
 
 struct CLogCategoryDesc {
@@ -224,8 +233,6 @@ std::string LogCategoryToStr(BCLog::LogFlags category)
 {
     // Each log category string representation should sync with LogCategories
     switch (category) {
-    case BCLog::LogFlags::NONE:
-        return "";
     case BCLog::LogFlags::NET:
         return "net";
     case BCLog::LogFlags::TOR:
@@ -286,8 +293,12 @@ std::string LogCategoryToStr(BCLog::LogFlags category)
         return "txreconciliation";
     case BCLog::LogFlags::SCAN:
         return "scan";
+    // Add new entries before this line.
+
     case BCLog::LogFlags::ALL:
         return "all";
+    case BCLog::LogFlags::NONE:
+        return "";
     }
     assert(false);
 }

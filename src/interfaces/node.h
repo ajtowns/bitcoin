@@ -6,6 +6,7 @@
 #define BITCOIN_INTERFACES_NODE_H
 
 #include <consensus/amount.h>          // For CAmount
+#include <logging.h>
 #include <net.h>                       // For NodeId
 #include <net_types.h>                 // For banmap_t
 #include <netaddress.h>                // For Network
@@ -81,7 +82,7 @@ public:
     virtual bilingual_str getWarnings() = 0;
 
     // Get log flags.
-    virtual uint32_t getLogCategories() = 0;
+    virtual BCLog::LogFlagsBitset getLogCategories() = 0;
 
     //! Initialize app dependencies.
     virtual bool baseInitialize() = 0;
