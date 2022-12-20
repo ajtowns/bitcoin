@@ -5,6 +5,7 @@
 #include <consensus/consensus.h>
 #include <consensus/tx_verify.h>
 #include <key.h>
+#include <policy/policy.h>
 #include <pubkey.h>
 #include <script/script.h>
 #include <script/standard.h>
@@ -224,6 +225,40 @@ BOOST_AUTO_TEST_CASE(GetTxSigOpCost)
         BuildTxs(spendingTx, coins, creationTx, scriptPubKey, scriptSig, scriptWitness);
         assert(GetTransactionSigOpCost(CTransaction(spendingTx), coins, flags) == 2);
         assert(VerifyWithFlag(CTransaction(creationTx), spendingTx, flags) == SCRIPT_ERR_CHECKMULTISIGVERIFY);
+    }
+
+    // RSK (RSKIP-201) script
+    {
+        CScript redeemScript;
+        redeemScript << OP_IF << OP_5;
+        for (int i = 0; i < 9; ++i) redeemScript << ToByteVector(pubkey);
+        redeemScript << OP_9 << OP_ELSE << (int64_t)52560 << OP_CHECKSEQUENCEVERIFY << OP_DROP << OP_3;
+        for (int i = 0; i < 4; ++i) redeemScript << ToByteVector(pubkey);
+        redeemScript << OP_4 << OP_ENDIF << OP_CHECKMULTISIGVERIFY;
+        CScript scriptPubKey = GetScriptForDestination(ScriptHash(redeemScript));
+        CScript scriptSig = CScript() << OP_0 << OP_0 << OP_0 << OP_0 << OP_0 << OP_0 << OP_1 << ToByteVector(redeemScript);
+
+        BuildTxs(spendingTx, coins, creationTx, scriptPubKey, scriptSig, CScriptWitness());
+        BOOST_CHECK_EQUAL(GetTransactionSigOpCost(CTransaction(spendingTx), coins, flags), 20 * WITNESS_SCALE_FACTOR);
+        BOOST_CHECK_EQUAL(VerifyWithFlag(CTransaction(creationTx), spendingTx, flags), SCRIPT_ERR_CHECKMULTISIGVERIFY);
+        BOOST_CHECK(!AreInputsStandard(CTransaction(spendingTx),coins));
+    }
+
+    // RSK (RSKIP-353) script
+    {
+        CScript redeemScript;
+        redeemScript << OP_IF << OP_5;
+        for (int i = 0; i < 9; ++i) redeemScript << ToByteVector(pubkey);
+        redeemScript << OP_9 << OP_CHECKMULTISIGVERIFY << OP_ELSE << (int64_t)52560 << OP_CHECKSEQUENCEVERIFY << OP_DROP << OP_3;
+        for (int i = 0; i < 4; ++i) redeemScript << ToByteVector(pubkey);
+        redeemScript << OP_4 << OP_CHECKMULTISIGVERIFY << OP_ENDIF;
+        CScript scriptPubKey = GetScriptForDestination(ScriptHash(redeemScript));
+        CScript scriptSig = CScript() << OP_0 << OP_0 << OP_0 << OP_0 << OP_0 << OP_0 << OP_1 << ToByteVector(redeemScript);
+
+        BuildTxs(spendingTx, coins, creationTx, scriptPubKey, scriptSig, CScriptWitness());
+        BOOST_CHECK_EQUAL(GetTransactionSigOpCost(CTransaction(spendingTx), coins, flags), (9+4) * WITNESS_SCALE_FACTOR);
+        BOOST_CHECK_EQUAL(VerifyWithFlag(CTransaction(creationTx), spendingTx, flags), SCRIPT_ERR_CHECKMULTISIGVERIFY);
+        BOOST_CHECK(AreInputsStandard(CTransaction(spendingTx),coins));
     }
 }
 
