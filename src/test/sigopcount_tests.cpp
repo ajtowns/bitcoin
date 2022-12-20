@@ -241,7 +241,7 @@ BOOST_AUTO_TEST_CASE(GetTxSigOpCost)
         BuildTxs(spendingTx, coins, creationTx, scriptPubKey, scriptSig, CScriptWitness());
         BOOST_CHECK_EQUAL(GetTransactionSigOpCost(CTransaction(spendingTx), coins, flags), 20 * WITNESS_SCALE_FACTOR);
         BOOST_CHECK_EQUAL(VerifyWithFlag(CTransaction(creationTx), spendingTx, flags), SCRIPT_ERR_CHECKMULTISIGVERIFY);
-        BOOST_CHECK(!AreInputsStandard(CTransaction(spendingTx),coins));
+        BOOST_CHECK(AreInputsStandard(CTransaction(spendingTx),coins));
     }
 
     // RSK (RSKIP-353) script
