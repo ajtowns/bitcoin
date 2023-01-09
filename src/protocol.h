@@ -17,6 +17,8 @@
 #include <limits>
 #include <string>
 
+static constexpr uint8_t V2_MAX_MSG_TYPE_LEN = 12; // maximum length for V2 (BIP324) string message types
+
 /** Message header.
  * (4) message start.
  * (12) command.
@@ -266,17 +268,8 @@ extern const char* WTXIDRELAY;
 extern const char* SENDTXRCNCL;
 }; // namespace NetMsgType
 
-/* Get a map of all valid message types (see above) */
-const std::map<uint8_t, std::string>& getAllNetMessageTypes();
-
-/** Short message type IDs are a low bandwidth representations of a message type
- *   The mapping is a peer to peer agreement (initially defined in BIP324)
- *
- *   returns the short ID for a message type (if known) */
-std::optional<uint8_t> GetShortIDFromMessageType(const std::string& message_type);
-
-/** returns the message type (string) from a short ID (as initially defined in BIP324) */
-std::optional<std::string> GetMessageTypeFromShortID(const uint8_t shortID);
+/* Get a vector of all valid message types (see above) */
+const std::vector<std::string>& getAllNetMessageTypes();
 
 /** nServices flags */
 enum ServiceFlags : uint64_t {
@@ -523,5 +516,38 @@ public:
 
 /** Convert a TX/WITNESS_TX/WTX CInv to a GenTxid. */
 GenTxid ToGenTxid(const CInv& inv);
+
+class MapToShortID
+{
+private:
+    std::map<std::string, uint8_t> m_map;
+public:
+    template<size_t N>
+    explicit MapToShortID(const std::pair<uint8_t, const char*> (&shortids)[N])
+    {
+        for (auto [shortid, cmd] : shortids) {
+            m_map.emplace(cmd, shortid);
+        }
+    }
+
+    std::optional<uint8_t> find(const std::string& cmd) const
+    {
+        auto it = m_map.find(cmd);
+        if (it == m_map.end()) return {};
+        return it->second;
+    }
+};
+
+class MapFromShortID
+{
+private:
+    std::array<int8_t,256-V2_MAX_MSG_TYPE_LEN-1> m_map;
+public:
+    MapFromShortID();
+    void Set(uint8_t shortid, std::string_view cmd);
+    std::string Get(uint8_t shortid) const;
+};
+
+extern const MapToShortID g_bip324_maptoshortid;
 
 #endif // BITCOIN_PROTOCOL_H

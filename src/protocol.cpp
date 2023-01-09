@@ -5,6 +5,7 @@
 
 #include <protocol.h>
 
+#include <util/check.h>
 #include <util/system.h>
 
 static std::atomic<bool> g_initial_block_download_completed(false);
@@ -50,34 +51,69 @@ const char *SENDTXRCNCL="sendtxrcncl";
 /** All known message types including the short-ID (as initially defined in BIP324).
  *  Keep this in the same order as the list of messages above and in protocol.h.
  */
-const static std::map<uint8_t, std::string> allNetMessageTypes = {
-    {37, NetMsgType::VERSION},
-    {36, NetMsgType::VERACK},
+const static std::vector<std::string> allNetMessageTypes = {
+    NetMsgType::VERSION,
+    NetMsgType::VERACK,
+    NetMsgType::ADDR,
+    NetMsgType::ADDRV2,
+    NetMsgType::SENDADDRV2,
+    NetMsgType::INV,
+    NetMsgType::GETDATA,
+    NetMsgType::MERKLEBLOCK,
+    NetMsgType::GETBLOCKS,
+    NetMsgType::GETHEADERS,
+    NetMsgType::TX,
+    NetMsgType::HEADERS,
+    NetMsgType::BLOCK,
+    NetMsgType::GETADDR,
+    NetMsgType::MEMPOOL,
+    NetMsgType::PING,
+    NetMsgType::PONG,
+    NetMsgType::NOTFOUND,
+    NetMsgType::FILTERLOAD,
+    NetMsgType::FILTERADD,
+    NetMsgType::FILTERCLEAR,
+    NetMsgType::SENDHEADERS,
+    NetMsgType::FEEFILTER,
+    NetMsgType::SENDCMPCT,
+    NetMsgType::CMPCTBLOCK,
+    NetMsgType::GETBLOCKTXN,
+    NetMsgType::BLOCKTXN,
+    NetMsgType::GETCFILTERS,
+    NetMsgType::CFILTER,
+    NetMsgType::GETCFHEADERS,
+    NetMsgType::CFHEADERS,
+    NetMsgType::GETCFCHECKPT,
+    NetMsgType::CFCHECKPT,
+    NetMsgType::WTXIDRELAY,
+    NetMsgType::SENDTXRCNCL};
+
+static const std::pair<uint8_t, const char*> g_bip324_shortids[] = {
     {13, NetMsgType::ADDR},
-    {45, NetMsgType::ADDRV2},
-    {46, NetMsgType::SENDADDRV2},
-    {27, NetMsgType::INV},
-    {24, NetMsgType::GETDATA},
-    {29, NetMsgType::MERKLEBLOCK},
-    {22, NetMsgType::GETBLOCKS},
-    {25, NetMsgType::GETHEADERS},
-    {35, NetMsgType::TX},
-    {26, NetMsgType::HEADERS},
     {14, NetMsgType::BLOCK},
-    {21, NetMsgType::GETADDR},
-    {28, NetMsgType::MEMPOOL},
-    {31, NetMsgType::PING},
-    {32, NetMsgType::PONG},
-    {30, NetMsgType::NOTFOUND},
-    {20, NetMsgType::FILTERLOAD},
+    {15, NetMsgType::BLOCKTXN},
+    {16, NetMsgType::CMPCTBLOCK},
+    {17, NetMsgType::FEEFILTER},
     {18, NetMsgType::FILTERADD},
     {19, NetMsgType::FILTERCLEAR},
-    {34, NetMsgType::SENDHEADERS},
-    {17, NetMsgType::FEEFILTER},
-    {33, NetMsgType::SENDCMPCT},
-    {16, NetMsgType::CMPCTBLOCK},
+    {20, NetMsgType::FILTERLOAD},
+    {21, NetMsgType::GETADDR},
+    {22, NetMsgType::GETBLOCKS},
     {23, NetMsgType::GETBLOCKTXN},
-    {15, NetMsgType::BLOCKTXN},
+    {24, NetMsgType::GETDATA},
+    {25, NetMsgType::GETHEADERS},
+    {26, NetMsgType::HEADERS},
+    {27, NetMsgType::INV},
+    {28, NetMsgType::MEMPOOL},
+    {29, NetMsgType::MERKLEBLOCK},
+    {30, NetMsgType::NOTFOUND},
+    {31, NetMsgType::PING},
+    {32, NetMsgType::PONG},
+    {33, NetMsgType::SENDCMPCT},
+    {34, NetMsgType::SENDHEADERS},
+    {35, NetMsgType::TX},
+    {36, NetMsgType::VERACK},
+    {37, NetMsgType::VERSION},
     {38, NetMsgType::GETCFILTERS},
     {39, NetMsgType::CFILTER},
     {40, NetMsgType::GETCFHEADERS},
@@ -85,9 +121,52 @@ const static std::map<uint8_t, std::string> allNetMessageTypes = {
     {42, NetMsgType::GETCFCHECKPT},
     {43, NetMsgType::CFCHECKPT},
     {44, NetMsgType::WTXIDRELAY},
-    {47, NetMsgType::SENDTXRCNCL}};
+    {45, NetMsgType::ADDRV2},
+    {46, NetMsgType::SENDADDRV2},
+    {47, NetMsgType::SENDTXRCNCL},
+    //{48, NetMsgType::REQRECON},
+    //{49, NetMsgType::SKETCH},
+    //{50, NetMsgType::REQSKETCHEXT},
+    //{51, NetMsgType::RECONCILDIFF},
+};
 
-static std::map<std::string, uint8_t> msgTypeShortIDs;
+const MapToShortID g_bip324_maptoshortid(g_bip324_shortids);
+
+MapFromShortID::MapFromShortID()
+{
+    m_map.fill(-1);
+    for (auto [shortid, cmd] : g_bip324_shortids) {
+        Set(shortid, cmd);
+    }
+}
+
+void MapFromShortID::Set(uint8_t shortid, std::string_view cmd)
+{
+    if (shortid <= V2_MAX_MSG_TYPE_LEN) return;
+    shortid -= (V2_MAX_MSG_TYPE_LEN + 1);
+    size_t i = 0;
+    for (const auto& s : allNetMessageTypes) {
+        // need a bigger type for m_map to support more commands
+        if (!Assume(i < std::numeric_limits<int8_t>::max())) break;
+
+        if (cmd == s) {
+            m_map[shortid] = i;
+            return;
+        }
+        ++i;
+    }
+    m_map[shortid] = -1;
+}
+
+std::string MapFromShortID::Get(uint8_t shortid) const
+{
+    if (shortid > V2_MAX_MSG_TYPE_LEN) {
+        auto idx = m_map[shortid-V2_MAX_MSG_TYPE_LEN-1];
+        if (idx >= 0 && (size_t)idx < allNetMessageTypes.size()) return allNetMessageTypes[idx];
+    }
+    // unknown-short-id results in a valid but unknown message (will be skipped)
+    return "unknown-" + ToString(shortid);
+}
 
 CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* pszCommand, unsigned int nMessageSizeIn)
 {
@@ -178,7 +257,7 @@ std::string CInv::ToString() const
     }
 }
 
-const std::map<uint8_t, std::string>& getAllNetMessageTypes()
+const std::vector<std::string>& getAllNetMessageTypes()
 {
     return allNetMessageTypes;
 }
@@ -222,28 +301,4 @@ GenTxid ToGenTxid(const CInv& inv)
 {
     assert(inv.IsGenTxMsg());
     return inv.IsMsgWtx() ? GenTxid::Wtxid(inv.hash) : GenTxid::Txid(inv.hash);
-}
-
-std::optional<uint8_t> GetShortIDFromMessageType(const std::string& message_type)
-{
-    if (msgTypeShortIDs.size() != allNetMessageTypes.size()) {
-        for (const std::pair<uint8_t, std::string> entry : allNetMessageTypes) {
-            msgTypeShortIDs[entry.second] = entry.first;
-        }
-    }
-
-    auto it = msgTypeShortIDs.find(message_type);
-    if (it != msgTypeShortIDs.end()) {
-        return it->second;
-    }
-    return {};
-}
-
-std::optional<std::string> GetMessageTypeFromShortID(const uint8_t shortID)
-{
-    auto it = allNetMessageTypes.find(shortID);
-    if (it != allNetMessageTypes.end()) {
-        return it->second;
-    }
-    return {};
 }

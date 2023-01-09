@@ -275,6 +275,7 @@ public:
                                    bool& reject_message,
                                    bool& disconnect,
                                    Span<const std::byte> aad) = 0;
+    virtual void SetShortID(uint8_t short_cmd, const char* long_cmd) = 0;
     virtual ~TransportDeserializer() {}
 };
 
@@ -318,6 +319,8 @@ public:
         Reset();
     }
 
+    void SetShortID(uint8_t short_cmd, const char* long_cmd) override { }
+
     bool Complete() const override
     {
         if (!in_data)
@@ -357,6 +360,7 @@ private:
     size_t m_hdr_pos = 0;       // read pos in header
     size_t m_data_pos = 0;      // read pos in data
     bool m_processed_version_placeholder = false; // BIP324 transport version message has been received
+    MapFromShortID m_shortidmap;
 
 public:
     V2TransportDeserializer(const NodeId node_id,
@@ -367,6 +371,11 @@ public:
           vRecv(SER_NETWORK, INIT_PROTO_VERSION)
     {
         Reset();
+    }
+
+    void SetShortID(uint8_t short_cmd, const char* long_cmd) override
+    {
+        m_shortidmap.Set(short_cmd, long_cmd);
     }
 
     void Reset()

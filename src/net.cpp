@@ -115,7 +115,6 @@ static const uint64_t RANDOMIZER_ID_NETGROUP = 0x6c0edd8036ef4036ULL; // SHA256(
 static const uint64_t RANDOMIZER_ID_LOCALHOSTNONCE = 0xd93e69e2bbfa5735ULL; // SHA256("localhostnonce")[0:8]
 static const uint64_t RANDOMIZER_ID_ADDRCACHE = 0x1cf2e4ddd306dda9ULL; // SHA256("addrcache")[0:8]
 
-static constexpr uint8_t V2_MAX_MSG_TYPE_LEN = 12; // maximum length for V2 (BIP324) string message types
 static constexpr size_t V2_MAX_GARBAGE_BYTES = 4095; // maximum length for V2 (BIP324) shapable handshake
 //
 // Global state variables
@@ -1034,13 +1033,7 @@ CNetMessage V2TransportDeserializer::GetMessage(const std::chrono::microseconds 
                 vRecv.read(MakeWritableByteSpan(msg_type));
                 msg_type_size += size_or_shortid;
             } else {
-                auto mtype = GetMessageTypeFromShortID(size_or_shortid);
-                if (mtype.has_value()) {
-                    msg_type = mtype.value();
-                } else {
-                    // unknown-short-id results in a valid but unknown message (will be skipped)
-                    msg_type = "unknown-" + ToString(size_or_shortid);
-                }
+                msg_type = m_shortidmap.Get(size_or_shortid);
             }
         }
     } else {
@@ -1071,7 +1064,7 @@ bool V2TransportSerializer::prepareForTransport(CSerializedNetMsg& msg, std::vec
     // When dealing with a message other than the transport version placeholder message, serialize the command.
     if (!msg.m_type.empty() || !msg.data.empty()) {
         size_t serialized_msg_type_size = 1; // short-IDs are 1 byte
-        std::optional<uint8_t> short_msg_type = GetShortIDFromMessageType(msg.m_type);
+        const std::optional<uint8_t> short_msg_type = g_bip324_maptoshortid.find(msg.m_type);
 
         if (!short_msg_type) {
             // message type without an assigned short-ID
@@ -3205,7 +3198,7 @@ CNode::CNode(NodeId idIn,
     if (inbound_onion) assert(conn_type_in == ConnectionType::INBOUND);
 
     for (const auto& msg : getAllNetMessageTypes()) {
-        mapRecvBytesPerMsgType[msg.second] = 0;
+        mapRecvBytesPerMsgType[msg] = 0;
     }
     mapRecvBytesPerMsgType[NET_MESSAGE_TYPE_OTHER] = 0;
 
