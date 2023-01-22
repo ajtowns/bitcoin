@@ -89,7 +89,7 @@ public:
     void initLogging() override { InitLogging(*Assert(m_context->args)); }
     void initParameterInteraction() override { InitParameterInteraction(*Assert(m_context->args)); }
     bilingual_str getWarnings() override { return GetWarnings(true); }
-    BCLog::LogFlagsBitset getLogCategories() override { return LogInstance().GetCategoryMask(); }
+    const BCLog::LogFlagsBitset& getLogCategories() override { return LogInstance().GetCategoryMask(); }
     bool baseInitialize() override
     {
         if (!AppInitBasicSetup(gArgs)) return false;

@@ -74,7 +74,63 @@ namespace BCLog {
         ALL, // this is also the size of the bitset
         NONE,
     };
-    using LogFlagsBitset = std::bitset<ALL>;
+
+template<typename FlagType, size_t N, typename T=uint64_t>
+class AtomicBitSet {
+private:
+    static constexpr size_t SIZE = 8 * sizeof(T);
+    static constexpr size_t BITS_N = (N / SIZE) + (N % SIZE == 0 ? 0 : 1);
+    std::atomic<T> bits[BITS_N]{0};
+
+public:
+    AtomicBitSet() = default;
+    AtomicBitSet(FlagType f) { set(f); }
+
+    AtomicBitSet(const AtomicBitSet&) = delete;
+    AtomicBitSet(AtomicBitSet&&) = delete;
+    AtomicBitSet& operator=(const AtomicBitSet&) = delete;
+    AtomicBitSet& operator=(AtomicBitSet&&) = delete;
+    ~AtomicBitSet() = default;
+
+    constexpr size_t size() const { return N; }
+
+    bool any() const {
+        for (const auto& i : bits) {
+            if (i.load()) return true;
+        }
+        return false;
+    }
+    bool none() const { return !any(); }
+    void set() {
+        for (size_t i = 0; i < BITS_N; ++i) {
+            if (N % SIZE == 0 || i + 1 < BITS_N) {
+                bits[i] = ~T{0};
+            } else {
+                bits[i] = (T{1} << (N % SIZE)) - 1;
+            }
+        }
+    }
+    void reset() {
+        for (size_t i = 0; i < BITS_N; ++i) {
+            bits[i] = 0;
+        }
+    }
+    void set(FlagType f) {
+        if (f < 0 || f >= N) return;
+        bits[f/SIZE] |= (T{1} << (f % SIZE));
+    }
+    void reset(FlagType f) {
+        if (f < 0 || f >= N) return;
+        bits[f/SIZE] &= ~(T{1} << (f % SIZE));
+    }
+    bool test(FlagType f) const {
+        if (f < 0 || f >= N) return false;
+        return (bits[f/SIZE] & (T{1} << (f % SIZE)));
+    }
+};
+
+    using LogFlagsBitset = AtomicBitSet<LogFlags, LogFlags::ALL, uint32_t>;
+
     enum class Level {
         Trace = 0, // High-volume or detailed logging for development/debugging
         Debug,     // Reasonably noisy logging, but still usable in production
@@ -109,7 +165,7 @@ namespace BCLog {
         std::atomic<Level> m_log_level{DEFAULT_LOG_LEVEL};
 
         /** Log categories bitfield. */
-        LogFlagsBitset m_categories GUARDED_BY(m_cs);
+        LogFlagsBitset m_categories;
 
         std::string LogTimestampStr(const std::string& str);
 
@@ -176,7 +232,7 @@ namespace BCLog {
         void SetLogLevel(Level level) { m_log_level = level; }
         bool SetLogLevel(const std::string& level);
 
-        LogFlagsBitset GetCategoryMask() const
+        const LogFlagsBitset& GetCategoryMask() const
         {
             StdLockGuard scoped_lock(m_cs);
             return m_categories;

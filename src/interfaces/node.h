@@ -82,7 +82,7 @@ public:
     virtual bilingual_str getWarnings() = 0;
 
     // Get log flags.
-    virtual BCLog::LogFlagsBitset getLogCategories() = 0;
+    virtual const BCLog::LogFlagsBitset& getLogCategories() = 0;
 
     //! Initialize app dependencies.
     virtual bool baseInitialize() = 0;
