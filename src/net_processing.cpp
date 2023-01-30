@@ -153,7 +153,6 @@ static constexpr auto INBOUND_INVENTORY_BROADCAST_INTERVAL{5s};
 static constexpr auto OUTBOUND_INVENTORY_BROADCAST_INTERVAL{2s};
 /** Maximum rate of inventory items to send per second.
  *  Limits the impact of low-fee transaction floods. */
-static constexpr auto STEM_DELAY_INTERVAL{180s};
 static constexpr unsigned int INVENTORY_BROADCAST_PER_SECOND = 7;
 /** Maximum number of inventory items to send per transmission. */
 static constexpr unsigned int INVENTORY_BROADCAST_MAX = INVENTORY_BROADCAST_PER_SECOND * count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL);
@@ -164,6 +163,9 @@ static constexpr unsigned int INVENTORY_MAX_RECENT_RELAY = 3500;
  *  lower bound, and it should be larger to account for higher inv rate to outbound
  *  peers, and random variations in the broadcast mechanism. */
 static_assert(INVENTORY_MAX_RECENT_RELAY >= INVENTORY_BROADCAST_PER_SECOND * UNCONDITIONAL_RELAY_DELAY / std::chrono::seconds{1}, "INVENTORY_RELAY_MAX too low");
+/** SHA256("stem relay")[0:8] */
+static constexpr uint64_t RANDOMIZER_ID_STEM_RELAY = 0x5e8b138c2dd2c59a;
+static constexpr auto STEM_DELAY_INTERVAL{180s};
 /** Average delay between feefilter broadcasts in seconds. */
 static constexpr auto AVG_FEEFILTER_BROADCAST_INTERVAL{10min};
 /** Maximum feefilter broadcast delay after significant change. */
@@ -3130,12 +3132,12 @@ void PeerManagerImpl::ProcessTxStem(CNode& pfrom, PeerRef& peer, CTransactionRef
     // XXX we don't need to tell m_txrequest to ForgetTxHash here, right?
 
     // add to stempool for stemming
-    const uint256& txhash = ptx->GetHash();
+    const uint256& txhash = ptx->GetHash(); // use txid or wtxid here?
     std::vector<std::tuple<uint64_t, NodeId>> send_order;
     send_order.reserve(MAX_OUTBOUND_FULL_RELAY_CONNECTIONS);
-    const CSipHasher hasher{m_connman.GetDeterministicRandomizer(RANDOMIZER_ID_ADDRESS_RELAY).Write(txhash.begin(), txhash.size())};
+    const CSipHasher hasher{m_connman.GetDeterministicRandomizer(RANDOMIZER_ID_STEM_RELAY).Write(txhash.begin(), txhash.size())};
     m_connman.ForEachNode([&](CNode* pnode) {
-        if (!pnode->IsFullOutboundConn() || pnode->fDisconnect) return;
+        if (!pnode->IsFullOutboundConn() || pnode->fDisconnect) return; // whitelisted or manual peers?
         PeerRef obpeer = GetPeerRef(pnode->GetId());
         if (!obpeer || !obpeer->GetTxRelay()) return;
 
