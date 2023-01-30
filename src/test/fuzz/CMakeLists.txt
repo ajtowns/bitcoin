@@ -133,6 +133,7 @@ add_executable(fuzz
   utxo_total_supply.cpp
   validation_load_mempool.cpp
   vecdeque.cpp
+  versionbits.cpp
 )
 target_link_libraries(fuzz
   core_interface
