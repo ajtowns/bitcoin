@@ -49,11 +49,11 @@ void initialize_addrman()
 FUZZ_TARGET(data_stream_addr_man, .init = initialize_addrman)
 {
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
-    CDataStream data_stream = ConsumeDataStream(fuzzed_data_provider);
+    DataStream data_stream = ConsumeDataStream(fuzzed_data_provider);
     NetGroupManager netgroupman{ConsumeNetGroupManager(fuzzed_data_provider)};
     AddrMan addr_man(netgroupman, /*deterministic=*/false, GetCheckRatio());
     try {
-        ReadFromStream(addr_man, data_stream);
+        ReadFromStreamUnitTests(WithParams(CAddress::V1_DISK, addr_man), data_stream);
     } catch (const std::exception&) {
     }
 }
@@ -78,12 +78,12 @@ CNetAddr RandAddr(FuzzedDataProvider& fuzzed_data_provider, FastRandomContext& f
             net = 6;
         }
 
-        CDataStream s(SER_NETWORK, PROTOCOL_VERSION | ADDRV2_FORMAT);
+        DataStream s{};
 
         s << net;
         s << fast_random_context.randbytes(net_len_map.at(net));
 
-        s >> addr;
+        s >> WithParams(CAddress::V2_NETWORK, addr);
     }
 
     // Return a dummy IPv4 5.5.5.5 if we generated an invalid address.
@@ -241,11 +241,10 @@ FUZZ_TARGET(addrman, .init = initialize_addrman)
     auto addr_man_ptr = std::make_unique<AddrManDeterministic>(netgroupman, fuzzed_data_provider);
     if (fuzzed_data_provider.ConsumeBool()) {
         const std::vector<uint8_t> serialized_data{ConsumeRandomLengthByteVector(fuzzed_data_provider)};
-        CDataStream ds(serialized_data, SER_DISK, INIT_PROTO_VERSION);
-        const auto ser_version{fuzzed_data_provider.ConsumeIntegral<int32_t>()};
-        ds.SetVersion(ser_version);
+        DataStream ds{serialized_data};
+        const bool ser_v2(fuzzed_data_provider.ConsumeIntegral<int32_t>() & 0x20000000);
         try {
-            ds >> *addr_man_ptr;
+            ds >> WithParams(ser_v2 ? CAddress::V2_DISK : CAddress::V1_DISK, *addr_man_ptr);
         } catch (const std::ios_base::failure&) {
             addr_man_ptr = std::make_unique<AddrManDeterministic>(netgroupman, fuzzed_data_provider);
         }
@@ -295,8 +294,8 @@ FUZZ_TARGET(addrman, .init = initialize_addrman)
         in_new = fuzzed_data_provider.ConsumeBool();
     }
     (void)const_addr_man.Size(network, in_new);
-    CDataStream data_stream(SER_NETWORK, PROTOCOL_VERSION);
-    data_stream << const_addr_man;
+    DataStream data_stream{};
+    data_stream << WithParams(CAddress::V1_NETWORK, const_addr_man);
 }
 
 // Check that serialize followed by unserialize produces the same addrman.
@@ -309,10 +308,10 @@ FUZZ_TARGET(addrman_serdeser, .init = initialize_addrman)
     AddrManDeterministic addr_man1{netgroupman, fuzzed_data_provider};
     AddrManDeterministic addr_man2{netgroupman, fuzzed_data_provider};
 
-    CDataStream data_stream(SER_NETWORK, PROTOCOL_VERSION);
+    DataStream data_stream{};
 
     FillAddrman(addr_man1, fuzzed_data_provider);
-    data_stream << addr_man1;
-    data_stream >> addr_man2;
+    data_stream << WithParams(CAddress::V1_NETWORK, addr_man1);
+    data_stream >> WithParams(CAddress::V1_NETWORK, addr_man2);
     assert(addr_man1 == addr_man2);
 }

@@ -697,16 +697,17 @@ BOOST_AUTO_TEST_CASE(addrman_serialization)
     auto addrman_asmap1_dup = std::make_unique<AddrMan>(netgroupman, DETERMINISTIC, ratio);
     auto addrman_noasmap = std::make_unique<AddrMan>(EMPTY_NETGROUPMAN, DETERMINISTIC, ratio);
 
-    CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+    DataStream stream{};
+    const auto ser_params{CAddress::V1_NETWORK};
 
     CAddress addr = CAddress(ResolveService("250.1.1.1"), NODE_NONE);
     CNetAddr default_source;
 
     addrman_asmap1->Add({addr}, default_source);
 
-    stream << *addrman_asmap1;
+    stream << WithParams(ser_params, *addrman_asmap1);
     // serizalizing/deserializing addrman with the same asmap
-    stream >> *addrman_asmap1_dup;
+    stream >> WithParams(ser_params, *addrman_asmap1_dup);
 
     AddressPosition addr_pos1 = addrman_asmap1->FindAddressEntry(addr).value();
     AddressPosition addr_pos2 = addrman_asmap1_dup->FindAddressEntry(addr).value();
@@ -716,8 +717,8 @@ BOOST_AUTO_TEST_CASE(addrman_serialization)
     BOOST_CHECK(addr_pos1 == addr_pos2);
 
     // deserializing asmaped peers.dat to non-asmaped addrman
-    stream << *addrman_asmap1;
-    stream >> *addrman_noasmap;
+    stream << WithParams(ser_params, *addrman_asmap1);
+    stream >> WithParams(ser_params, *addrman_noasmap);
     AddressPosition addr_pos3 = addrman_noasmap->FindAddressEntry(addr).value();
     BOOST_CHECK(addr_pos3.multiplicity != 0);
     BOOST_CHECK(addr_pos1.bucket != addr_pos3.bucket);
@@ -727,8 +728,8 @@ BOOST_AUTO_TEST_CASE(addrman_serialization)
     addrman_asmap1 = std::make_unique<AddrMan>(netgroupman, DETERMINISTIC, ratio);
     addrman_noasmap = std::make_unique<AddrMan>(EMPTY_NETGROUPMAN, DETERMINISTIC, ratio);
     addrman_noasmap->Add({addr}, default_source);
-    stream << *addrman_noasmap;
-    stream >> *addrman_asmap1;
+    stream << WithParams(ser_params, *addrman_noasmap);
+    stream >> WithParams(ser_params, *addrman_asmap1);
 
     AddressPosition addr_pos4 = addrman_asmap1->FindAddressEntry(addr).value();
     BOOST_CHECK(addr_pos4.multiplicity != 0);
@@ -744,8 +745,8 @@ BOOST_AUTO_TEST_CASE(addrman_serialization)
     AddressPosition addr_pos5 = addrman_noasmap->FindAddressEntry(addr1).value();
     AddressPosition addr_pos6 = addrman_noasmap->FindAddressEntry(addr2).value();
     BOOST_CHECK(addr_pos5.bucket != addr_pos6.bucket);
-    stream << *addrman_noasmap;
-    stream >> *addrman_asmap1;
+    stream << WithParams(ser_params, *addrman_noasmap);
+    stream >> WithParams(ser_params, *addrman_asmap1);
     AddressPosition addr_pos7 = addrman_asmap1->FindAddressEntry(addr1).value();
     AddressPosition addr_pos8 = addrman_asmap1->FindAddressEntry(addr2).value();
     BOOST_CHECK(addr_pos7.bucket == addr_pos8.bucket);
@@ -757,7 +758,8 @@ BOOST_AUTO_TEST_CASE(remove_invalid)
     // Confirm that invalid addresses are ignored in unserialization.
 
     auto addrman = std::make_unique<AddrMan>(EMPTY_NETGROUPMAN, DETERMINISTIC, GetCheckRatio(m_node));
-    CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+    DataStream stream{};
+    const auto ser_params{CAddress::V1_NETWORK};
 
     const CAddress new1{ResolveService("5.5.5.5"), NODE_NONE};
     const CAddress new2{ResolveService("6.6.6.6"), NODE_NONE};
@@ -769,7 +771,7 @@ BOOST_AUTO_TEST_CASE(remove_invalid)
     addrman->Good(tried2);
     BOOST_REQUIRE_EQUAL(addrman->Size(), 4);
 
-    stream << *addrman;
+    stream << WithParams(ser_params, *addrman);
 
     const std::string str{stream.str()};
     size_t pos;
@@ -789,7 +791,7 @@ BOOST_AUTO_TEST_CASE(remove_invalid)
     memcpy(stream.data() + pos, tried2_raw_replacement, sizeof(tried2_raw_replacement));
 
     addrman = std::make_unique<AddrMan>(EMPTY_NETGROUPMAN, DETERMINISTIC, GetCheckRatio(m_node));
-    stream >> *addrman;
+    stream >> WithParams(ser_params, *addrman);
     BOOST_CHECK_EQUAL(addrman->Size(), 2);
 }
 
@@ -940,11 +942,11 @@ BOOST_AUTO_TEST_CASE(addrman_evictionworks)
     BOOST_CHECK(!addr_pos36.tried);
 }
 
-static CDataStream AddrmanToStream(const AddrMan& addrman)
+static auto AddrmanToStream(const AddrMan& addrman)
 {
-    CDataStream ssPeersIn(SER_DISK, CLIENT_VERSION);
+    DataStream ssPeersIn{};
     ssPeersIn << Params().MessageStart();
-    ssPeersIn << addrman;
+    ssPeersIn << WithParams(CAddress::V1_DISK, addrman);
     return ssPeersIn;
 }
 
@@ -972,7 +974,7 @@ BOOST_AUTO_TEST_CASE(load_addrman)
     BOOST_CHECK(addrman.Size() == 3);
 
     // Test that the de-serialization does not throw an exception.
-    CDataStream ssPeers1 = AddrmanToStream(addrman);
+    auto ssPeers1{AddrmanToStream(addrman)};
     bool exceptionThrown = false;
     AddrMan addrman1{EMPTY_NETGROUPMAN, !DETERMINISTIC, GetCheckRatio(m_node)};
 
@@ -980,7 +982,7 @@ BOOST_AUTO_TEST_CASE(load_addrman)
     try {
         unsigned char pchMsgTmp[4];
         ssPeers1 >> pchMsgTmp;
-        ssPeers1 >> addrman1;
+        ssPeers1 >> WithParams(CAddress::V1_DISK, addrman1);
     } catch (const std::exception&) {
         exceptionThrown = true;
     }
@@ -988,19 +990,19 @@ BOOST_AUTO_TEST_CASE(load_addrman)
     BOOST_CHECK(addrman1.Size() == 3);
     BOOST_CHECK(exceptionThrown == false);
 
-    // Test that ReadFromStream creates an addrman with the correct number of addrs.
-    CDataStream ssPeers2 = AddrmanToStream(addrman);
+    // Test that ReadFromStreamUnitTests creates an addrman with the correct number of addrs.
+    auto ssPeers2{AddrmanToStream(addrman)};
 
     AddrMan addrman2{EMPTY_NETGROUPMAN, !DETERMINISTIC, GetCheckRatio(m_node)};
     BOOST_CHECK(addrman2.Size() == 0);
-    ReadFromStream(addrman2, ssPeers2);
+    ReadFromStreamUnitTests(WithParams(CAddress::V1_DISK, addrman2), ssPeers2);
     BOOST_CHECK(addrman2.Size() == 3);
 }
 
 // Produce a corrupt peers.dat that claims 20 addrs when it only has one addr.
-static CDataStream MakeCorruptPeersDat()
+static auto MakeCorruptPeersDat()
 {
-    CDataStream s(SER_DISK, CLIENT_VERSION);
+    DataStream s{};
     s << ::Params().MessageStart();
 
     unsigned char nVersion = 1;
@@ -1019,7 +1021,7 @@ static CDataStream MakeCorruptPeersDat()
     std::optional<CNetAddr> resolved{LookupHost("252.2.2.2", false)};
     BOOST_REQUIRE(resolved.has_value());
     AddrInfo info = AddrInfo(addr, resolved.value());
-    s << info;
+    s << WithParams(CAddress::V1_DISK, info);
 
     return s;
 }
@@ -1027,25 +1029,25 @@ static CDataStream MakeCorruptPeersDat()
 BOOST_AUTO_TEST_CASE(load_addrman_corrupted)
 {
     // Test that the de-serialization of corrupted peers.dat throws an exception.
-    CDataStream ssPeers1 = MakeCorruptPeersDat();
+    auto ssPeers1{MakeCorruptPeersDat()};
     bool exceptionThrown = false;
     AddrMan addrman1{EMPTY_NETGROUPMAN, !DETERMINISTIC, GetCheckRatio(m_node)};
     BOOST_CHECK(addrman1.Size() == 0);
     try {
         unsigned char pchMsgTmp[4];
         ssPeers1 >> pchMsgTmp;
-        ssPeers1 >> addrman1;
+        ssPeers1 >> WithParams(CAddress::V1_DISK, addrman1);
     } catch (const std::exception&) {
         exceptionThrown = true;
     }
     BOOST_CHECK(exceptionThrown);
 
-    // Test that ReadFromStream fails if peers.dat is corrupt
-    CDataStream ssPeers2 = MakeCorruptPeersDat();
+    // Test that ReadFromStreamUnitTests fails if peers.dat is corrupt
+    auto ssPeers2{MakeCorruptPeersDat()};
 
     AddrMan addrman2{EMPTY_NETGROUPMAN, !DETERMINISTIC, GetCheckRatio(m_node)};
     BOOST_CHECK(addrman2.Size() == 0);
-    BOOST_CHECK_THROW(ReadFromStream(addrman2, ssPeers2), std::ios_base::failure);
+    BOOST_CHECK_THROW(ReadFromStreamUnitTests(WithParams(CAddress::V1_DISK, addrman2), ssPeers2), std::ios_base::failure);
 }
 
 BOOST_AUTO_TEST_CASE(addrman_update_address)

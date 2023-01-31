@@ -171,8 +171,8 @@ void AddrManImpl::Serialize(Stream& s_) const
      */
 
     // Always serialize in the latest version (FILE_FORMAT).
-
-    OverrideStream<Stream> s(&s_, s_.GetType(), s_.GetVersion() | ADDRV2_FORMAT);
+    const CAddress::SerParams ser_params{{CNetAddr::Encoding::V2}, s_.GetParams().fmt};
+    ParamsStream s{ser_params, s_};
 
     s << static_cast<uint8_t>(FILE_FORMAT);
 
@@ -236,14 +236,15 @@ void AddrManImpl::Unserialize(Stream& s_)
     Format format;
     s_ >> Using<CustomUintFormatter<1>>(format);
 
-    int stream_version = s_.GetVersion();
+    auto stream_enc{CNetAddr::Encoding::V1};
     if (format >= Format::V3_BIP155) {
-        // Add ADDRV2_FORMAT to the version so that the CNetAddr and CAddress
+        // Set V2 so that the CNetAddr and CAddress
         // unserialize methods know that an address in addrv2 format is coming.
-        stream_version |= ADDRV2_FORMAT;
+        stream_enc = CNetAddr::Encoding::V2;
     }
 
-    OverrideStream<Stream> s(&s_, s_.GetType(), stream_version);
+    const CAddress::SerParams ser_params{{stream_enc}, s_.GetParams().fmt};
+    ParamsStream s{ser_params, s_};
 
     uint8_t compat;
     s >> compat;
@@ -1249,12 +1250,12 @@ void AddrMan::Unserialize(Stream& s_)
 }
 
 // explicit instantiation
-template void AddrMan::Serialize(HashedSourceWriter<CAutoFile>& s) const;
-template void AddrMan::Serialize(CDataStream& s) const;
-template void AddrMan::Unserialize(CAutoFile& s);
-template void AddrMan::Unserialize(CHashVerifier<CAutoFile>& s);
-template void AddrMan::Unserialize(CDataStream& s);
-template void AddrMan::Unserialize(CHashVerifier<CDataStream>& s);
+template void AddrMan::Serialize(ParamsStream<CAddress::SerParams, HashedSourceWriter<AutoFile>>&) const;
+template void AddrMan::Serialize(ParamsStream<CAddress::SerParams, DataStream>&) const;
+template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, AutoFile>&);
+template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, HashVerifier<AutoFile>>&);
+template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, DataStream>&);
+template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, HashVerifier<DataStream>>&);
 
 size_t AddrMan::Size(std::optional<Network> net, std::optional<bool> in_new) const
 {
