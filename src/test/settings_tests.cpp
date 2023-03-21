@@ -5,6 +5,7 @@
 #include <util/settings.h>
 
 #include <fs.h>
+#include <kernel/chainname.h>
 #include <test/util/setup_common.h>
 #include <test/util/str.h>
 

@@ -11,6 +11,7 @@
 //
 // It is part of the libbitcoinkernel project.
 
+#include <kernel/chainname.h>
 #include <kernel/chainparams.h>
 #include <kernel/checks.h>
 #include <kernel/context.h>

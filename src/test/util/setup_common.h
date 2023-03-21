@@ -7,6 +7,7 @@
 
 #include <chainparamsbase.h>
 #include <fs.h>
+#include <kernel/chainname.h>
 #include <key.h>
 #include <node/caches.h>
 #include <node/context.h>

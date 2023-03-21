@@ -6,6 +6,7 @@
 #include <compressor.h>
 #include <core_io.h>
 #include <core_memusage.h>
+#include <kernel/chainname.h>
 #include <key_io.h>
 #include <policy/policy.h>
 #include <pubkey.h>

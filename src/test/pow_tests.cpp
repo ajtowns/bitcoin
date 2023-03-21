@@ -4,6 +4,7 @@
 
 #include <chain.h>
 #include <chainparams.h>
+#include <kernel/chainname.h>
 #include <pow.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>

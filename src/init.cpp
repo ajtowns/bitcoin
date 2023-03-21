@@ -18,6 +18,7 @@
 #include <blockfilter.h>
 #include <chain.h>
 #include <chainparams.h>
+#include <chainparamsbase.h>
 #include <consensus/amount.h>
 #include <deploymentstatus.h>
 #include <fs.h>
@@ -31,6 +32,7 @@
 #include <interfaces/chain.h>
 #include <interfaces/init.h>
 #include <interfaces/node.h>
+#include <kernel/chainname.h>
 #include <mapport.h>
 #include <net.h>
 #include <net_permissions.h>

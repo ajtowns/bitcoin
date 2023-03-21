@@ -3,8 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <banman.h>
-#include <chainparams.h>
 #include <consensus/consensus.h>
+#include <kernel/chainname.h>
 #include <net.h>
 #include <net_processing.h>
 #include <protocol.h>

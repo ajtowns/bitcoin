@@ -5,6 +5,7 @@
 #include <bench/bench.h>
 #include <bench/data.h>
 
+#include <kernel/chainname.h>
 #include <rpc/blockchain.h>
 #include <streams.h>
 #include <test/util/setup_common.h>

@@ -4,6 +4,7 @@
 
 #include <chainparams.h>
 #include <core_io.h>
+#include <kernel/chainname.h>
 #include <rpc/client.h>
 #include <rpc/util.h>
 #include <test/fuzz/fuzz.h>

@@ -14,6 +14,7 @@
 #include <chainparams.h>
 #include <fs.h>
 #include <interfaces/node.h>
+#include <kernel/chainname.h>
 #include <key_io.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>

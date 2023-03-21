@@ -7,6 +7,7 @@
 
 #include <chainparamsbase.h>
 #include <fs.h>
+#include <kernel/chainname.h>
 #include <sync.h>
 #include <util/check.h>
 #include <util/getuniquepath.h>

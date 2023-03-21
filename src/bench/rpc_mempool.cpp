@@ -3,7 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <bench/bench.h>
-#include <chainparamsbase.h>
+#include <kernel/chainname.h>
 #include <kernel/cs_main.h>
 #include <kernel/mempool_entry.h>
 #include <rpc/mempool.h>

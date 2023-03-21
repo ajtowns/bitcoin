@@ -4,6 +4,7 @@
 
 #include <chainparams.h>
 #include <hash.h>
+#include <kernel/chainname.h>
 #include <net.h>
 #include <netmessagemaker.h>
 #include <protocol.h>

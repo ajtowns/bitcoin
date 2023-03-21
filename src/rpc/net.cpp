@@ -6,9 +6,9 @@
 
 #include <addrman.h>
 #include <banman.h>
-#include <chainparams.h>
 #include <clientversion.h>
 #include <core_io.h>
+#include <kernel/chainname.h>
 #include <net_permissions.h>
 #include <net_processing.h>
 #include <net_types.h> // For banmap_t

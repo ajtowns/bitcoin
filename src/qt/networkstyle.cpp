@@ -6,7 +6,7 @@
 
 #include <qt/guiconstants.h>
 
-#include <chainparamsbase.h>
+#include <kernel/chainname.h>
 #include <tinyformat.h>
 
 #include <QApplication>

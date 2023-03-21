@@ -4,6 +4,7 @@
 
 #include <chain.h>
 #include <chainparams.h>
+#include <kernel/chainname.h>
 #include <pow.h>
 #include <primitives/block.h>
 #include <test/fuzz/FuzzedDataProvider.h>

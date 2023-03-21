@@ -4,7 +4,7 @@
 
 #include <bench/bench.h>
 #include <bench/data.h>
-#include <chainparams.h>
+#include <kernel/chainname.h>
 #include <test/util/setup_common.h>
 #include <validation.h>
 

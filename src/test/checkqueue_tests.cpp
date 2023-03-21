@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <checkqueue.h>
+#include <kernel/chainname.h>
 #include <sync.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>

@@ -7,6 +7,7 @@
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <core_memusage.h>
+#include <kernel/chainname.h>
 #include <primitives/block.h>
 #include <pubkey.h>
 #include <streams.h>

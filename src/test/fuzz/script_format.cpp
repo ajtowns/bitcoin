@@ -5,6 +5,7 @@
 #include <chainparams.h>
 #include <consensus/consensus.h>
 #include <core_io.h>
+#include <kernel/chainname.h>
 #include <policy/policy.h>
 #include <script/script.h>
 #include <test/fuzz/FuzzedDataProvider.h>

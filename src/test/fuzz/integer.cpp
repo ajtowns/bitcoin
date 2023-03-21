@@ -9,6 +9,7 @@
 #include <core_io.h>
 #include <crypto/common.h>
 #include <crypto/siphash.h>
+#include <kernel/chainname.h>
 #include <key_io.h>
 #include <memusage.h>
 #include <netbase.h>

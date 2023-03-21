@@ -3,7 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <chainparams.h>
-#include <chainparamsbase.h>
+#include <kernel/chainname.h>
 #include <key.h>
 #include <key_io.h>
 #include <outputtype.h>
