@@ -11,11 +11,6 @@
 
 #include <assert.h>
 
-const std::string CBaseChainParams::MAIN = "main";
-const std::string CBaseChainParams::TESTNET = "test";
-const std::string CBaseChainParams::SIGNET = "signet";
-const std::string CBaseChainParams::REGTEST = "regtest";
-
 void SetupChainParamsBaseOptions(ArgsManager& argsman)
 {
     argsman.AddArg("-chain=<chain>", "Use the chain <chain> (default: main). Allowed values: main, test, signet, regtest", ArgsManager::ALLOW_ANY, OptionsCategory::CHAINPARAMS);

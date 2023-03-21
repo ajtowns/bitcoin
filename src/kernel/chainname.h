@@ -5,16 +5,14 @@
 #ifndef BITCOIN_KERNEL_CHAINNAME_H
 #define BITCOIN_KERNEL_CHAINNAME_H
 
-#include <chainparamsbase.h>
-
 #include <string>
 
 namespace kernel {
 namespace chainname {
-static const std::string& MAIN = CBaseChainParams::MAIN;
-static const std::string& TESTNET = CBaseChainParams::TESTNET;
-static const std::string& SIGNET = CBaseChainParams::SIGNET;
-static const std::string& REGTEST = CBaseChainParams::REGTEST;
+static const std::string MAIN{"main"};
+static const std::string TESTNET{"test"};
+static const std::string SIGNET{"signet"};
+static const std::string REGTEST{"regtest"};
 } // namespace chainname
 } // namespace kernel
 
