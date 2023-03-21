@@ -397,7 +397,7 @@ class CRegTestParams : public CChainParams
 public:
     explicit CRegTestParams(const RegTestOptions& opts)
     {
-        strNetworkID =  kernel::chainname::REGTEST;
+        strNetworkID = kernel::chainname::REGTEST;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 150;

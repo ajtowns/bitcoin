@@ -253,7 +253,7 @@ std::set<std::string> ArgsManager::GetUnsuitableSectionOnlyArgs() const
     if (m_network.empty()) return std::set<std::string> {};
 
     // if it's okay to use the default section for this network, don't worry
-    if (m_network == kernel::chainname::MAIN) return std::set<std::string> {};
+    if (m_network == kernel::chainname::MAIN) return std::set<std::string>{};
 
     for (const auto& arg : m_network_only_args) {
         if (OnlyHasDefaultSectionSetting(m_settings, m_network, SettingName(arg))) {
@@ -270,8 +270,7 @@ std::list<SectionInfo> ArgsManager::GetUnrecognizedSections() const
         kernel::chainname::REGTEST,
         kernel::chainname::SIGNET,
         kernel::chainname::TESTNET,
-        kernel::chainname::MAIN
-    };
+        kernel::chainname::MAIN};
 
     LOCK(cs_args);
     std::list<SectionInfo> unrecognized = m_config_sections;
