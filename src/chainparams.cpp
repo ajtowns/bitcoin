@@ -100,15 +100,15 @@ const CChainParams &Params() {
 
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const std::string& chain)
 {
-    if (chain == CBaseChainParams::MAIN) {
+    if (chain == kernel::chainname::MAIN) {
         return CChainParams::Main();
-    } else if (chain == CBaseChainParams::TESTNET) {
+    } else if (chain == kernel::chainname::TESTNET) {
         return CChainParams::TestNet();
-    } else if (chain == CBaseChainParams::SIGNET) {
+    } else if (chain == kernel::chainname::SIGNET) {
         auto opts = CChainParams::SigNetOptions{};
         ReadSigNetArgs(args, opts);
         return CChainParams::SigNet(opts);
-    } else if (chain == CBaseChainParams::REGTEST) {
+    } else if (chain == kernel::chainname::REGTEST) {
         auto opts = CChainParams::RegTestOptions{};
         ReadRegTestArgs(args, opts);
         return CChainParams::RegTest(opts);

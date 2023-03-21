@@ -408,14 +408,14 @@ void SetupServerArgs(ArgsManager& argsman)
 
     init::AddLoggingArgs(argsman);
 
-    const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
-    const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
-    const auto signetBaseParams = CreateBaseChainParams(CBaseChainParams::SIGNET);
-    const auto regtestBaseParams = CreateBaseChainParams(CBaseChainParams::REGTEST);
-    const auto defaultChainParams = CreateChainParams(argsman, CBaseChainParams::MAIN);
-    const auto testnetChainParams = CreateChainParams(argsman, CBaseChainParams::TESTNET);
-    const auto signetChainParams = CreateChainParams(argsman, CBaseChainParams::SIGNET);
-    const auto regtestChainParams = CreateChainParams(argsman, CBaseChainParams::REGTEST);
+    const auto defaultBaseParams = CreateBaseChainParams(kernel::chainname::MAIN);
+    const auto testnetBaseParams = CreateBaseChainParams(kernel::chainname::TESTNET);
+    const auto signetBaseParams = CreateBaseChainParams(kernel::chainname::SIGNET);
+    const auto regtestBaseParams = CreateBaseChainParams(kernel::chainname::REGTEST);
+    const auto defaultChainParams = CreateChainParams(argsman, kernel::chainname::MAIN);
+    const auto testnetChainParams = CreateChainParams(argsman, kernel::chainname::TESTNET);
+    const auto signetChainParams = CreateChainParams(argsman, kernel::chainname::SIGNET);
+    const auto regtestChainParams = CreateChainParams(argsman, kernel::chainname::REGTEST);
 
     // Hidden Options
     std::vector<std::string> hidden_args = {
@@ -846,7 +846,7 @@ bool AppInitParameterInteraction(const ArgsManager& args, bool use_syscall_sandb
     // specified in default section of config file, but not overridden
     // on the command line or in this network's section of the config file.
     std::string network = args.GetChainName();
-    if (network == CBaseChainParams::SIGNET) {
+    if (network == kernel::chainname::SIGNET) {
         LogPrintf("Signet derived magic (message start): %s\n", HexStr(chainparams.MessageStart()));
     }
     bilingual_str errors;

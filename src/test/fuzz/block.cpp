@@ -20,7 +20,7 @@
 
 void initialize_block()
 {
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(kernel::chainname::REGTEST);
 }
 
 FUZZ_TARGET_INIT(block, initialize_block)

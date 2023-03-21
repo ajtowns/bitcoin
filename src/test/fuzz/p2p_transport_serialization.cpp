@@ -19,7 +19,7 @@
 
 void initialize_p2p_transport_serialization()
 {
-    SelectParams(CBaseChainParams::REGTEST);
+    SelectParams(kernel::chainname::REGTEST);
 }
 
 FUZZ_TARGET_INIT(p2p_transport_serialization, initialize_p2p_transport_serialization)

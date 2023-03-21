@@ -72,10 +72,10 @@ static void SetupCliArgs(ArgsManager& argsman)
 {
     SetupHelpOptions(argsman);
 
-    const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
-    const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
-    const auto signetBaseParams = CreateBaseChainParams(CBaseChainParams::SIGNET);
-    const auto regtestBaseParams = CreateBaseChainParams(CBaseChainParams::REGTEST);
+    const auto defaultBaseParams = CreateBaseChainParams(kernel::chainname::MAIN);
+    const auto testnetBaseParams = CreateBaseChainParams(kernel::chainname::TESTNET);
+    const auto signetBaseParams = CreateBaseChainParams(kernel::chainname::SIGNET);
+    const auto regtestBaseParams = CreateBaseChainParams(kernel::chainname::REGTEST);
 
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-conf=<file>", strprintf("Specify configuration file. Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -425,9 +425,9 @@ private:
     std::vector<Peer> m_peers;
     std::string ChainToString() const
     {
-        if (gArgs.GetChainName() == CBaseChainParams::TESTNET) return " testnet";
-        if (gArgs.GetChainName() == CBaseChainParams::SIGNET) return " signet";
-        if (gArgs.GetChainName() == CBaseChainParams::REGTEST) return " regtest";
+        if (gArgs.GetChainName() == kernel::chainname::TESTNET) return " testnet";
+        if (gArgs.GetChainName() == kernel::chainname::SIGNET) return " signet";
+        if (gArgs.GetChainName() == kernel::chainname::REGTEST) return " regtest";
         return "";
     }
     std::string PingTimeToString(double seconds) const
