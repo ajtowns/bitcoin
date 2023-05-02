@@ -5822,26 +5822,34 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         //
         // Message: getdata (transactions)
         //
-        std::vector<std::pair<NodeId, GenTxid>> expired;
-        auto requestable = m_txrequest.GetRequestable(pto->GetId(), current_time, &expired);
-        for (const auto& entry : expired) {
-            LogPrint(BCLog::NET, "timeout of inflight %s %s from peer=%d\n", entry.second.IsWtxid() ? "wtx" : "tx",
-                entry.second.GetHash().ToString(), entry.first);
-        }
-        for (const GenTxid& gtxid : requestable) {
-            if (!AlreadyHaveTx(gtxid)) {
-                LogPrint(BCLog::NET, "Requesting %s %s peer=%d\n", gtxid.IsWtxid() ? "wtx" : "tx",
-                    gtxid.GetHash().ToString(), pto->GetId());
-                vGetData.emplace_back(gtxid.IsWtxid() ? MSG_WTX : (MSG_TX | GetFetchFlags(*peer)), gtxid.GetHash());
-                if (vGetData.size() >= MAX_GETDATA_SZ) {
-                    m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
-                    vGetData.clear();
+        if (!m_mempool.IsOverSize(m_mempool.m_max_size_bytes / 2)) {
+            // Defer tx getdata if the mempool is already half full during LoadMempool
+            //
+            // This should only result in dropped transactions from peers with similar
+            // relay behaviour to ours if it takes more than ~12 minutes to load the mempool.
+            // (12m = MAX_PEER_TX_ANNOUNCEMENTS/INVENTORY_BROADCAST_PER_SECOND seconds)
+
+            std::vector<std::pair<NodeId, GenTxid>> expired;
+            auto requestable = m_txrequest.GetRequestable(pto->GetId(), current_time, &expired);
+            for (const auto& entry : expired) {
+                LogPrint(BCLog::NET, "timeout of inflight %s %s from peer=%d\n", entry.second.IsWtxid() ? "wtx" : "tx",
+                    entry.second.GetHash().ToString(), entry.first);
+            }
+            for (const GenTxid& gtxid : requestable) {
+                if (!AlreadyHaveTx(gtxid)) {
+                    LogPrint(BCLog::NET, "Requesting %s %s peer=%d\n", gtxid.IsWtxid() ? "wtx" : "tx",
+                        gtxid.GetHash().ToString(), pto->GetId());
+                    vGetData.emplace_back(gtxid.IsWtxid() ? MSG_WTX : (MSG_TX | GetFetchFlags(*peer)), gtxid.GetHash());
+                    if (vGetData.size() >= MAX_GETDATA_SZ) {
+                        m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETDATA, vGetData));
+                        vGetData.clear();
+                    }
+                    m_txrequest.RequestedTx(pto->GetId(), gtxid.GetHash(), current_time + GETDATA_TX_INTERVAL);
+                } else {
+                    // We have already seen this transaction, no need to download. This is just a belt-and-suspenders, as
+                    // this should already be called whenever a transaction becomes AlreadyHaveTx().
+                    m_txrequest.ForgetTxHash(gtxid.GetHash());
                 }
-                m_txrequest.RequestedTx(pto->GetId(), gtxid.GetHash(), current_time + GETDATA_TX_INTERVAL);
-            } else {
-                // We have already seen this transaction, no need to download. This is just a belt-and-suspenders, as
-                // this should already be called whenever a transaction becomes AlreadyHaveTx().
-                m_txrequest.ForgetTxHash(gtxid.GetHash());
             }
         }
 

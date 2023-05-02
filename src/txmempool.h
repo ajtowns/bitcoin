@@ -628,6 +628,12 @@ public:
         m_skip_trim_to_size = skip;
     }
 
+    /** Allow subsystems to defer adding to the mempool while it is oversize */
+    bool IsOverSize(size_t sizelimit) LOCKS_EXCLUDED(cs) {
+        LOCK(cs);
+        return m_skip_trim_to_size && !mapTx.empty() && DynamicMemoryUsage() > sizelimit;
+    }
+
     /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
     int Expire(std::chrono::seconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
