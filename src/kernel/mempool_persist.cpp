@@ -55,6 +55,8 @@ bool LoadMempool(CTxMemPool& pool, const fs::path& load_path, Chainstate& active
     int64_t unbroadcast = 0;
     auto now = NodeClock::now();
 
+    WITH_LOCK(pool.cs, pool.SetSkipTrimToSize(true));
+
     try {
         uint64_t version;
         file >> version;
@@ -116,6 +118,12 @@ bool LoadMempool(CTxMemPool& pool, const fs::path& load_path, Chainstate& active
     } catch (const std::exception& e) {
         LogPrintf("Failed to deserialize mempool data on disk: %s. Continuing anyway.\n", e.what());
         return false;
+    }
+
+    {
+        LOCK2(::cs_main, pool.cs);
+        pool.SetSkipTrimToSize(false);
+        LimitMempoolSize(pool, active_chainstate.CoinsTip());
     }
 
     LogPrintf("Imported mempool transactions from disk: %i succeeded, %i failed, %i expired, %i already there, %i waiting for initial broadcast\n", count, failed, expired, already_there, unbroadcast);

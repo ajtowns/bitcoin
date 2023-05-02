@@ -1053,8 +1053,11 @@ void CTxMemPool::trackPackageRemoved(const CFeeRate& rate) {
     }
 }
 
-void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining) {
+void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining)
+{
     AssertLockHeld(cs);
+
+    if (m_skip_trim_to_size) return;
 
     unsigned nTxnRemoved = 0;
     CFeeRate maxFeeRateRemoved(0);

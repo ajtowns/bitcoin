@@ -427,6 +427,7 @@ private:
      */
     std::set<uint256> m_unbroadcast_txids GUARDED_BY(cs);
 
+    bool m_skip_trim_to_size GUARDED_BY(cs){false};
 
     /**
      * Helper function to calculate all in-mempool ancestors of staged_ancestors and apply ancestor
@@ -621,6 +622,11 @@ public:
       *  which are not in mempool which no longer have any spends in this mempool.
       */
     void TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpendsRemaining = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    /** Temporarily turn TrimToSize into a no-op */
+    void SetSkipTrimToSize(bool skip) EXCLUSIVE_LOCKS_REQUIRED(cs) {
+        m_skip_trim_to_size = skip;
+    }
 
     /** Expire all transaction (and their dependencies) in the mempool older than time. Return the number of removed transactions. */
     int Expire(std::chrono::seconds time) EXCLUSIVE_LOCKS_REQUIRED(cs);

@@ -1199,4 +1199,7 @@ bool IsBIP30Repeat(const CBlockIndex& block_index);
 /** Identifies blocks which coinbase output was subsequently overwritten in the UTXO set (see BIP30) */
 bool IsBIP30Unspendable(const CBlockIndex& block_index);
 
+void LimitMempoolSize(CTxMemPool& pool, CCoinsViewCache& coins_cache)
+    EXCLUSIVE_LOCKS_REQUIRED(::cs_main, pool.cs);
+
 #endif // BITCOIN_VALIDATION_H
