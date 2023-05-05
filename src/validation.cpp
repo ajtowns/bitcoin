@@ -1107,6 +1107,9 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
 {
     AssertLockHeld(cs_main);
     AssertLockHeld(m_pool.cs);
+
+    MyLogger mylog(__func__, __LINE__);
+
     const CTransaction& tx = *ws.m_ptx;
     const uint256& hash = ws.m_hash;
     TxValidationState& state = ws.m_state;
@@ -1133,7 +1136,9 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
         );
         ws.m_replaced_transactions.push_back(it->GetSharedTx());
     }
+    mylog.log(__LINE__);
     m_pool.RemoveStaged(ws.m_all_conflicting, false, MemPoolRemovalReason::REPLACED);
+    mylog.log(__LINE__);
 
     // This transaction should only count for fee estimation if:
     // - it's not being re-added during a reorg which bypasses typical mempool fee limits
@@ -1142,9 +1147,11 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
     // - it's not part of a package. Since package relay is not currently supported, this
     // transaction has not necessarily been accepted to miners' mempools.
     bool validForFeeEstimation = !bypass_limits && !args.m_package_submission && IsCurrentForFeeEstimation(m_active_chainstate) && m_pool.HasNoInputsOf(tx);
+    mylog.log(__LINE__);
 
     // Store transaction in memory
     m_pool.addUnchecked(*entry, ws.m_ancestors, validForFeeEstimation);
+    mylog.log(__LINE__);
 
     // trim mempool and check if tx was trimmed
     // If we are validating a package, don't trim here because we could evict a previous transaction
@@ -1152,9 +1159,11 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
     // is still within limits and package submission happens atomically.
     if (!args.m_package_submission && !bypass_limits) {
         LimitMempoolSize(m_pool, m_active_chainstate.CoinsTip());
+        mylog.log(__LINE__);
         if (!m_pool.exists(GenTxid::Txid(hash)))
             return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "mempool full");
     }
+    mylog.log(__LINE__);
     return true;
 }
 
