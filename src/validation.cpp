@@ -1492,13 +1492,18 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
     EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
 {
     AssertLockHeld(::cs_main);
+
+    const auto time_0{SteadyClock::now()};
+
     const CChainParams& chainparams{active_chainstate.m_chainman.GetParams()};
     assert(active_chainstate.GetMempool() != nullptr);
     CTxMemPool& pool{*active_chainstate.GetMempool()};
 
     std::vector<COutPoint> coins_to_uncache;
     auto args = MemPoolAccept::ATMPArgs::SingleAccept(chainparams, accept_time, bypass_limits, coins_to_uncache, test_accept);
+    const auto time_1{SteadyClock::now()};
     MempoolAcceptResult result = MemPoolAccept(pool, active_chainstate).AcceptSingleTransaction(tx, args);
+    const auto time_2{SteadyClock::now()};
     if (result.m_result_type != MempoolAcceptResult::ResultType::VALID) {
         // Remove coins that were not present in the coins cache before calling
         // AcceptSingleTransaction(); this is to prevent memory DoS in case we receive a large
@@ -1512,9 +1517,21 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
                 result.m_state.GetRejectReason().c_str()
         );
     }
+    const auto time_3{SteadyClock::now()};
     // After we've (potentially) uncached entries, ensure our coins cache is still within its size limits
     BlockValidationState state_dummy;
+    const auto time_4{SteadyClock::now()};
     active_chainstate.FlushStateToDisk(state_dummy, FlushStateMode::PERIODIC);
+    const auto time_5{SteadyClock::now()};
+    if (time_5 - time_0 > 5s) {
+        LogPrint(BCLog::MEMPOOL, "Slow ATMP: %.2fms total (%.2fms %.2fms %.2fms %.2fms %.2fms)\n",
+                 Ticks<MillisecondsDouble>(time_5 - time_0),
+                 Ticks<MillisecondsDouble>(time_1 - time_0),
+                 Ticks<MillisecondsDouble>(time_2 - time_1),
+                 Ticks<MillisecondsDouble>(time_3 - time_2),
+                 Ticks<MillisecondsDouble>(time_4 - time_3),
+                 Ticks<MillisecondsDouble>(time_5 - time_4));
+    }
     return result;
 }
 
