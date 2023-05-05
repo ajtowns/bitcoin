@@ -261,20 +261,57 @@ bool CheckSequenceLocksAtTip(CBlockIndex* tip,
 // Returns the script flags which should be checked for a given block
 static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const ChainstateManager& chainman);
 
+namespace {
+class MyLogger {
+public:
+    const char* func;
+    struct caught {
+         int line;
+         SteadyClock::time_point when;
+         explicit caught(int l) : line{l}, when{SteadyClock::now()} { }
+    };
+    std::vector<caught> times;
+    MyLogger(const char* func, int line) : func{func}
+    {
+        times.reserve(15);
+        log(line);
+    }
+    void log(int line) {
+        times.emplace_back(line);
+    }
+    ~MyLogger() {
+        log(-1);
+        const auto total = times.back().when - times.front().when;
+        if (total < 5s) return;
+        LogPrint(BCLog::MEMPOOL, "Slow %s: %.2fms total\n", func, Ticks<MillisecondsDouble>(total));
+        for (size_t i = 1; i < times.size(); ++i) {
+            LogPrint(BCLog::MEMPOOL, " - %s:%d-%d: %.2fms\n", func, times[i-1].line, times[i].line, Ticks<MillisecondsDouble>(times[i].when - times[i-1].when));
+        }
+    }
+};
+}
+
 static void LimitMempoolSize(CTxMemPool& pool, CCoinsViewCache& coins_cache)
     EXCLUSIVE_LOCKS_REQUIRED(::cs_main, pool.cs)
 {
     AssertLockHeld(::cs_main);
     AssertLockHeld(pool.cs);
+
+    MyLogger mylog(__func__, __LINE__);
+
     int expired = pool.Expire(GetTime<std::chrono::seconds>() - pool.m_expiry);
     if (expired != 0) {
         LogPrint(BCLog::MEMPOOL, "Expired %i transactions from the memory pool\n", expired);
     }
 
+    mylog.log(__LINE__);
+
     std::vector<COutPoint> vNoSpendsRemaining;
     pool.TrimToSize(pool.m_max_size_bytes, &vNoSpendsRemaining);
+    mylog.log(__LINE__);
     for (const COutPoint& removed : vNoSpendsRemaining)
         coins_cache.Uncache(removed);
+    mylog.log(__LINE__);
 }
 
 static bool IsCurrentForFeeEstimation(Chainstate& active_chainstate) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -1212,18 +1249,23 @@ MempoolAcceptResult MemPoolAccept::AcceptSingleTransaction(const CTransactionRef
 {
     AssertLockHeld(cs_main);
     LOCK(m_pool.cs); // mempool "read lock" (held through GetMainSignals().TransactionAddedToMempool())
+    MyLogger mylog(__func__, __LINE__);
 
     Workspace ws(ptx);
 
     if (!PreChecks(args, ws)) return MempoolAcceptResult::Failure(ws.m_state);
+    mylog.log(__LINE__);
 
     if (m_rbf && !ReplacementChecks(ws)) return MempoolAcceptResult::Failure(ws.m_state);
+    mylog.log(__LINE__);
 
     // Perform the inexpensive checks first and avoid hashing and signature verification unless
     // those checks pass, to mitigate CPU exhaustion denial-of-service attacks.
     if (!PolicyScriptChecks(args, ws)) return MempoolAcceptResult::Failure(ws.m_state);
+    mylog.log(__LINE__);
 
     if (!ConsensusScriptChecks(args, ws)) return MempoolAcceptResult::Failure(ws.m_state);
+    mylog.log(__LINE__);
 
     const CFeeRate effective_feerate{ws.m_modified_fees, static_cast<uint32_t>(ws.m_vsize)};
     const std::vector<uint256> single_wtxid{ws.m_ptx->GetWitnessHash()};
@@ -1233,9 +1275,12 @@ MempoolAcceptResult MemPoolAccept::AcceptSingleTransaction(const CTransactionRef
                                             ws.m_base_fees, effective_feerate, single_wtxid);
     }
 
+    mylog.log(__LINE__);
     if (!Finalize(args, ws)) return MempoolAcceptResult::Failure(ws.m_state);
+    mylog.log(__LINE__);
 
     GetMainSignals().TransactionAddedToMempool(ptx, m_pool.GetAndIncrementSequence());
+    mylog.log(__LINE__);
 
     return MempoolAcceptResult::Success(std::move(ws.m_replaced_transactions), ws.m_vsize, ws.m_base_fees,
                                         effective_feerate, single_wtxid);
@@ -1493,7 +1538,7 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
 {
     AssertLockHeld(::cs_main);
 
-    const auto time_0{SteadyClock::now()};
+    MyLogger mylog(__func__, __LINE__);
 
     const CChainParams& chainparams{active_chainstate.m_chainman.GetParams()};
     assert(active_chainstate.GetMempool() != nullptr);
@@ -1501,9 +1546,9 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
 
     std::vector<COutPoint> coins_to_uncache;
     auto args = MemPoolAccept::ATMPArgs::SingleAccept(chainparams, accept_time, bypass_limits, coins_to_uncache, test_accept);
-    const auto time_1{SteadyClock::now()};
+    mylog.log(__LINE__);
     MempoolAcceptResult result = MemPoolAccept(pool, active_chainstate).AcceptSingleTransaction(tx, args);
-    const auto time_2{SteadyClock::now()};
+    mylog.log(__LINE__);
     if (result.m_result_type != MempoolAcceptResult::ResultType::VALID) {
         // Remove coins that were not present in the coins cache before calling
         // AcceptSingleTransaction(); this is to prevent memory DoS in case we receive a large
@@ -1517,21 +1562,12 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
                 result.m_state.GetRejectReason().c_str()
         );
     }
-    const auto time_3{SteadyClock::now()};
+    mylog.log(__LINE__);
     // After we've (potentially) uncached entries, ensure our coins cache is still within its size limits
     BlockValidationState state_dummy;
-    const auto time_4{SteadyClock::now()};
+    mylog.log(__LINE__);
     active_chainstate.FlushStateToDisk(state_dummy, FlushStateMode::PERIODIC);
-    const auto time_5{SteadyClock::now()};
-    if (time_5 - time_0 > 5s) {
-        LogPrint(BCLog::MEMPOOL, "Slow ATMP: %.2fms total (%.2fms %.2fms %.2fms %.2fms %.2fms)\n",
-                 Ticks<MillisecondsDouble>(time_5 - time_0),
-                 Ticks<MillisecondsDouble>(time_1 - time_0),
-                 Ticks<MillisecondsDouble>(time_2 - time_1),
-                 Ticks<MillisecondsDouble>(time_3 - time_2),
-                 Ticks<MillisecondsDouble>(time_4 - time_3),
-                 Ticks<MillisecondsDouble>(time_5 - time_4));
-    }
+    mylog.log(__LINE__);
     return result;
 }
 
