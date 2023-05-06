@@ -306,6 +306,13 @@ AC_ARG_ENABLE([debug],
     [enable_debug=$enableval],
     [enable_debug=no])
 
+dnl Enable slow debug
+AC_ARG_ENABLE([slow-debug],
+    [AS_HELP_STRING([--enable-slow-debug],
+                    [use compiler flags and macros suited for debugging that may cause slowdown (default is no)])],
+    [enable_slow_debug=$enableval],
+    [enable_slow_debug=no])
+
 dnl Enable different -fsanitize options
 AC_ARG_WITH([sanitizers],
     [AS_HELP_STRING([--with-sanitizers],
@@ -1482,7 +1489,7 @@ if test "$use_boost" = "yes"; then
   AX_CHECK_PREPROC_FLAG([-DBOOST_NO_CXX98_FUNCTION_BASE], [BOOST_CPPFLAGS="$BOOST_CPPFLAGS -DBOOST_NO_CXX98_FUNCTION_BASE"], [], [$CXXFLAG_WERROR],
                         [AC_LANG_PROGRAM([[#include <boost/config.hpp>]])])
 
-  if test "$enable_debug" = "yes" || test "$enable_fuzz" = "yes"; then
+  if (test "$enable_debug" = "yes" && test "$enable_slow_debug" = "yes") || test "$enable_fuzz" = "yes"; then
     BOOST_CPPFLAGS="$BOOST_CPPFLAGS -DBOOST_MULTI_INDEX_ENABLE_SAFE_MODE"
   fi
 
