@@ -138,6 +138,7 @@ class NetTest(BitcoinTestFramework):
                 "permissions": [],
                 "presynced_headers": -1,
                 "relaytxes": False,
+                "inv_to_send": 0,
                 "services": "0000000000000000",
                 "servicesnames": [],
                 "startingheight": -1,
