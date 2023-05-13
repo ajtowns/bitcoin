@@ -107,6 +107,16 @@ public:
 
     /** This function is used for testing the stale tip eviction logic, see denialofservice_tests.cpp */
     virtual void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) = 0;
+
+    struct Stats
+    {
+        size_t extra_txns{0};
+        size_t orphans{0};
+        size_t txrequest{0};
+        size_t reconciliation{0};
+    };
+
+    virtual Stats GetStats() const = 0;
 };
 
 #endif // BITCOIN_NET_PROCESSING_H

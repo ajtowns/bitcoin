@@ -623,6 +623,13 @@ static RPCHelpMan getnetworkinfo()
                                 {RPCResult::Type::NUM, "score", "relative score"},
                             }},
                         }},
+                        {RPCResult::Type::OBJ, "internal", "internal data structures",
+                        {
+                            {RPCResult::Type::NUM, "extratxns", "extra transaction pool size"},
+                            {RPCResult::Type::NUM, "orphans", "orphan pool size"},
+                            {RPCResult::Type::NUM, "txrequest", "txrequest size"},
+                            {RPCResult::Type::NUM, "reconciliation", "reconciliation data size"},
+                        }},
                         {RPCResult::Type::STR, "warnings", "any network and blockchain warnings"},
                     }
                 },
@@ -645,6 +652,15 @@ static RPCHelpMan getnetworkinfo()
     }
     if (node.peerman) {
         obj.pushKV("localrelay", !node.peerman->IgnoresIncomingTxs());
+
+        PeerManager::Stats peermanstats{node.peerman->GetStats()};
+
+        UniValue internal(UniValue::VOBJ);
+        internal.pushKV("extratxns", peermanstats.extra_txns);
+        internal.pushKV("orphans", peermanstats.orphans);
+        internal.pushKV("txrequest", peermanstats.txrequest);
+        internal.pushKV("reconciliation", peermanstats.reconciliation);
+        obj.pushKV("internal", internal);
     }
     obj.pushKV("timeoffset",    GetTimeOffset());
     if (node.connman) {

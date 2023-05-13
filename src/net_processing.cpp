@@ -500,7 +500,7 @@ public:
     bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex);
     bool SendMessages(CNode* pto) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, !m_stats_mutex, g_msgproc_mutex);
 
     /** Implement PeerManager */
     void StartScheduledTasks(CScheduler& scheduler) override;
@@ -517,6 +517,7 @@ public:
                         const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_recent_confirmed_transactions_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex);
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
+    Stats GetStats() const override EXCLUSIVE_LOCKS_REQUIRED(!m_stats_mutex);
 
 private:
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
@@ -1021,7 +1022,34 @@ private:
 
     void AddAddressKnown(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
     void PushAddress(Peer& peer, const CAddress& addr, FastRandomContext& insecure_rand) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+
+    std::chrono::microseconds m_next_stats_update GUARDED_BY(g_msgproc_mutex){0};
+    mutable Mutex m_stats_mutex;
+    Stats m_stats GUARDED_BY(m_stats_mutex);
+    void UpdateStats(std::chrono::microseconds now) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_stats_mutex);
 };
+
+void PeerManagerImpl::UpdateStats(std::chrono::microseconds now)
+{
+    AssertLockHeld(g_msgproc_mutex);
+
+    if (now < m_next_stats_update) return;
+    m_next_stats_update = now + 1s;
+
+    const size_t txrequest_size{WITH_LOCK(::cs_main, return m_txrequest.Size())};
+
+    LOCK(m_stats_mutex);
+    m_stats.extra_txns = vExtraTxnForCompact.size();
+    m_stats.orphans = m_orphanage.Size();
+    m_stats.txrequest = txrequest_size;
+    m_stats.reconciliation = 0;
+}
+
+PeerManager::Stats PeerManagerImpl::GetStats() const
+{
+    LOCK(m_stats_mutex);
+    return m_stats;
+}
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
@@ -5421,6 +5449,8 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
     const CNetMsgMaker msgMaker(pto->GetCommonVersion());
 
     const auto current_time{GetTime<std::chrono::microseconds>()};
+
+    UpdateStats(current_time);
 
     if (pto->IsAddrFetchConn() && current_time - pto->m_connected > 10 * AVG_ADDRESS_BROADCAST_INTERVAL) {
         LogPrint(BCLog::NET, "addrfetch connection timeout; disconnecting peer=%d\n", pto->GetId());
