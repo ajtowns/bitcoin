@@ -5,6 +5,7 @@
 #ifndef BITCOIN_RPC_UTIL_H
 #define BITCOIN_RPC_UTIL_H
 
+#include <consensus/amount.h>
 #include <node/transaction.h>
 #include <outputtype.h>
 #include <protocol.h>
@@ -14,12 +15,28 @@
 #include <script/script.h>
 #include <script/sign.h>
 #include <script/standard.h>
+#include <uint256.h>
 #include <univalue.h>
 #include <util/check.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <initializer_list>
+#include <map>
+#include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
+
+class JSONRPCRequest;
+enum ServiceFlags : uint64_t;
+enum class OutputType;
+enum class TransactionError;
+struct FlatSigningProvider;
+struct bilingual_str;
 
 static constexpr bool DEFAULT_RPC_DOC_CHECK{
 #ifdef RPC_DOC_CHECK
@@ -383,6 +400,36 @@ public:
     RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImpl fun);
 
     UniValue HandleRequest(const JSONRPCRequest& request) const;
+    /**
+     * Helper to get a request argument or its default value.
+     * This function only works during m_fun(), i.e. it should only be used in RPC method implementations.
+     * Use Arg<Type> to get the argument or its default value.
+     * Use Arg<Type*> to get the argument or a falsy value.
+     */
+    template <typename R>
+    auto Arg(size_t i) const
+    {
+        if constexpr (std::is_pointer_v<R>) {
+            // Return optional argument (without default).
+            using U = std::remove_pointer_t<R>;
+            if constexpr (std::is_integral_v<U> || std::is_floating_point_v<U>) {
+                // Return numbers by value, wrapped in optional.
+                return ArgValue<std::optional<U>>(i);
+            } else {
+                // Return other types by pointer.
+                return ArgValue<const U*>(i);
+            }
+        } else {
+            // Return argument (required or with default value).
+            if constexpr (std::is_integral_v<R> || std::is_floating_point_v<R>) {
+                // Return numbers by value.
+                return ArgValue<R>(i);
+            } else {
+                // Return everything else by reference.
+                return ArgRef<R>(i);
+            }
+        }
+    }
     std::string ToString() const;
     /** Return the named args that need to be converted from string to another JSON type */
     UniValue GetArgMap() const;
@@ -399,6 +446,11 @@ private:
     const std::vector<RPCArg> m_args;
     const RPCResults m_results;
     const RPCExamples m_examples;
+    mutable const JSONRPCRequest* m_req{nullptr}; // A pointer to the request for the duration of m_fun()
+    template <typename R>
+    R ArgValue(size_t i) const;
+    template <typename R>
+    const R& ArgRef(size_t i) const;
 };
 
 /**
