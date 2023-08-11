@@ -106,11 +106,11 @@ static RPCHelpMan getnetworkhashps()
                     HelpExampleCli("getnetworkhashps", "")
             + HelpExampleRpc("getnetworkhashps", "")
                 },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [&](const RPCHelpfulRequest& helpful) -> UniValue
 {
-    ChainstateManager& chainman = EnsureAnyChainman(request.context);
+    ChainstateManager& chainman = EnsureAnyChainman(helpful.m_req.context);
     LOCK(cs_main);
-    return GetNetworkHashPS(self.Arg<int>(0), self.Arg<int>(1), chainman.ActiveChain());
+    return GetNetworkHashPS(helpful.Arg<int>(0), helpful.Arg<int>(1), chainman.ActiveChain());
 },
     };
 }
@@ -215,18 +215,18 @@ static RPCHelpMan generatetodescriptor()
         },
         RPCExamples{
             "\nGenerate 11 blocks to mydesc\n" + HelpExampleCli("generatetodescriptor", "11 \"mydesc\"")},
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [&](const RPCHelpfulRequest& helpful) -> UniValue
 {
-    const auto num_blocks{self.Arg<int>(0)};
-    const auto max_tries{self.Arg<uint64_t>(2)};
+    const auto num_blocks{helpful.Arg<int>(0)};
+    const auto max_tries{helpful.Arg<uint64_t>(2)};
 
     CScript coinbase_script;
     std::string error;
-    if (!getScriptFromDescriptor(self.Arg<std::string>(1), coinbase_script, error)) {
+    if (!getScriptFromDescriptor(helpful.Arg<std::string>(1), coinbase_script, error)) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, error);
     }
 
-    NodeContext& node = EnsureAnyNodeContext(request.context);
+    NodeContext& node = EnsureAnyNodeContext(helpful.m_req.context);
     const CTxMemPool& mempool = EnsureMemPool(node);
     ChainstateManager& chainman = EnsureChainman(node);
 
@@ -463,12 +463,14 @@ static RPCHelpMan prioritisetransaction()
                     HelpExampleCli("prioritisetransaction", "\"txid\" 0.0 10000")
             + HelpExampleRpc("prioritisetransaction", "\"txid\", 0.0, 10000")
                 },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [&](const RPCHelpfulRequest& helpful) -> UniValue
 {
+    auto& request = helpful.m_req;
+
     LOCK(cs_main);
 
     uint256 hash(ParseHashV(request.params[0], "txid"));
-    const auto dummy{self.Arg<double*>(1)};
+    const auto dummy{helpful.Arg<double*>(1)};
     CAmount nAmount = request.params[2].getInt<int64_t>();
 
     if (dummy && *dummy != 0) {

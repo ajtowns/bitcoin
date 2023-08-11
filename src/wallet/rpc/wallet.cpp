@@ -451,8 +451,10 @@ static RPCHelpMan unloadwallet()
                     HelpExampleCli("unloadwallet", "wallet_name")
             + HelpExampleRpc("unloadwallet", "wallet_name")
                 },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        [&](const RPCHelpfulRequest& helpful) -> UniValue
 {
+    const auto& request = helpful.m_req;
+
     std::string wallet_name;
     if (GetWalletNameFromJSONRPCRequest(request, wallet_name)) {
         if (!(request.params[0].isNull() || request.params[0].get_str() == wallet_name)) {
@@ -478,7 +480,7 @@ static RPCHelpMan unloadwallet()
         // Release the "main" shared pointer and prevent further notifications.
         // Note that any attempt to load the same wallet would fail until the wallet
         // is destroyed (see CheckUniqueFileid).
-        std::optional<bool> load_on_start{self.Arg<bool*>(1)};
+        std::optional<bool> load_on_start{helpful.Arg<bool*>(1)};
         if (!RemoveWallet(context, wallet, load_on_start, warnings)) {
             throw JSONRPCError(RPC_MISC_ERROR, "Requested wallet already unloaded");
         }

@@ -496,7 +496,16 @@ struct Sections {
 };
 
 RPCHelpMan::RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples)
-    : RPCHelpMan{std::move(name), std::move(description), std::move(args), std::move(results), std::move(examples), nullptr} {}
+    : RPCHelpMan{std::move(name), std::move(description), std::move(args), std::move(results), std::move(examples), RPCMethodImpl{nullptr}} {}
+
+static RPCHelpMan::RPCMethodImpl RPCMethodImplNewToOld(RPCHelpMan::RPCMethodImplNew fn)
+{
+    return [fn](const RPCHelpMan& helpman, const JSONRPCRequest& req) -> UniValue { return fn(RPCHelpfulRequest(helpman, req)); };
+}
+
+RPCHelpMan::RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImplNew fun)
+    : RPCHelpMan(name, description, args, results, examples, RPCMethodImplNewToOld(fun))
+{ }
 
 RPCHelpMan::RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImpl fun)
     : m_name{std::move(name)},
@@ -608,9 +617,7 @@ UniValue RPCHelpMan::HandleRequest(const JSONRPCRequest& request) const
     if (!arg_mismatch.empty()) {
         throw JSONRPCError(RPC_TYPE_ERROR, strprintf("Wrong type passed:\n%s", arg_mismatch.write(4)));
     }
-    m_req = &request;
     UniValue ret = m_fun(*this, request);
-    m_req = nullptr;
     if (gArgs.GetBoolArg("-rpcdoccheck", DEFAULT_RPC_DOC_CHECK)) {
         UniValue mismatch{UniValue::VARR};
         for (const auto& res : m_results.m_results) {
@@ -636,10 +643,10 @@ UniValue RPCHelpMan::HandleRequest(const JSONRPCRequest& request) const
     return ret;
 }
 
-static const UniValue* MaybeArg(bool no_default, const std::vector<RPCArg>& params, const JSONRPCRequest* req, size_t i)
+static const UniValue* MaybeArg(bool no_default, const std::vector<RPCArg>& params, const JSONRPCRequest& req, size_t i)
 {
     CHECK_NONFATAL(i < params.size());
-    const UniValue& arg{CHECK_NONFATAL(req)->params[i]};
+    const UniValue& arg{req.params[i]};
     const RPCArg::Fallback& fallback{params.at(i).m_fallback};
     if (no_default) CHECK_NONFATAL(!std::holds_alternative<RPCArg::Default>(fallback));
 
@@ -648,15 +655,15 @@ static const UniValue* MaybeArg(bool no_default, const std::vector<RPCArg>& para
     return &std::get<RPCArg::Default>(fallback);
 }
 
-#define TMPL_INST(no_default, ret_type, get_arg, return_code) \
-    template <>                                               \
-    ret_type RPCHelpMan::get_arg(size_t i) const              \
-    {                                                         \
-        const UniValue* maybe_arg{                            \
-            MaybeArg(no_default, m_args, m_req, i),           \
-        };                                                    \
-        return return_code                                    \
-    }                                                         \
+#define TMPL_INST(no_default, ret_type, get_arg, return_code)    \
+    template <>                                                  \
+    ret_type RPCHelpfulRequest::get_arg(size_t i) const          \
+    {                                                            \
+        const UniValue* maybe_arg{                               \
+            MaybeArg(no_default, m_helpman.GetArgs(), m_req, i), \
+        };                                                       \
+        return return_code                                       \
+    }                                                            \
     void force_semicolon()
 
 // Optional arg (without default).

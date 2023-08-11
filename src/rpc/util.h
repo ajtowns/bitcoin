@@ -392,14 +392,44 @@ struct RPCExamples {
     std::string ToDescriptionString() const;
 };
 
+class RPCHelpfulRequest;
+
 class RPCHelpMan
 {
 public:
     RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples);
     using RPCMethodImpl = std::function<UniValue(const RPCHelpMan&, const JSONRPCRequest&)>;
     RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImpl fun);
+    using RPCMethodImplNew = std::function<UniValue(const RPCHelpfulRequest&)>;
+    RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImplNew fun);
 
     UniValue HandleRequest(const JSONRPCRequest& request) const;
+
+    std::string ToString() const;
+    /** Return the named args that need to be converted from string to another JSON type */
+    UniValue GetArgMap() const;
+    /** If the supplied number of args is neither too small nor too high */
+    bool IsValidNumArgs(size_t num_args) const;
+    //! Return list of arguments and whether they are named-only.
+    std::vector<std::pair<std::string, bool>> GetArgNames() const;
+
+    const std::string m_name;
+
+    const std::vector<RPCArg>& GetArgs() const { return m_args; }
+private:
+    const RPCMethodImpl m_fun;
+    const std::string m_description;
+    const std::vector<RPCArg> m_args;
+    const RPCResults m_results;
+    const RPCExamples m_examples;
+};
+
+class RPCHelpfulRequest {
+public:
+    const RPCHelpMan& m_helpman;
+    const JSONRPCRequest& m_req;
+    RPCHelpfulRequest(const RPCHelpMan& helpman, const JSONRPCRequest& req) : m_helpman{helpman}, m_req{req} { }
+
     /**
      * Helper to get a request argument or its default value.
      * This function only works during m_fun(), i.e. it should only be used in RPC method implementations.
@@ -430,23 +460,8 @@ public:
             }
         }
     }
-    std::string ToString() const;
-    /** Return the named args that need to be converted from string to another JSON type */
-    UniValue GetArgMap() const;
-    /** If the supplied number of args is neither too small nor too high */
-    bool IsValidNumArgs(size_t num_args) const;
-    //! Return list of arguments and whether they are named-only.
-    std::vector<std::pair<std::string, bool>> GetArgNames() const;
-
-    const std::string m_name;
 
 private:
-    const RPCMethodImpl m_fun;
-    const std::string m_description;
-    const std::vector<RPCArg> m_args;
-    const RPCResults m_results;
-    const RPCExamples m_examples;
-    mutable const JSONRPCRequest* m_req{nullptr}; // A pointer to the request for the duration of m_fun()
     template <typename R>
     R ArgValue(size_t i) const;
     template <typename R>
