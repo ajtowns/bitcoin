@@ -495,6 +495,19 @@ struct Sections {
     }
 };
 
+void RPCHelpMan::SetupDeprecatedRPC(const ArgsManager& args)
+{
+    const std::vector<std::string> enabled_methods = args.GetArgs("-deprecatedrpc");
+
+    /*
+    for (const auto& method : enabled_methods) {
+        if (method == "foo") {
+            deprecated_rpc[DeprecatedRPC::FOO] = true;
+        }
+    }
+    */
+}
+
 RPCHelpMan::RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples)
     : RPCHelpMan{std::move(name), std::move(description), std::move(args), std::move(results), std::move(examples), nullptr} {}
 

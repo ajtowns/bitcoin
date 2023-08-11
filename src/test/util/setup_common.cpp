@@ -243,6 +243,7 @@ TestingSetup::TestingSetup(
     m_block_tree_db_in_memory = block_tree_db_in_memory;
     // Ideally we'd move all the RPC tests to the functional testing framework
     // instead of unit tests, but for now we need these here.
+    RPCHelpMan::SetupDeprecatedRPC(*m_node.args);
     RegisterAllCoreRPCCommands(tableRPC);
 
     LoadVerifyActivateChainstate();

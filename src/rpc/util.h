@@ -17,6 +17,7 @@
 #include <univalue.h>
 #include <util/check.h>
 
+#include <bitset>
 #include <string>
 #include <variant>
 #include <vector>
@@ -41,6 +42,7 @@ extern const std::string UNIX_EPOCH_TIME;
  */
 extern const std::string EXAMPLE_ADDRESS[2];
 
+class ArgsManager;
 class FillableSigningProvider;
 class CPubKey;
 class CScript;
@@ -393,7 +395,13 @@ public:
 
     const std::string m_name;
 
+    static void SetupDeprecatedRPC(const ArgsManager& args);
+    enum DeprecatedRPC : size_t { NUM_DEPRECATED_RPC };
+    static bool EnabledDeprecatedRPC(DeprecatedRPC code) { return deprecated_rpc[code]; }
+
 private:
+    inline static std::bitset<NUM_DEPRECATED_RPC> deprecated_rpc{};
+
     const RPCMethodImpl m_fun;
     const std::string m_description;
     const std::vector<RPCArg> m_args;
