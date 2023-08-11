@@ -480,7 +480,7 @@ static RPCHelpMan unloadwallet()
         // Release the "main" shared pointer and prevent further notifications.
         // Note that any attempt to load the same wallet would fail until the wallet
         // is destroyed (see CheckUniqueFileid).
-        std::optional<bool> load_on_start{helpful.Arg<bool*>(1)};
+        std::optional<bool> load_on_start{helpful.ArgOrNot<bool>(1)};
         if (!RemoveWallet(context, wallet, load_on_start, warnings)) {
             throw JSONRPCError(RPC_MISC_ERROR, "Requested wallet already unloaded");
         }

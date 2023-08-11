@@ -110,7 +110,7 @@ static RPCHelpMan getnetworkhashps()
 {
     ChainstateManager& chainman = EnsureAnyChainman(helpful.m_req.context);
     LOCK(cs_main);
-    return GetNetworkHashPS(helpful.Arg<int>(0), helpful.Arg<int>(1), chainman.ActiveChain());
+    return GetNetworkHashPS(helpful.ArgOrDefault<int>(0), helpful.ArgOrDefault<int>(1), chainman.ActiveChain());
 },
     };
 }
@@ -217,12 +217,12 @@ static RPCHelpMan generatetodescriptor()
             "\nGenerate 11 blocks to mydesc\n" + HelpExampleCli("generatetodescriptor", "11 \"mydesc\"")},
         [&](const RPCHelpfulRequest& helpful) -> UniValue
 {
-    const auto num_blocks{helpful.Arg<int>(0)};
-    const auto max_tries{helpful.Arg<uint64_t>(2)};
+    const auto num_blocks{helpful.ArgOrDefault<int>(0)};
+    const auto max_tries{helpful.ArgOrDefault<uint64_t>(2)};
 
     CScript coinbase_script;
     std::string error;
-    if (!getScriptFromDescriptor(helpful.Arg<std::string>(1), coinbase_script, error)) {
+    if (!getScriptFromDescriptor(helpful.ArgOrDefault<std::string>(1), coinbase_script, error)) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, error);
     }
 
@@ -470,7 +470,7 @@ static RPCHelpMan prioritisetransaction()
     LOCK(cs_main);
 
     uint256 hash(ParseHashV(request.params[0], "txid"));
-    const auto dummy{helpful.Arg<double*>(1)};
+    const auto dummy{helpful.ArgOrNot<double>(1)};
     CAmount nAmount = request.params[2].getInt<int64_t>();
 
     if (dummy && *dummy != 0) {

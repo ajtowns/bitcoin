@@ -437,27 +437,28 @@ public:
      * Use Arg<Type*> to get the argument or a falsy value.
      */
     template <typename R>
-    auto Arg(size_t i) const
+    auto ArgOrNot(size_t i) const
     {
-        if constexpr (std::is_pointer_v<R>) {
-            // Return optional argument (without default).
-            using U = std::remove_pointer_t<R>;
-            if constexpr (std::is_integral_v<U> || std::is_floating_point_v<U>) {
-                // Return numbers by value, wrapped in optional.
-                return ArgValue<std::optional<U>>(i);
-            } else {
-                // Return other types by pointer.
-                return ArgValue<const U*>(i);
-            }
+        // Return optional argument (without default).
+        if constexpr (std::is_integral_v<R> || std::is_floating_point_v<R>) {
+            // Return numbers by value, wrapped in optional.
+            return ArgValue<std::optional<R>>(i);
         } else {
-            // Return argument (required or with default value).
-            if constexpr (std::is_integral_v<R> || std::is_floating_point_v<R>) {
-                // Return numbers by value.
-                return ArgValue<R>(i);
-            } else {
-                // Return everything else by reference.
-                return ArgRef<R>(i);
-            }
+            // Return other types by pointer.
+            return ArgValue<const R*>(i);
+        }
+    }
+
+    template <typename R>
+    auto ArgOrDefault(size_t i) const
+    {
+        // Return argument (required or with default value).
+        if constexpr (std::is_integral_v<R> || std::is_floating_point_v<R>) {
+            // Return numbers by value.
+            return ArgValue<R>(i);
+        } else {
+            // Return everything else by reference.
+            return ArgRef<R>(i);
         }
     }
 
