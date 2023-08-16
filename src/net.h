@@ -203,7 +203,6 @@ public:
         CClientUIInterface* uiInterface = nullptr;
         NetEventsInterface* m_msgproc = nullptr;
         BanMan* m_banman = nullptr;
-        unsigned int nSendBufferMaxSize = 0;
         unsigned int nReceiveFloodSize = 0;
         uint64_t nMaxOutboundLimit = 0;
         int64_t m_peer_connect_timeout = DEFAULT_PEER_CONNECT_TIMEOUT;
@@ -236,7 +235,6 @@ public:
         m_client_interface = connOptions.uiInterface;
         m_banman = connOptions.m_banman;
         m_msgproc = connOptions.m_msgproc;
-        nSendBufferMaxSize = connOptions.nSendBufferMaxSize;
         nReceiveFloodSize = connOptions.nReceiveFloodSize;
         m_peer_connect_timeout = std::chrono::seconds{connOptions.m_peer_connect_timeout};
         {
@@ -277,8 +275,6 @@ public:
     RecursiveMutex& GetNodesMutex() const LOCK_RETURNED(m_nodes_mutex);
 
     bool ForNode(NodeId id, std::function<bool(CNode* pnode)> func);
-
-    void PushMessage(CNode* pnode, CSerializedNetMsg&& msg);
 
     using NodeFn = std::function<void(CNode*)>;
     void ForEachNode(const NodeFn& func)
@@ -542,7 +538,6 @@ private:
     // whitelisted (as well as those connecting to whitelisted binds).
     std::vector<NetWhitelistPermissions> vWhitelistedRange;
 
-    unsigned int nSendBufferMaxSize{0};
     unsigned int nReceiveFloodSize{0};
 
     std::vector<ListenSocket> vhListenSocket;
