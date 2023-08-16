@@ -675,6 +675,12 @@ private:
     void AddTxAnnouncement(const CNode& node, const GenTxid& gtxid, std::chrono::microseconds current_time)
         EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
+    /** Send a message to a peer */
+    void PushMessage(CNode* pnode, CSerializedNetMsg&& msg) const
+    {
+        pnode->PushMessage(std::move(msg), m_opts.send_buffer_max_size);
+    }
+
     /** Send a version message to a peer */
     void PushNodeVersion(CNode& pnode, const Peer& peer);
 
@@ -1247,7 +1253,7 @@ void PeerManagerImpl::MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid)
             // As per BIP152, we only get 3 of our peers to announce
             // blocks using compact encodings.
             m_connman.ForNode(lNodesAnnouncingHeaderAndIDs.front(), [this](CNode* pnodeStop){
-                m_connman.PushMessage(pnodeStop, CNetMsgMaker(pnodeStop->GetCommonVersion()).Make(NetMsgType::SENDCMPCT, /*high_bandwidth=*/false, /*version=*/CMPCTBLOCKS_VERSION));
+                PushMessage(pnodeStop, CNetMsgMaker(pnodeStop->GetCommonVersion()).Make(NetMsgType::SENDCMPCT, /*high_bandwidth=*/false, /*version=*/CMPCTBLOCKS_VERSION));
                 // save BIP152 bandwidth state: we select peer to be low-bandwidth
                 pnodeStop->m_bip152_highbandwidth_to = false;
                 return true;
