@@ -84,16 +84,20 @@ FUZZ_TARGET(connman, .init = initialize_connman)
                 (void)connman.ForNode(fuzzed_data_provider.ConsumeIntegral<NodeId>(), [&](auto) { return fuzzed_data_provider.ConsumeBool(); });
             },
             [&] {
+#if 0 // FIXME in peerman now
                 (void)connman.GetAddresses(
                     /*max_addresses=*/fuzzed_data_provider.ConsumeIntegral<size_t>(),
                     /*max_pct=*/fuzzed_data_provider.ConsumeIntegral<size_t>(),
                     /*network=*/std::nullopt);
+#endif
             },
             [&] {
+#if 0 // FIXME in peerman now
                 (void)connman.GetAddresses(
                     /*requestor=*/random_node,
                     /*max_addresses=*/fuzzed_data_provider.ConsumeIntegral<size_t>(),
                     /*max_pct=*/fuzzed_data_provider.ConsumeIntegral<size_t>());
+#endif
             },
             [&] {
                 (void)connman.GetDeterministicRandomizer(fuzzed_data_provider.ConsumeIntegral<uint64_t>());

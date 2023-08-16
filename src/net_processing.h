@@ -94,6 +94,15 @@ public:
     /** Set the best height */
     virtual void SetBestHeight(int height) = 0;
 
+    /**
+     * Return all or many randomly selected addresses, optionally by network.
+     *
+     * @param[in] max_addresses  Maximum number of addresses to return (0 = all).
+     * @param[in] max_pct        Maximum percentage of addresses to return (0 = all).
+     * @param[in] network        Select only addresses of this network (nullopt = all).
+     */
+    virtual std::vector<CAddress> GetAddresses(size_t max_addresses, size_t max_pct, std::optional<Network> network) = 0;
+
     /* Public for unit testing. */
     virtual void UnitTestMisbehaving(NodeId peer_id, int howmuch) = 0;
 

@@ -295,23 +295,6 @@ public:
         }
     };
 
-    // Addrman functions
-    /**
-     * Return all or many randomly selected addresses, optionally by network.
-     *
-     * @param[in] max_addresses  Maximum number of addresses to return (0 = all).
-     * @param[in] max_pct        Maximum percentage of addresses to return (0 = all).
-     * @param[in] network        Select only addresses of this network (nullopt = all).
-     */
-    std::vector<CAddress> GetAddresses(size_t max_addresses, size_t max_pct, std::optional<Network> network) const;
-    /**
-     * Cache is used to minimize topology leaks, so it should
-     * be used for all non-trusted calls, for example, p2p.
-     * A non-malicious call (from RPC or a peer with addr permission) should
-     * call the function without a parameter to avoid using the cache.
-     */
-    std::vector<CAddress> GetAddresses(CNode& requestor, size_t max_addresses, size_t max_pct);
-
     // This allows temporarily exceeding m_max_outbound_full_relay, with the goal of finding
     // a peer that is better than all our current peers.
     void SetTryNewOutboundPeer(bool flag);
@@ -557,33 +540,6 @@ private:
 
     // Stores number of full-tx connections (outbound and manual) per network
     std::array<unsigned int, Network::NET_MAX> m_network_conn_counts GUARDED_BY(m_nodes_mutex) = {};
-
-    /**
-     * Cache responses to addr requests to minimize privacy leak.
-     * Attack example: scraping addrs in real-time may allow an attacker
-     * to infer new connections of the victim by detecting new records
-     * with fresh timestamps (per self-announcement).
-     */
-    struct CachedAddrResponse {
-        std::vector<CAddress> m_addrs_response_cache;
-        std::chrono::microseconds m_cache_entry_expiration{0};
-    };
-
-    /**
-     * Addr responses stored in different caches
-     * per (network, local socket) prevent cross-network node identification.
-     * If a node for example is multi-homed under Tor and IPv6,
-     * a single cache (or no cache at all) would let an attacker
-     * to easily detect that it is the same node by comparing responses.
-     * Indexing by local socket prevents leakage when a node has multiple
-     * listening addresses on the same network.
-     *
-     * The used memory equals to 1000 CAddress records (or around 40 bytes) per
-     * distinct Network (up to 5) we have/had an inbound peer from,
-     * resulting in at most ~196 KB. Every separate local socket may
-     * add up to ~196 KB extra.
-     */
-    std::map<uint64_t, CachedAddrResponse> m_addr_response_caches;
 
     /**
      * Services this node offers.
