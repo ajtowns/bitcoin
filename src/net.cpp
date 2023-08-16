@@ -12,28 +12,38 @@
 #include <addrdb.h>
 #include <addrman.h>
 #include <banman.h>
-#include <clientversion.h>
+#include <chainparams.h>
 #include <common/args.h>
 #include <compat/compat.h>
 #include <consensus/consensus.h>
-#include <crypto/sha256.h>
+#include <crypto/siphash.h>
 #include <i2p.h>
 #include <logging.h>
-#include <net_permissions.h>
 #include <netaddress.h>
 #include <netbase.h>
+#include <netgroup.h>
+#include <net_permissions.h>
+#include <node/connection_types.h>
 #include <node/eviction.h>
 #include <node/interface_ui.h>
+#include <prevector.h>
 #include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
+#include <serialize.h>
+#include <span.h>
+#include <streams.h>
+#include <sync.h>
+#include <tinyformat.h>
 #include <util/fs.h>
 #include <util/sock.h>
 #include <util/strencodings.h>
 #include <util/thread.h>
 #include <util/threadinterrupt.h>
+#include <util/time.h>
 #include <util/trace.h>
 #include <util/translation.h>
+#include <version.h>
 
 #ifdef WIN32
 #include <string.h>
@@ -49,8 +59,6 @@
 #include <functional>
 #include <optional>
 #include <unordered_map>
-
-#include <math.h>
 
 /** Maximum number of block-relay-only anchor connections */
 static constexpr size_t MAX_BLOCK_RELAY_ONLY_ANCHORS = 2;

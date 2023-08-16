@@ -3,60 +3,35 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#if defined(HAVE_CONFIG_H)
-#include <config/bitcoin-config.h>
-#endif
-
 #include <net_node.h>
 
-#include <addrdb.h>
-#include <addrman.h>
-#include <banman.h>
-#include <clientversion.h>
+#include <chainparams.h>
 #include <common/args.h>
-#include <compat/compat.h>
-#include <consensus/consensus.h>
-#include <crypto/sha256.h>
+#include <crypto/common.h>
+#include <hash.h>
 #include <i2p.h>
 #include <logging.h>
-#include <net_permissions.h>
 #include <netaddress.h>
-#include <netbase.h>
+#include <node/connection_types.h>
 #include <node/eviction.h>
-#include <node/interface_ui.h>
 #include <protocol.h>
 #include <random.h>
-#include <scheduler.h>
+#include <serialize.h>
+#include <span.h>
+#include <streams.h>
+#include <sync.h>
+#include <tinyformat.h>
+#include <uint256.h>
 #include <util/fs.h>
 #include <util/sock.h>
+#include <util/time.h>
 #include <util/strencodings.h>
-#include <util/thread.h>
-#include <util/threadinterrupt.h>
-#include <util/trace.h>
-#include <util/translation.h>
-
-#ifdef WIN32
-#include <string.h>
-#else
-#include <fcntl.h>
-#endif
-
-#if HAVE_DECL_GETIFADDRS && HAVE_DECL_FREEIFADDRS
-#include <ifaddrs.h>
-#endif
-
-#ifdef USE_POLL
-#include <poll.h>
-#endif
+#include <version.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <unordered_map>
-
-#include <math.h>
 
 const std::string NET_MESSAGE_TYPE_OTHER = "*other*";
 

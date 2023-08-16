@@ -6,27 +6,18 @@
 #ifndef BITCOIN_NET_H
 #define BITCOIN_NET_H
 
-#include <chainparams.h>
-#include <common/bloom.h>
-#include <compat/compat.h>
 #include <node/connection_types.h>
-#include <consensus/amount.h>
 #include <crypto/siphash.h>
-#include <hash.h>
 #include <i2p.h>
 #include <net_permissions.h>
 #include <netaddress.h>
 #include <netbase.h>
 #include <netgroup.h>
 #include <net_node.h> // IWYU pragma: export
-#include <policy/feerate.h>
 #include <protocol.h>
 #include <random.h>
 #include <span.h>
-#include <streams.h>
 #include <sync.h>
-#include <uint256.h>
-#include <util/check.h>
 #include <util/sock.h>
 #include <util/threadinterrupt.h>
 
@@ -46,9 +37,7 @@
 
 class AddrMan;
 class BanMan;
-class CNode;
 class CScheduler;
-struct bilingual_str;
 
 /** Default for -whitelistrelay. */
 static const bool DEFAULT_WHITELISTRELAY = true;

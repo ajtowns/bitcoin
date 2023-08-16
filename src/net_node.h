@@ -7,30 +7,21 @@
 #define BITCOIN_NETNODE_H
 
 #include <chainparams.h>
-#include <common/bloom.h>
-#include <compat/compat.h>
 #include <node/connection_types.h>
-#include <consensus/amount.h>
-#include <crypto/siphash.h>
 #include <hash.h>
 #include <i2p.h>
 #include <net_permissions.h>
 #include <netaddress.h>
-#include <netbase.h>
-#include <netgroup.h>
-#include <policy/feerate.h>
 #include <protocol.h>
-#include <random.h>
 #include <span.h>
 #include <streams.h>
 #include <sync.h>
 #include <uint256.h>
 #include <util/check.h>
 #include <util/sock.h>
-#include <util/threadinterrupt.h>
+#include <version.h>
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -38,9 +29,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <queue>
-#include <thread>
-#include <unordered_set>
 #include <vector>
 
 typedef int64_t NodeId;
