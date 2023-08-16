@@ -405,7 +405,7 @@ size_t CNode::SocketSendData()
     return nSentSize;
 }
 
-size_t CNode::PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
+void CNode::PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
 {
     size_t nMessageSize = msg.data.size();
     LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, GetId());
@@ -444,7 +444,7 @@ size_t CNode::PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
         // If write queue empty, attempt "optimistic write"
         if (optimisticSend) nBytesSent = SocketSendData();
     }
-    return nBytesSent;
+    if (nBytesSent) RecordPushedBytes(nBytesSent);
 }
 
 void CaptureMessageToFile(const CAddress& addr,

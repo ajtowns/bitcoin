@@ -343,7 +343,7 @@ public:
 
     /** Push a message for sending across this connection.
      */
-    size_t PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
+    void PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
         EXCLUSIVE_LOCKS_REQUIRED(!m_msg_process_queue_mutex, !cs_vSend, !m_sock_mutex);
 
     bool IsOutboundOrBlockRelayConn() const {
@@ -539,6 +539,13 @@ public:
         m_min_ping_time = std::min(m_min_ping_time.load(), ping_time);
     }
 
+    void RecordPushedBytes(size_t bytes) {
+        m_pushed_bytes += bytes;
+    }
+    size_t QueryAndResetPushedBytes() {
+        return m_pushed_bytes.exchange(0);
+    }
+
 private:
     const NodeId id;
     const uint64_t nLocalHostNonce;
@@ -557,6 +564,8 @@ private:
 
     mapMsgTypeSize mapSendBytesPerMsgType GUARDED_BY(cs_vSend);
     mapMsgTypeSize mapRecvBytesPerMsgType GUARDED_BY(cs_vRecv);
+
+    std::atomic<size_t> m_pushed_bytes{0};
 
     /**
      * If an I2P session is created per connection (for outbound transient I2P

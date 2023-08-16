@@ -1815,6 +1815,12 @@ void CConnman::ThreadMessageHandler()
                 if (pnode->fDisconnect)
                     continue;
 
+                // Check for optimistic sends (via CNode::PushMessage)
+                {
+                    size_t nBytes = pnode->QueryAndResetPushedBytes();
+                    if (nBytes) RecordBytesSent(nBytes);
+                }
+
                 // Receive messages
                 bool fMoreNodeWork = m_msgproc->ProcessMessages(pnode, flagInterruptMsgProc);
                 fMoreWork |= (fMoreNodeWork && !pnode->IsSendingPaused());
@@ -2536,9 +2542,7 @@ bool CConnman::NodeFullyConnected(const CNode* pnode)
 
 void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
 {
-    AssertLockNotHeld(m_total_bytes_sent_mutex);
-    size_t nBytesSent = pnode->PushMessage(std::move(msg), nSendBufferMaxSize);
-    if (nBytesSent) RecordBytesSent(nBytesSent);
+    pnode->PushMessage(std::move(msg), nSendBufferMaxSize);
 }
 
 bool CConnman::ForNode(NodeId id, std::function<bool(CNode* pnode)> func)
