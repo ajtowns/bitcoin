@@ -320,13 +320,6 @@ public:
     size_t PushMessage(CSerializedNetMsg&& msg, unsigned int nSendBufferMaxSize)
         EXCLUSIVE_LOCKS_REQUIRED(!m_msg_process_queue_mutex, !cs_vSend, !m_sock_mutex);
 
-    /** Account for the total size of a sent message in the per msg type connection stats. */
-    void AccountForSentBytes(const std::string& msg_type, size_t sent_bytes)
-        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
-    {
-        mapSendBytesPerMsgType[msg_type] += sent_bytes;
-    }
-
     bool IsOutboundOrBlockRelayConn() const {
         switch (m_conn_type) {
             case ConnectionType::OUTBOUND_FULL_RELAY:
@@ -550,6 +543,13 @@ private:
      * Otherwise this unique_ptr is empty.
      */
     std::unique_ptr<i2p::sam::Session> m_i2p_sam_session GUARDED_BY(m_sock_mutex);
+
+    /** Account for the total size of a sent message in the per msg type connection stats. */
+    void AccountForSentBytes(const std::string& msg_type, size_t sent_bytes)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
+    {
+        mapSendBytesPerMsgType[msg_type] += sent_bytes;
+    }
 };
 
 /** Dump binary message to file, with timestamp */
