@@ -68,7 +68,7 @@ FUZZ_TARGET(process_messages, .init = initialize_process_messages)
         CNode& random_node = *PickValue(fuzzed_data_provider, peers);
 
         (void)connman.ReceiveMsgFrom(random_node, net_msg);
-        random_node.fPauseSend = false;
+        random_node.ClearSendingPause();
 
         try {
             connman.ProcessMessagesOnce(random_node);

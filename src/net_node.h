@@ -299,7 +299,11 @@ public:
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
+private:
     std::atomic_bool fPauseSend{false};
+public:
+    bool IsSendingPaused() const { return fPauseSend; }
+    void ClearSendingPause() { fPauseSend = false; }
 
     const ConnectionType m_conn_type;
 
