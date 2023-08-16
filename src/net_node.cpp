@@ -25,6 +25,7 @@
 #include <util/fs.h>
 #include <util/sock.h>
 #include <util/time.h>
+#include <util/trace.h>
 #include <util/strencodings.h>
 #include <version.h>
 
@@ -402,6 +403,47 @@ size_t CNode::SocketSendData(unsigned int nSendBufferMaxSize)
     }
     vSendMsg.erase(vSendMsg.begin(), it);
     return nSentSize;
+}
+
+size_t CNode::PushMessage(CSerializedNetMsg&& msg, unsigned int nSendBufferMaxSize)
+{
+    size_t nMessageSize = msg.data.size();
+    LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, GetId());
+    if (gArgs.GetBoolArg("-capturemessages", false)) {
+        CaptureMessage(addr, msg.m_type, msg.data, /*is_incoming=*/false);
+    }
+
+    TRACE6(net, outbound_message,
+        GetId(),
+        m_addr_name.c_str(),
+        ConnectionTypeAsString().c_str(),
+        msg.m_type.c_str(),
+        msg.data.size(),
+        msg.data.data()
+    );
+
+    // make sure we use the appropriate network transport format
+    std::vector<unsigned char> serializedHeader;
+    m_serializer->prepareForTransport(msg, serializedHeader);
+    size_t nTotalSize = nMessageSize + serializedHeader.size();
+
+    size_t nBytesSent = 0;
+    {
+        LOCK(cs_vSend);
+        bool optimisticSend(vSendMsg.empty());
+
+        //log total amount of bytes per message type
+        AccountForSentBytes(msg.m_type, nTotalSize);
+        nSendSize += nTotalSize;
+
+        if (nSendSize > nSendBufferMaxSize) fPauseSend = true;
+        vSendMsg.push_back(std::move(serializedHeader));
+        if (nMessageSize) vSendMsg.push_back(std::move(msg.data));
+
+        // If write queue empty, attempt "optimistic write"
+        if (optimisticSend) nBytesSent = SocketSendData(nSendBufferMaxSize);
+    }
+    return nBytesSent;
 }
 
 void CaptureMessageToFile(const CAddress& addr,

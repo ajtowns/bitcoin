@@ -41,7 +41,6 @@
 #include <util/thread.h>
 #include <util/threadinterrupt.h>
 #include <util/time.h>
-#include <util/trace.h>
 #include <util/translation.h>
 #include <version.h>
 
@@ -2538,42 +2537,7 @@ bool CConnman::NodeFullyConnected(const CNode* pnode)
 void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
 {
     AssertLockNotHeld(m_total_bytes_sent_mutex);
-    size_t nMessageSize = msg.data.size();
-    LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, pnode->GetId());
-    if (gArgs.GetBoolArg("-capturemessages", false)) {
-        CaptureMessage(pnode->addr, msg.m_type, msg.data, /*is_incoming=*/false);
-    }
-
-    TRACE6(net, outbound_message,
-        pnode->GetId(),
-        pnode->m_addr_name.c_str(),
-        pnode->ConnectionTypeAsString().c_str(),
-        msg.m_type.c_str(),
-        msg.data.size(),
-        msg.data.data()
-    );
-
-    // make sure we use the appropriate network transport format
-    std::vector<unsigned char> serializedHeader;
-    pnode->m_serializer->prepareForTransport(msg, serializedHeader);
-    size_t nTotalSize = nMessageSize + serializedHeader.size();
-
-    size_t nBytesSent = 0;
-    {
-        LOCK(pnode->cs_vSend);
-        bool optimisticSend(pnode->vSendMsg.empty());
-
-        //log total amount of bytes per message type
-        pnode->AccountForSentBytes(msg.m_type, nTotalSize);
-        pnode->nSendSize += nTotalSize;
-
-        if (pnode->nSendSize > nSendBufferMaxSize) pnode->fPauseSend = true;
-        pnode->vSendMsg.push_back(std::move(serializedHeader));
-        if (nMessageSize) pnode->vSendMsg.push_back(std::move(msg.data));
-
-        // If write queue empty, attempt "optimistic write"
-        if (optimisticSend) nBytesSent = pnode->SocketSendData(nSendBufferMaxSize);
-    }
+    size_t nBytesSent = pnode->PushMessage(std::move(msg), nSendBufferMaxSize);
     if (nBytesSent) RecordBytesSent(nBytesSent);
 }
 
