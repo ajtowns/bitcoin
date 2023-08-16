@@ -199,6 +199,7 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   net.h \
+  net_node.h \
   net_permissions.h \
   net_processing.h \
   net_types.h \
@@ -402,6 +403,7 @@ libbitcoin_node_a_SOURCES = \
   kernel/mempool_persist.cpp \
   mapport.cpp \
   net.cpp \
+  net_node.cpp \
   net_processing.cpp \
   netgroup.cpp \
   node/abort.cpp \
