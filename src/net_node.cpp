@@ -347,7 +347,7 @@ std::optional<std::pair<CNetMessage, bool>> CNode::PollMessage()
     return std::make_pair(std::move(msgs.front()), !m_msg_process_queue.empty());
 }
 
-size_t CNode::SocketSendData(unsigned int nSendBufferMaxSize)
+size_t CNode::SocketSendData()
 {
     auto it = vSendMsg.begin();
     size_t nSentSize = 0;
@@ -377,7 +377,7 @@ size_t CNode::SocketSendData(unsigned int nSendBufferMaxSize)
             if (nSendOffset == data.size()) {
                 nSendOffset = 0;
                 nSendSize -= data.size();
-                fPauseSend = nSendSize > nSendBufferMaxSize;
+                SubtractSendingPause(nSendSize);
                 it++;
             } else {
                 // could not send full message; stop sending more
@@ -405,7 +405,7 @@ size_t CNode::SocketSendData(unsigned int nSendBufferMaxSize)
     return nSentSize;
 }
 
-size_t CNode::PushMessage(CSerializedNetMsg&& msg, unsigned int nSendBufferMaxSize)
+size_t CNode::PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
 {
     size_t nMessageSize = msg.data.size();
     LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, GetId());
@@ -436,12 +436,13 @@ size_t CNode::PushMessage(CSerializedNetMsg&& msg, unsigned int nSendBufferMaxSi
         AccountForSentBytes(msg.m_type, nTotalSize);
         nSendSize += nTotalSize;
 
-        if (nSendSize > nSendBufferMaxSize) fPauseSend = true;
+        SetSendingPause(nSendSize - std::min(nSendSize, nSendBufferMaxSize));
+
         vSendMsg.push_back(std::move(serializedHeader));
         if (nMessageSize) vSendMsg.push_back(std::move(msg.data));
 
         // If write queue empty, attempt "optimistic write"
-        if (optimisticSend) nBytesSent = SocketSendData(nSendBufferMaxSize);
+        if (optimisticSend) nBytesSent = SocketSendData();
     }
     return nBytesSent;
 }

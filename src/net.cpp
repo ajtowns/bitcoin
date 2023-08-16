@@ -1072,7 +1072,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
 
         if (sendSet) {
             // Send data
-            size_t bytes_sent = WITH_LOCK(pnode->cs_vSend, return pnode->SocketSendData(nSendBufferMaxSize));
+            size_t bytes_sent = WITH_LOCK(pnode->cs_vSend, return pnode->SocketSendData());
             if (bytes_sent) RecordBytesSent(bytes_sent);
         }
 

@@ -261,7 +261,7 @@ public:
     Mutex m_sock_mutex;
     Mutex cs_vRecv;
     /* Send queued data from vSendMsg to m_sock */
-    size_t SocketSendData(unsigned int nSendBufferMaxSize)
+    size_t SocketSendData()
         EXCLUSIVE_LOCKS_REQUIRED(cs_vSend, !m_sock_mutex);
 
     uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
@@ -300,10 +300,32 @@ public:
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
 private:
-    std::atomic_bool fPauseSend{false};
+    /** Number of bytes that need to be sent over the socket before
+     * additional messages should be queued for sending */
+    std::atomic<size_t> fPauseSendBytes{0};
+    void SubtractSendingPause(size_t bytes)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
+    {
+        size_t before = fPauseSendBytes;
+        if (before < bytes) before = bytes;
+        fPauseSendBytes = before - bytes;
+    }
+    void SetSendingPause(size_t bytes)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
+    {
+        fPauseSendBytes = bytes;
+    }
+
 public:
-    bool IsSendingPaused() const { return fPauseSend; }
-    void ClearSendingPause() { fPauseSend = false; }
+    bool IsSendingPaused() const { return fPauseSendBytes > 0; }
+
+    /** For tests only */
+    void ClearSendingPause()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_vSend)
+    {
+        LOCK(cs_vSend);
+        SetSendingPause(0);
+    }
 
     const ConnectionType m_conn_type;
 
@@ -321,7 +343,7 @@ public:
 
     /** Push a message for sending across this connection.
      */
-    size_t PushMessage(CSerializedNetMsg&& msg, unsigned int nSendBufferMaxSize)
+    size_t PushMessage(CSerializedNetMsg&& msg, size_t nSendBufferMaxSize)
         EXCLUSIVE_LOCKS_REQUIRED(!m_msg_process_queue_mutex, !cs_vSend, !m_sock_mutex);
 
     bool IsOutboundOrBlockRelayConn() const {
