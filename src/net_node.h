@@ -260,6 +260,9 @@ public:
     Mutex cs_vSend;
     Mutex m_sock_mutex;
     Mutex cs_vRecv;
+    /* Send queued data from vSendMsg to m_sock */
+    size_t SocketSendData(unsigned int nSendBufferMaxSize)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend, !m_sock_mutex);
 
     uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
 

@@ -346,6 +346,64 @@ std::optional<std::pair<CNetMessage, bool>> CNode::PollMessage()
     return std::make_pair(std::move(msgs.front()), !m_msg_process_queue.empty());
 }
 
+size_t CNode::SocketSendData(unsigned int nSendBufferMaxSize)
+{
+    auto it = vSendMsg.begin();
+    size_t nSentSize = 0;
+
+    while (it != vSendMsg.end()) {
+        const auto& data = *it;
+        assert(data.size() > nSendOffset);
+        int nBytes = 0;
+        {
+            LOCK(m_sock_mutex);
+            if (!m_sock) {
+                break;
+            }
+            int flags = MSG_NOSIGNAL | MSG_DONTWAIT;
+#ifdef MSG_MORE
+            if (it + 1 != vSendMsg.end()) {
+                flags |= MSG_MORE;
+            }
+#endif
+            nBytes = m_sock->Send(reinterpret_cast<const char*>(data.data()) + nSendOffset, data.size() - nSendOffset, flags);
+        }
+        if (nBytes > 0) {
+            m_last_send = GetTime<std::chrono::seconds>();
+            nSendBytes += nBytes;
+            nSendOffset += nBytes;
+            nSentSize += nBytes;
+            if (nSendOffset == data.size()) {
+                nSendOffset = 0;
+                nSendSize -= data.size();
+                fPauseSend = nSendSize > nSendBufferMaxSize;
+                it++;
+            } else {
+                // could not send full message; stop sending more
+                break;
+            }
+        } else {
+            if (nBytes < 0) {
+                // error
+                int nErr = WSAGetLastError();
+                if (nErr != WSAEWOULDBLOCK && nErr != WSAEMSGSIZE && nErr != WSAEINTR && nErr != WSAEINPROGRESS) {
+                    LogPrint(BCLog::NET, "socket send error for peer=%d: %s\n", GetId(), NetworkErrorString(nErr));
+                    CloseSocketDisconnect();
+                }
+            }
+            // couldn't send anything at all
+            break;
+        }
+    }
+
+    if (it == vSendMsg.end()) {
+        assert(nSendOffset == 0);
+        assert(nSendSize == 0);
+    }
+    vSendMsg.erase(vSendMsg.begin(), it);
+    return nSentSize;
+}
+
 void CaptureMessageToFile(const CAddress& addr,
                           const std::string& msg_type,
                           Span<const unsigned char> data,

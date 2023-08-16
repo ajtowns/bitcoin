@@ -599,64 +599,6 @@ void CConnman::AddWhitelistPermissionFlags(NetPermissionFlags& flags, const CNet
     }
 }
 
-size_t CConnman::SocketSendData(CNode& node) const
-{
-    auto it = node.vSendMsg.begin();
-    size_t nSentSize = 0;
-
-    while (it != node.vSendMsg.end()) {
-        const auto& data = *it;
-        assert(data.size() > node.nSendOffset);
-        int nBytes = 0;
-        {
-            LOCK(node.m_sock_mutex);
-            if (!node.m_sock) {
-                break;
-            }
-            int flags = MSG_NOSIGNAL | MSG_DONTWAIT;
-#ifdef MSG_MORE
-            if (it + 1 != node.vSendMsg.end()) {
-                flags |= MSG_MORE;
-            }
-#endif
-            nBytes = node.m_sock->Send(reinterpret_cast<const char*>(data.data()) + node.nSendOffset, data.size() - node.nSendOffset, flags);
-        }
-        if (nBytes > 0) {
-            node.m_last_send = GetTime<std::chrono::seconds>();
-            node.nSendBytes += nBytes;
-            node.nSendOffset += nBytes;
-            nSentSize += nBytes;
-            if (node.nSendOffset == data.size()) {
-                node.nSendOffset = 0;
-                node.nSendSize -= data.size();
-                node.fPauseSend = node.nSendSize > nSendBufferMaxSize;
-                it++;
-            } else {
-                // could not send full message; stop sending more
-                break;
-            }
-        } else {
-            if (nBytes < 0) {
-                // error
-                int nErr = WSAGetLastError();
-                if (nErr != WSAEWOULDBLOCK && nErr != WSAEMSGSIZE && nErr != WSAEINTR && nErr != WSAEINPROGRESS) {
-                    LogPrint(BCLog::NET, "socket send error for peer=%d: %s\n", node.GetId(), NetworkErrorString(nErr));
-                    node.CloseSocketDisconnect();
-                }
-            }
-            // couldn't send anything at all
-            break;
-        }
-    }
-
-    if (it == node.vSendMsg.end()) {
-        assert(node.nSendOffset == 0);
-        assert(node.nSendSize == 0);
-    }
-    node.vSendMsg.erase(node.vSendMsg.begin(), it);
-    return nSentSize;
-}
-
 /** Try to find a connection to evict when the node is full.
  *  Extreme care must be taken to avoid opening the node to attacker
  *   triggered network partitioning.
@@ -1131,7 +1073,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
 
         if (sendSet) {
             // Send data
-            size_t bytes_sent = WITH_LOCK(pnode->cs_vSend, return SocketSendData(*pnode));
+            size_t bytes_sent = WITH_LOCK(pnode->cs_vSend, return pnode->SocketSendData(nSendBufferMaxSize));
             if (bytes_sent) RecordBytesSent(bytes_sent);
         }
 
@@ -2630,7 +2572,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
         if (nMessageSize) pnode->vSendMsg.push_back(std::move(msg.data));
 
         // If write queue empty, attempt "optimistic write"
-        if (optimisticSend) nBytesSent = SocketSendData(*pnode);
+        if (optimisticSend) nBytesSent = pnode->SocketSendData(nSendBufferMaxSize);
     }
     if (nBytesSent) RecordBytesSent(nBytesSent);
 }

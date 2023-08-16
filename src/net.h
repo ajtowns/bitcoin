@@ -493,7 +493,6 @@ private:
 
     NodeId GetNewNodeId();
 
-    size_t SocketSendData(CNode& node) const EXCLUSIVE_LOCKS_REQUIRED(node.cs_vSend);
     void DumpAddresses();
 
     // Network stats
