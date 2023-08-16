@@ -58,6 +58,8 @@ public:
         uint32_t max_extra_txs{DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN};
         //! Whether all P2P messages are captured to disk
         bool capture_messages{false};
+        //! Maximum send buffer size
+        uint32_t send_buffer_max_size{1000*DEFAULT_MAXSENDBUFFER};
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,

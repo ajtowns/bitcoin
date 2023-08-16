@@ -23,6 +23,8 @@ void ApplyArgsManOptions(const ArgsManager& argsman, PeerManager::Options& optio
     if (auto value{argsman.GetBoolArg("-capturemessages")}) options.capture_messages = *value;
 
     if (auto value{argsman.GetBoolArg("-blocksonly")}) options.ignore_incoming_txs = *value;
+
+    if (auto value{argsman.GetIntArg("-maxsendbuffer")}) options.send_buffer_max_size = 1000 * (*value);
 }
 
 } // namespace node
