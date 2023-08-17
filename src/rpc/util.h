@@ -423,7 +423,7 @@ public:
             return ArgValue<R>(i);
         } else {
             // Return everything else by reference.
-            return ArgRef<R>(i);
+            return ArgValue<const R&>(i);
         }
     }
     template <typename R>
@@ -457,8 +457,6 @@ private:
     mutable const JSONRPCRequest* m_req{nullptr}; // A pointer to the request for the duration of m_fun()
     template <typename R>
     R ArgValue(size_t i) const;
-    template <typename R>
-    const R& ArgRef(size_t i) const;
 };
 
 /**
