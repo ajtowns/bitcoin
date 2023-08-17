@@ -384,6 +384,12 @@ public:
     Mutex m_sock_mutex;
     Mutex cs_vRecv;
 
+    bool WantsToSend() const
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
+    {
+        return !vSendMsg.empty();
+    }
+
     uint64_t nRecvBytes GUARDED_BY(cs_vRecv){0};
 
     std::atomic<std::chrono::seconds> m_last_send{0s};
@@ -993,7 +999,7 @@ private:
     NodeId GetNewNodeId();
 
     /** (Try to) send data from node's vSendMsg. Returns (bytes_sent, data_left). */
-    std::pair<size_t, bool> SocketSendData(CNode& node) const EXCLUSIVE_LOCKS_REQUIRED(node.cs_vSend);
+    size_t SocketSendData(CNode& node) const EXCLUSIVE_LOCKS_REQUIRED(node.cs_vSend);
 
     void DumpAddresses();
 

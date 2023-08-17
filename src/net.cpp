@@ -827,7 +827,7 @@ void V1TransportSerializer::prepareForTransport(CSerializedNetMsg& msg, std::vec
     CVectorWriter{SER_NETWORK, INIT_PROTO_VERSION, header, 0, hdr};
 }
 
-std::pair<size_t, bool> CConnman::SocketSendData(CNode& node) const
+size_t CConnman::SocketSendData(CNode& node) const
 {
     auto it = node.vSendMsg.begin();
     size_t nSentSize = 0;
@@ -882,7 +882,7 @@ std::pair<size_t, bool> CConnman::SocketSendData(CNode& node) const
         assert(node.nSendSize == 0);
     }
     node.vSendMsg.erase(node.vSendMsg.begin(), it);
-    return {nSentSize, !node.vSendMsg.empty()};
+    return nSentSize;
 }
 
 /** Try to find a connection to evict when the node is full.
@@ -1218,7 +1218,7 @@ Sock::EventsPerSock CConnman::GenerateWaitSockets(Span<CNode* const> nodes)
 
     for (CNode* pnode : nodes) {
         bool select_recv = !pnode->fPauseRecv;
-        bool select_send = WITH_LOCK(pnode->cs_vSend, return !pnode->vSendMsg.empty());
+        bool select_send = WITH_LOCK(pnode->cs_vSend, return pnode->WantsToSend());
         if (!select_recv && !select_send) continue;
 
         LOCK(pnode->m_sock_mutex);
@@ -1289,7 +1289,13 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
 
         if (sendSet) {
             // Send data
-            auto [bytes_sent, data_left] = WITH_LOCK(pnode->cs_vSend, return SocketSendData(*pnode));
+            size_t bytes_sent;
+            bool data_left;
+            {
+                LOCK(pnode->cs_vSend);
+                bytes_sent = SocketSendData(*pnode);
+                data_left = pnode->WantsToSend();
+            }
             if (bytes_sent) {
                 RecordBytesSent(bytes_sent);
 
@@ -2866,7 +2872,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
     size_t nBytesSent = 0;
     {
         LOCK(pnode->cs_vSend);
-        bool optimisticSend(pnode->vSendMsg.empty());
+        const bool optimisticSend{!pnode->WantsToSend()};
 
         //log total amount of bytes per message type
         pnode->AccountForSentBytes(msg.m_type, nTotalSize);
@@ -2877,8 +2883,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
         if (nMessageSize) pnode->vSendMsg.push_back(std::move(msg.data));
 
         // If write queue empty, attempt "optimistic write"
-        bool data_left;
-        if (optimisticSend) std::tie(nBytesSent, data_left) = SocketSendData(*pnode);
+        if (optimisticSend) nBytesSent = SocketSendData(*pnode);
     }
     if (nBytesSent) RecordBytesSent(nBytesSent);
 }
