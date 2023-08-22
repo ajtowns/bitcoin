@@ -213,8 +213,6 @@ std::string BCLog::Logger::LogLevelToStr(BCLog::Level level)
         return "warning";
     case BCLog::Level::Error:
         return "error";
-    case BCLog::Level::None:
-        return "";
     }
     assert(false);
 }
@@ -305,8 +303,6 @@ static std::optional<BCLog::Level> GetLogLevel(const std::string& level_str)
         return BCLog::Level::Warning;
     } else if (level_str == "error") {
         return BCLog::Level::Error;
-    } else if (level_str == "none") {
-        return BCLog::Level::None;
     } else {
         return std::nullopt;
     }
@@ -394,20 +390,16 @@ static std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level)
 {
     const bool has_category{category != BCLog::LogFlags::NONE};
 
-    if (!has_category && level == BCLog::Level::None) return {};
-
     // If there is no category, Info is implied
     if (!has_category && level == BCLog::Level::Info) return {};
 
     std::string s{"["};
     if (has_category) {
         s += LogCategoryToStr(category);
-
-        // If there is a category, Debug is implied
-        if (level == BCLog::Level::Debug) level = BCLog::Level::None;
     }
 
-    if (level != BCLog::Level::None) {
+    if (!has_category || level != BCLog::Level::Debug) {
+        // If there is a category, Debug is implied, so don't add the category
         if (has_category) {
             // Only add separator if both flag and level are not NONE
             s += ":";

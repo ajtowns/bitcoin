@@ -77,7 +77,6 @@ namespace BCLog {
         Info,      // Default
         Warning,
         Error,
-        None, // Internal use only
     };
     constexpr auto DEFAULT_LOG_LEVEL{Level::Debug};
 
@@ -242,7 +241,7 @@ static inline void LogPrintf_(const std::string& logging_function, const std::st
 
 // Deprecated unconditional logging
 #define LogPrintf(...) LogInfo(__VA_ARGS__)
-#define LogPrintfCategory(category, ...) LogPrintLevel_(category, BCLog::Level::None, __VA_ARGS__)
+#define LogPrintfCategory(category, ...) LogPrintLevel_(category, BCLog::Level::Info, __VA_ARGS__)
 
 // Use a macro instead of a function for conditional logging to prevent
 // evaluating arguments when logging for the category is not enabled.
