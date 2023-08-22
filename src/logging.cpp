@@ -200,7 +200,7 @@ bool GetLogCategory(BCLog::LogFlags& flag, const std::string& str)
     return false;
 }
 
-std::string BCLog::Logger::LogLevelToStr(BCLog::Level level) const
+std::string BCLog::Logger::LogLevelToStr(BCLog::Level level)
 {
     switch (level) {
     case BCLog::Level::Trace:
@@ -339,7 +339,7 @@ static constexpr std::array<BCLog::Level, 3> LogLevelsList()
 std::string BCLog::Logger::LogLevelsString() const
 {
     const auto& levels = LogLevelsList();
-    return Join(std::vector<BCLog::Level>{levels.begin(), levels.end()}, ", ", [this](BCLog::Level level) { return LogLevelToStr(level); });
+    return Join(std::vector<BCLog::Level>{levels.begin(), levels.end()}, ", ", [](BCLog::Level level) { return LogLevelToStr(level); });
 }
 
 std::string BCLog::Logger::LogTimestampStr(const std::string& str)
@@ -390,29 +390,37 @@ namespace BCLog {
     }
 } // namespace BCLog
 
+static std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level)
+{
+    if (category != BCLog::LogFlags::NONE || level != BCLog::Level::None) {
+        std::string s{"["};
+
+        if (category != BCLog::LogFlags::NONE) {
+            s += LogCategoryToStr(category);
+        }
+
+        if (category != BCLog::LogFlags::NONE && level != BCLog::Level::None) {
+            // Only add separator if both flag and level are not NONE
+            s += ":";
+        }
+
+        if (level != BCLog::Level::None) {
+            s += BCLog::Logger::LogLevelToStr(level);
+        }
+
+        s += "] ";
+        return s;
+    }
+    return {};
+}
+
 void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, BCLog::LogFlags category, BCLog::Level level)
 {
     StdLockGuard scoped_lock(m_cs);
     std::string str_prefixed = LogEscapeMessage(str);
 
-    if ((category != LogFlags::NONE || level != Level::None) && m_started_new_line) {
-        std::string s{"["};
-
-        if (category != LogFlags::NONE) {
-            s += LogCategoryToStr(category);
-        }
-
-        if (category != LogFlags::NONE && level != Level::None) {
-            // Only add separator if both flag and level are not NONE
-            s += ":";
-        }
-
-        if (level != Level::None) {
-            s += LogLevelToStr(level);
-        }
-
-        s += "] ";
-        str_prefixed.insert(0, s);
+    if (m_started_new_line) {
+        str_prefixed.insert(0, GetLogPrefix(category, level));
     }
 
     if (m_log_sourcelocations && m_started_new_line) {

@@ -195,7 +195,7 @@ namespace BCLog {
         std::string LogLevelsString() const;
 
         //! Returns the string representation of a log level.
-        std::string LogLevelToStr(BCLog::Level level) const;
+        static std::string LogLevelToStr(BCLog::Level level);
 
         bool DefaultShrinkDebugFile() const;
     };
