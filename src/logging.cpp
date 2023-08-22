@@ -392,26 +392,31 @@ namespace BCLog {
 
 static std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level)
 {
-    if (category != BCLog::LogFlags::NONE || level != BCLog::Level::None) {
-        std::string s{"["};
+    const bool has_category{category != BCLog::LogFlags::NONE};
 
-        if (category != BCLog::LogFlags::NONE) {
-            s += LogCategoryToStr(category);
-        }
+    if (!has_category && level == BCLog::Level::None) return {};
 
-        if (category != BCLog::LogFlags::NONE && level != BCLog::Level::None) {
+    // If there is no category, Info is implied
+    if (!has_category && level == BCLog::Level::Info) return {};
+
+    std::string s{"["};
+    if (has_category) {
+        s += LogCategoryToStr(category);
+
+        // If there is a category, Debug is implied
+        if (level == BCLog::Level::Debug) level = BCLog::Level::None;
+    }
+
+    if (level != BCLog::Level::None) {
+        if (has_category) {
             // Only add separator if both flag and level are not NONE
             s += ":";
         }
-
-        if (level != BCLog::Level::None) {
-            s += BCLog::Logger::LogLevelToStr(level);
-        }
-
-        s += "] ";
-        return s;
+        s += BCLog::Logger::LogLevelToStr(level);
     }
-    return {};
+
+    s += "] ";
+    return s;
 }
 
 void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, BCLog::LogFlags category, BCLog::Level level)
