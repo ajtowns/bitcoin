@@ -7,6 +7,7 @@
 
 #include <chainparamsbase.h>
 #include <common/args.h>
+#include <common/argsregister.h>
 #include <consensus/params.h>
 #include <deploymentinfo.h>
 #include <logging.h>
@@ -21,32 +22,56 @@
 #include <stdexcept>
 #include <vector>
 
+
+namespace {
+class SigNetArgsRegister
+{
+public:
+    using T = CChainParams::SigNetOptions;
+
+    static inline void GetChallenge(std::optional<std::vector<uint8_t>>& challenge, const std::vector<std::string>& arg_challenges)
+    {
+        if (arg_challenges.size() != 1) {
+            throw std::runtime_error("-signetchallenge cannot be multiple values.");
+        }
+
+        const auto val{TryParseHex<uint8_t>(arg_challenges[0])};
+        if (!val) {
+            throw std::runtime_error(strprintf("-signetchallenge must be hex, not '%s'.", arg_challenges[0]));
+        }
+        challenge.emplace(*val);
+    }
+
+    template<typename C, typename Op>
+    static inline void Register(Op& op)
+    {
+        return C::Do(op,
+            C::Defn(&T::challenge, "-signetchallenge", "", GetChallenge,
+                    "Blocks must satisfy the given script to be considered valid (only for signet networks; defaults to the global default signet test network challenge)",
+                    ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION,
+                    OptionsCategory::CHAINPARAMS),
+            C::Defn(&T::seeds, "-signetseednode", "",
+                    "Specify a seed node for the signet network, in the hostname[:port] format, e.g. sig.net:1234 (may be used multiple times to specify multiple seed nodes; defaults to the global default signet test network seed node(s))",
+                    ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION,
+                    OptionsCategory::CHAINPARAMS)
+            );
+    }
+};
+} // anon namespace
+
 void SetupChainParamsOptions(ArgsManager& argsman)
 {
     argsman.AddArg("-fastprune", "Use smaller block files and lower minimum prune height for testing purposes", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-testactivationheight=name@height.", "Set the activation height of 'name' (segwit, bip34, dersig, cltv, csv). (regtest-only)", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-vbparams=deployment:start:end[:min_activation_height]", "Use given start/end times and min_activation_height for specified version bits deployment (regtest-only)", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
-    argsman.AddArg("-signetchallenge", "Blocks must satisfy the given script to be considered valid (only for signet networks; defaults to the global default signet test network challenge)", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::CHAINPARAMS);
-    argsman.AddArg("-signetseednode", "Specify a seed node for the signet network, in the hostname[:port] format, e.g. sig.net:1234 (may be used multiple times to specify multiple seed nodes; defaults to the global default signet test network seed node(s))", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::CHAINPARAMS);
+
+    ArgsRegister<SigNetArgsRegister>::Register(argsman);
 }
 
 
 void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& options)
 {
-    if (args.IsArgSet("-signetseednode")) {
-        options.seeds.emplace(args.GetArgs("-signetseednode"));
-    }
-    if (args.IsArgSet("-signetchallenge")) {
-        const auto signet_challenge = args.GetArgs("-signetchallenge");
-        if (signet_challenge.size() != 1) {
-            throw std::runtime_error("-signetchallenge cannot be multiple values.");
-        }
-        const auto val{TryParseHex<uint8_t>(signet_challenge[0])};
-        if (!val) {
-            throw std::runtime_error(strprintf("-signetchallenge must be hex, not '%s'.", signet_challenge[0]));
-        }
-        options.challenge.emplace(*val);
-    }
+    ArgsRegister<SigNetArgsRegister>::Update(args, options);
 }
 
 void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& options)
