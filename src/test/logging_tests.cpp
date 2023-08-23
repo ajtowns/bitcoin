@@ -211,6 +211,7 @@ BOOST_FIXTURE_TEST_CASE(logging_SeverityLevels, LogSetup)
         "[net:warning] foo5: bar5",
         "[net:error] foo7: bar7",
         "[all:info] foo8: bar8",
+        "foo9: bar9",
         "[warning] foo10: bar10",
     };
     std::ifstream file{tmp_log_path};
