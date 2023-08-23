@@ -136,6 +136,7 @@ BITCOIN_CORE_H = \
   clientversion.h \
   coins.h \
   common/args.h \
+  common/argsregister.h \
   common/bloom.h \
   common/init.h \
   common/run_command.h \

@@ -489,6 +489,28 @@ std::optional<int64_t> ArgsManager::GetIntArg(const std::string& strArg) const
     return SettingToInt(value);
 }
 
+template<>
+std::optional<std::string> ArgsManager::Get<std::string>(const std::string& arg) const
+{
+    return GetArg(arg);
+}
+
+template<>
+std::optional<bool> ArgsManager::Get<bool>(const std::string& arg) const
+{
+    return GetBoolArg(arg);
+}
+
+template<>
+std::optional<std::vector<std::string>> ArgsManager::Get<std::vector<std::string>>(const std::string& arg) const
+{
+    std::optional<std::vector<std::string>> result{GetArgs(arg)};
+    if (result.has_value() && result.value().empty()) {
+        result.reset();
+    }
+    return result;
+}
+
 std::optional<int64_t> SettingToInt(const common::SettingsValue& value)
 {
     if (value.isNull()) return std::nullopt;

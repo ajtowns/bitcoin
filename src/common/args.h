@@ -261,6 +261,15 @@ protected:
     bool IsArgNegated(const std::string& strArg) const;
 
     /**
+     * Return typed argument if present
+     *
+     * @param arg Argument to get (e.g. "-foo")
+     * @return command-line argument or nullopt
+     */
+    template<typename T>
+    std::optional<T> Get(const std::string& arg) const;
+
+    /**
      * Return string argument or default value
      *
      * @param strArg Argument to get (e.g. "-foo")
@@ -342,6 +351,17 @@ protected:
      * Add argument
      */
     void AddArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat);
+
+    /**
+     * Add typed argument
+     */
+    template<typename T>
+    void AddTypedArg(const std::string& name, const std::string& help, unsigned int flags, const OptionsCategory& cat)
+    {
+        // able to asssociate type information with argument directly in future,
+        // eg specialise AddTypedArg<std::vector<std::string>> to call AddArg(name, help, flags|ALLOW_LIST, cat).
+        AddArg(name, help, flags, cat);
+    }
 
     /**
      * Add subcommand
