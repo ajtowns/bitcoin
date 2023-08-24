@@ -65,6 +65,8 @@ class CSerializeMethodsTestOptions : public CSerializeMethodsTestSingle
 public:
     using CSerializeMethodsTestSingle::CSerializeMethodsTestSingle;
 
+    bool reordered{false};
+
     struct SerOptions
     {
          bool reorder{false};
@@ -77,6 +79,7 @@ public:
         } else {
             READWRITE(obj.intval, obj.boolval, obj.stringval, obj.charstrval, obj.txval);
         }
+        SER_READ(obj, obj.reordered = options.reorder);
     }
 };
 
@@ -266,6 +269,8 @@ BOOST_AUTO_TEST_CASE(class_methods)
     BOOST_CHECK(methodtest3 == methodtest4);
     BOOST_CHECK(methodtest4 == methodtest5);
     BOOST_CHECK(methodtest5 == methodtest6);
+    BOOST_CHECK_EQUAL(methodtest5.reordered, false);
+    BOOST_CHECK_EQUAL(methodtest6.reordered, true);
 
     CDataStream ss2{SER_DISK, PROTOCOL_VERSION};
     ss2 << intval << boolval << stringval << charstrval << txval;
