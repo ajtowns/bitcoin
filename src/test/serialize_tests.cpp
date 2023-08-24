@@ -69,7 +69,7 @@ public:
 
     struct SerOptions
     {
-         bool reorder{false};
+         NoDefaultInitializer<bool> reorder;
     };
 
     SERIALIZE_METHODS_OPT(CSerializeMethodsTestOptions, obj, options)
@@ -271,6 +271,9 @@ BOOST_AUTO_TEST_CASE(class_methods)
     BOOST_CHECK(methodtest5 == methodtest6);
     BOOST_CHECK_EQUAL(methodtest5.reordered, false);
     BOOST_CHECK_EQUAL(methodtest6.reordered, true);
+
+    // ss << methodtest5; // error: no matching member function for call to 'Serialize' .... note: candidate function template not viable: requires 2 arguments, but 1 was provided
+    // ss << seropt(methodtest5, {}); // error: no matching function for call to 'seropt' .... cannot convert initializer list argument to 'typename CSerializeMethodsTestOptions::SerOptions'
 
     CDataStream ss2{SER_DISK, PROTOCOL_VERSION};
     ss2 << intval << boolval << stringval << charstrval << txval;

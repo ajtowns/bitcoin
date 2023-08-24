@@ -238,6 +238,20 @@ struct UnserializableWithOptions
 };
 
 template<typename T>
+struct NoDefaultInitializer
+{
+    T value;
+    NoDefaultInitializer(T&& v) : value{std::move(v)} { }
+    NoDefaultInitializer(const T& v) : value{v} { }
+    NoDefaultInitializer() = delete;
+    NoDefaultInitializer(NoDefaultInitializer&&) = default;
+    NoDefaultInitializer(const NoDefaultInitializer&) = default;
+    operator T&() { return value; }
+    operator const T&() const { return value; }
+    T& operator=(const T& v) { value = v; return value; }
+};
+
+template<typename T>
 auto seropt(T& obj, typename T::SerOptions&& opts) { return UnserializableWithOptions<T, typename T::SerOptions>(obj, std::move(opts)); }
 
 template<typename T>
