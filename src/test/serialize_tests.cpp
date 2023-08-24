@@ -59,6 +59,28 @@ public:
     }
 };
 
+
+class CSerializeMethodsTestOptions : public CSerializeMethodsTestSingle
+{
+public:
+    using CSerializeMethodsTestSingle::CSerializeMethodsTestSingle;
+
+    struct SerOptions
+    {
+         bool reorder{false};
+    };
+
+    SERIALIZE_METHODS_OPT(CSerializeMethodsTestOptions, obj, options)
+    {
+        if (options.reorder) {
+            READWRITE(obj.txval, obj.intval, obj.boolval, obj.stringval, obj.charstrval);
+        } else {
+            READWRITE(obj.intval, obj.boolval, obj.stringval, obj.charstrval, obj.txval);
+        }
+    }
+};
+
+
 BOOST_AUTO_TEST_CASE(sizes)
 {
     BOOST_CHECK_EQUAL(sizeof(unsigned char), GetSerializeSize((unsigned char)0, 0));
@@ -227,15 +249,23 @@ BOOST_AUTO_TEST_CASE(class_methods)
     CSerializeMethodsTestMany methodtest2(intval, boolval, stringval, charstrval, tx_ref);
     CSerializeMethodsTestSingle methodtest3;
     CSerializeMethodsTestMany methodtest4;
+    CSerializeMethodsTestOptions methodtest5;
+    CSerializeMethodsTestOptions methodtest6;
     CDataStream ss(SER_DISK, PROTOCOL_VERSION);
     BOOST_CHECK(methodtest1 == methodtest2);
     ss << methodtest1;
     ss >> methodtest4;
     ss << methodtest2;
     ss >> methodtest3;
+    ss << methodtest1;
+    ss >> seropt(methodtest5, {.reorder=false});
+    ss << seropt(methodtest5, {.reorder=true});
+    ss >> seropt(methodtest6, {.reorder=true});
     BOOST_CHECK(methodtest1 == methodtest2);
     BOOST_CHECK(methodtest2 == methodtest3);
     BOOST_CHECK(methodtest3 == methodtest4);
+    BOOST_CHECK(methodtest4 == methodtest5);
+    BOOST_CHECK(methodtest5 == methodtest6);
 
     CDataStream ss2{SER_DISK, PROTOCOL_VERSION};
     ss2 << intval << boolval << stringval << charstrval << txval;

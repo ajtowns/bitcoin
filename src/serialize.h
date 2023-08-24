@@ -166,6 +166,14 @@ template<typename X> const X& ReadWriteAsHelper(const X& x) { return x; }
     template<typename Stream, typename Type, typename Operation> \
     static inline void SerializationOps(Type& obj, Stream& s, Operation ser_action) \
 
+#define FORMATTER_METHODS_OPT(cls, obj, opts) \
+    template<typename Stream> \
+    static void Ser(Stream& s, const cls& obj, const SerOptions& options) { SerializationOps(obj, s, options, CSerActionSerialize()); } \
+    template<typename Stream> \
+    static void Unser(Stream& s, cls& obj, const SerOptions& options) { SerializationOps(obj, s, options, CSerActionUnserialize()); } \
+    template<typename Stream, typename Type, typename Operation> \
+    static inline void SerializationOps(Type& obj, Stream& s, const SerOptions& opts, Operation ser_action) \
+
 /**
  * Implement the Serialize and Unserialize methods by delegating to a single templated
  * static method that takes the to-be-(de)serialized object as a parameter. This approach
@@ -187,6 +195,53 @@ template<typename X> const X& ReadWriteAsHelper(const X& x) { return x; }
         Unser(s, *this);                                                            \
     }                                                                               \
     FORMATTER_METHODS(cls, obj)
+
+/* Variation that supports options */
+#define SERIALIZE_METHODS_OPT(cls, obj, opts)                                       \
+    template<typename Stream>                                                       \
+    void Serialize(Stream& s, const SerOptions& options) const                           \
+    {                                                                               \
+        static_assert(std::is_same<const cls&, decltype(*this)>::value, "Serialize type mismatch"); \
+        Ser(s, *this, std::move(options));                                          \
+    }                                                                               \
+    template<typename Stream>                                                       \
+    void Unserialize(Stream& s, const SerOptions& options)                               \
+    {                                                                               \
+        static_assert(std::is_same<cls&, decltype(*this)>::value, "Unserialize type mismatch"); \
+        Unser(s, *this, std::move(options));                                        \
+    }                                                                               \
+    FORMATTER_METHODS_OPT(cls, obj, opts)
+
+template<typename T, typename O>
+struct SerializableWithOptions
+{
+    const T& m_obj;
+    O m_opts;
+    SerializableWithOptions(const T& obj, O&& opts) : m_obj{obj}, m_opts{std::move(opts)} { }
+
+    template<typename Stream>
+    void Serialize(Stream& s) const { m_obj.Serialize(s, m_opts); }
+};
+
+template<typename T, typename O>
+struct UnserializableWithOptions
+{
+    T& m_obj;
+    O m_opts;
+    UnserializableWithOptions(T& obj, O&& opts) : m_obj{obj}, m_opts{std::move(opts)} { }
+
+    template<typename Stream>
+    void Serialize(Stream& s) const { m_obj.Serialize(s, m_opts); }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) { m_obj.Unserialize(s, m_opts); }
+};
+
+template<typename T>
+auto seropt(T& obj, typename T::SerOptions&& opts) { return UnserializableWithOptions<T, typename T::SerOptions>(obj, std::move(opts)); }
+
+template<typename T>
+auto seropt(const T& obj, typename T::SerOptions&& opts) { return SerializableWithOptions<T, typename T::SerOptions>(obj, std::move(opts)); }
 
 // clang-format off
 #ifndef CHAR_EQUALS_INT8
