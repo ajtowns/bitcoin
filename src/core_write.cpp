@@ -130,7 +130,12 @@ std::string ScriptToAsmStr(const CScript& script, const bool fAttemptSighashDeco
                     }
                     str += HexStr(vch) + strSigHashDecode;
                 } else {
-                    str += HexStr(vch);
+                    auto hex = HexStr(vch);
+                    if (std::all_of(hex.begin(), hex.end(), ::IsDigit)) {
+                        // ambiguous between decimal/hex, add a prefix
+                        str += "0x";
+                    }
+                    str += hex;
                 }
             }
         } else {
