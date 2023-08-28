@@ -78,7 +78,6 @@ namespace BCLog {
         Warning,
         Error,
     };
-    constexpr auto DEFAULT_LOG_LEVEL{Level::Debug};
 
     class Logger
     {
@@ -101,7 +100,7 @@ namespace BCLog {
 
         //! If there is no category-specific log level, all logs with a severity
         //! level lower than `m_log_level` will be ignored.
-        std::atomic<Level> m_log_level{DEFAULT_LOG_LEVEL};
+        std::atomic<Level> m_log_level{Level::Debug};
 
         /** Log categories bitfield. */
         std::atomic<uint32_t> m_categories{0};
@@ -165,6 +164,7 @@ namespace BCLog {
             StdLockGuard scoped_lock(m_cs);
             m_category_log_levels = levels;
         }
+        void SetCategoryLogLevel(LogFlags flag, Level level);
         bool SetCategoryLogLevel(const std::string& category_str, const std::string& level_str);
 
         Level LogLevel() const { return m_log_level.load(); }
@@ -175,6 +175,8 @@ namespace BCLog {
 
         void EnableCategory(LogFlags flag);
         bool EnableCategory(const std::string& str);
+        void TraceCategory(LogFlags flag);
+        bool TraceCategory(const std::string& str);
         void DisableCategory(LogFlags flag);
         bool DisableCategory(const std::string& str);
 
