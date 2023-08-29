@@ -120,24 +120,12 @@ void BCLog::Logger::DisableLogging()
     StartLogging();
 }
 
-void BCLog::Logger::EnableCategory(BCLog::LogFlags flag)
-{
-    m_categories |= flag;
-    SetCategoryLogLevel(flag, Level::Debug);
-}
-
 bool BCLog::Logger::EnableCategory(std::string_view str)
 {
     BCLog::LogFlags flag;
     if (!GetLogCategory(flag, str)) return false;
     EnableCategory(flag);
     return true;
-}
-
-void BCLog::Logger::TraceCategory(BCLog::LogFlags flag)
-{
-    m_categories |= flag;
-    SetCategoryLogLevel(flag, Level::Trace);
 }
 
 bool BCLog::Logger::TraceCategory(std::string_view str)
@@ -148,35 +136,12 @@ bool BCLog::Logger::TraceCategory(std::string_view str)
     return true;
 }
 
-void BCLog::Logger::DisableCategory(BCLog::LogFlags flag)
-{
-    m_categories &= ~flag;
-}
-
 bool BCLog::Logger::DisableCategory(std::string_view str)
 {
     BCLog::LogFlags flag;
     if (!GetLogCategory(flag, str)) return false;
     DisableCategory(flag);
     return true;
-}
-
-bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
-{
-    return (m_categories.load(std::memory_order_relaxed) & category) != 0;
-}
-
-bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level level) const
-{
-    // Log messages at Info, Warning and Error level unconditionally, so that
-    // important troubleshooting information doesn't get lost.
-    if (level >= BCLog::Level::Info) return true;
-
-    if (!WillLogCategory(category)) return false;
-
-    STDLOCK(m_cs);
-    const auto it{m_category_log_levels.find(category)};
-    return level >= (it == m_category_log_levels.end() ? LogLevel() : it->second);
 }
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const
@@ -291,20 +256,17 @@ static std::optional<BCLog::Level> GetLogLevel(std::string_view level_str)
 
 std::vector<BCLog::CategoryInfo> BCLog::Logger::LogCategoriesInfo() const
 {
-    STDLOCK(m_cs);
     std::vector<CategoryInfo> ret;
     ret.reserve(LOG_CATEGORIES_BY_STR.size());
+    CategoryMask debug{m_categories.load()};
+    CategoryMask trace{m_trace_categories.load()};
 
-    const BCLog::Level base = LogLevel();
     for (const auto& [category, flag] : LOG_CATEGORIES_BY_STR) {
-        BCLog::Level level = base;
-        if (!WillLogCategory(flag)) {
-            level = BCLog::Level::Info;
-        } else {
-            const auto it{m_category_log_levels.find(flag)};
-            if (it != m_category_log_levels.end()) {
-                level = it->second;
-            }
+        BCLog::Level level{BCLog::Level::Info};
+        if (trace & flag) {
+            level = BCLog::Level::Trace;
+        } else if (debug & flag) {
+            level = BCLog::Level::Debug;
         }
         ret.push_back(CategoryInfo{.category = category, .level = level});
     }
@@ -614,22 +576,23 @@ bool BCLog::LogRateLimiter::Stats::Consume(uint64_t bytes)
     return true;
 }
 
-bool BCLog::Logger::SetLogLevel(std::string_view level_str)
-{
-    const auto level = GetLogLevel(level_str);
-    if (!level.has_value() || level.value() > MAX_USER_SETABLE_SEVERITY_LEVEL) return false;
-    m_log_level = level.value();
-    return true;
-}
-
 void BCLog::Logger::SetCategoryLogLevel(BCLog::LogFlags flag, BCLog::Level level)
 {
-    STDLOCK(m_cs);
-    if (flag == LogFlags::ALL) {
-        SetLogLevel(level);
-        m_category_log_levels.clear();
-    } else {
-        m_category_log_levels[flag] = level;
+    switch (level) {
+    case BCLog::Level::Error:
+    case BCLog::Level::Warning:
+    case BCLog::Level::Info:
+        m_trace_categories &= ~flag;
+        m_categories &= ~flag;
+        break;
+    case BCLog::Level::Debug:
+        m_categories |= flag;
+        m_trace_categories &= ~flag;
+        break;
+    case BCLog::Level::Trace:
+        m_categories |= flag;
+        m_trace_categories |= flag;
+        break;
     }
 }
 
