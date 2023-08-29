@@ -32,20 +32,6 @@ enum class ThresholdState : uint8_t;
 // will either be nullptr or a block with (height + 1) % Period() == 0.
 typedef std::map<const CBlockIndex*, ThresholdState> ThresholdConditionCache;
 
-/** Display status of an in-progress BIP9 softfork */
-struct BIP9Stats {
-    /** Length of blocks of the BIP9 signalling period */
-    uint32_t period{0};
-    /** Number of blocks with the version bit set required to activate the softfork */
-    uint32_t threshold{0};
-    /** Number of blocks elapsed since the beginning of the current period */
-    uint32_t elapsed{0};
-    /** Number of blocks with the version bit set since the beginning of the current period */
-    uint32_t count{0};
-    /** False if there are not enough blocks left in this period to pass activation threshold */
-    bool possible{false};
-};
-
 /** Detailed status of an enabled BIP9 deployment */
 struct BIP9Info {
     /** Height at which current_state started */
@@ -54,10 +40,12 @@ struct BIP9Info {
     std::string current_state{};
     /** String representing the next block's state */
     std::string next_state{};
-    /** For states where signalling is applicable, information about the signalling */
-    std::optional<BIP9Stats> stats;
-    /** Which blocks signalled; empty if signalling is not applicable */
-    std::vector<bool> signalling_blocks;
+    /** State period */
+    uint32_t period;
+    /** Signal for activation */
+    std::optional<int32_t> signal_activate;
+    /** Signal for abandonment */
+    std::optional<int32_t> signal_abandon;
     /** Height at which the deployment is active, if known. May be in the future. */
     std::optional<int> active_since;
 };
@@ -95,6 +83,9 @@ public:
      *  Returns a vector containing the bit number used for signalling and a bool
      *  indicating the deployment is likely to be ACTIVE, rather than merely LOCKED_IN. */
     std::vector<std::pair<int,bool>> CheckUnknownActivations(const CBlockIndex* pindex, const CChainParams& chainparams) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Report BINANA details, based on nVersion signalling standard */
+    bool BINANA(int& year, int& number, int& revision, const Consensus::Params& params, Consensus::DeploymentPos pos) const;
 
     void Clear() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 };

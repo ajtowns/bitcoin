@@ -46,7 +46,7 @@ inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::Buried
 inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::DeploymentPos dep)
 {
     assert(Consensus::ValidDeployment(dep));
-    return params.vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+    return params.vDeployments[dep].nStartTime != Consensus::HereticalDeployment::NEVER_ACTIVE;
 }
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H

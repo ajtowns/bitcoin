@@ -39,7 +39,7 @@ class AssumeutxoTest(BitcoinTestFramework):
         self.num_nodes = 3
         self.rpc_timeout = 120
         self.extra_args = [
-            [],
+            ["-blockversion=805306368"],
             [],
             [],
         ]
