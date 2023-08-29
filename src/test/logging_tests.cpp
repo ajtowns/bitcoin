@@ -21,8 +21,7 @@ BOOST_FIXTURE_TEST_SUITE(logging_tests, BasicTestingSetup)
 
 static void ResetLogger()
 {
-    LogInstance().SetLogLevel(BCLog::Level::Debug);
-    LogInstance().SetCategoryLogLevel({});
+    LogInstance().ResetLogLevels(0,0);
 }
 
 struct LogSetup : public BasicTestingSetup {
@@ -33,8 +32,8 @@ struct LogSetup : public BasicTestingSetup {
     bool prev_log_timestamps;
     bool prev_log_threadnames;
     bool prev_log_sourcelocations;
-    std::unordered_map<BCLog::LogFlags, BCLog::Level> prev_category_levels;
-    BCLog::Level prev_log_level;
+    uint32_t prev_category_mask;
+    uint32_t prev_category_trace_mask;
 
     LogSetup() : prev_log_path{LogInstance().m_file_path},
                  tmp_log_path{m_args.GetDataDirBase() / "tmp_debug.log"},
@@ -43,8 +42,8 @@ struct LogSetup : public BasicTestingSetup {
                  prev_log_timestamps{LogInstance().m_log_timestamps},
                  prev_log_threadnames{LogInstance().m_log_threadnames},
                  prev_log_sourcelocations{LogInstance().m_log_sourcelocations},
-                 prev_category_levels{LogInstance().CategoryLevels()},
-                 prev_log_level{LogInstance().LogLevel()}
+                 prev_category_mask{LogInstance().GetCategoryMask()},
+                 prev_category_trace_mask{LogInstance().GetCategoryTraceMask()}
     {
         LogInstance().m_file_path = tmp_log_path;
         LogInstance().m_reopen_file = true;
@@ -67,8 +66,7 @@ struct LogSetup : public BasicTestingSetup {
         LogInstance().m_log_timestamps = prev_log_timestamps;
         LogInstance().m_log_threadnames = prev_log_threadnames;
         LogInstance().m_log_sourcelocations = prev_log_sourcelocations;
-        LogInstance().SetLogLevel(prev_log_level);
-        LogInstance().SetCategoryLogLevel(prev_category_levels);
+        LogInstance().ResetLogLevels(prev_category_mask, prev_category_trace_mask);
     }
 };
 
@@ -190,7 +188,6 @@ BOOST_FIXTURE_TEST_CASE(logging_SeverityLevels, LogSetup)
 {
     LogInstance().EnableCategory(BCLog::LogFlags::ALL);
 
-    LogInstance().SetLogLevel(BCLog::Level::Debug);
     LogInstance().SetCategoryLogLevel(/*category_str=*/"net", /*level_str=*/"info");
 
     // Global log level
@@ -238,7 +235,9 @@ BOOST_FIXTURE_TEST_CASE(logging_Conf, LogSetup)
 
         auto result = init::SetLoggingCategories(args);
         BOOST_REQUIRE(result);
-        BOOST_CHECK_EQUAL(LogInstance().LogLevel(), BCLog::Level::Debug);
+
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryMask(), BCLog::LogFlags::NONE);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryTraceMask(), BCLog::LogFlags::NONE);
     }
 
     // All traced categories
@@ -253,10 +252,8 @@ BOOST_FIXTURE_TEST_CASE(logging_Conf, LogSetup)
         auto result = init::SetLoggingCategories(args);
         BOOST_REQUIRE(result);
 
-        BOOST_CHECK_EQUAL(LogInstance().LogLevel(), BCLog::Level::Trace);
-
-        const auto& category_levels{LogInstance().CategoryLevels()};
-        BOOST_CHECK_EQUAL(category_levels.size(), 0);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryMask(), BCLog::LogFlags::ALL);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryTraceMask(), BCLog::LogFlags::ALL);
     }
 
     // Specific traced categories
@@ -271,22 +268,9 @@ BOOST_FIXTURE_TEST_CASE(logging_Conf, LogSetup)
 
         auto result = init::SetLoggingCategories(args);
         BOOST_REQUIRE(result);
-        BOOST_CHECK_EQUAL(LogInstance().LogLevel(), BCLog::Level::Debug);
 
-        const auto& category_levels{LogInstance().CategoryLevels()};
-        BOOST_CHECK_EQUAL(category_levels.size(), 3);
-
-        const auto net_it{category_levels.find(BCLog::LogFlags::NET)};
-        BOOST_CHECK(net_it != category_levels.end());
-        BOOST_CHECK_EQUAL(net_it->second, BCLog::Level::Trace);
-
-        const auto http_it{category_levels.find(BCLog::LogFlags::HTTP)};
-        BOOST_CHECK(http_it != category_levels.end());
-        BOOST_CHECK_EQUAL(http_it->second, BCLog::Level::Trace);
-
-        const auto mempool_it{category_levels.find(BCLog::LogFlags::MEMPOOL)};
-        BOOST_CHECK(mempool_it != category_levels.end());
-        BOOST_CHECK_EQUAL(mempool_it->second, BCLog::Level::Debug);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryMask(), BCLog::LogFlags::NET | BCLog::LogFlags::HTTP | BCLog::LogFlags::MEMPOOL);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryTraceMask(), BCLog::LogFlags::NET | BCLog::LogFlags::HTTP);
     }
 }
 

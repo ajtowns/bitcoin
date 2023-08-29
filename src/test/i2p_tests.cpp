@@ -20,8 +20,9 @@ BOOST_FIXTURE_TEST_SUITE(i2p_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(unlimited_recv)
 {
-    const auto prev_log_level{LogInstance().LogLevel()};
-    LogInstance().SetLogLevel(BCLog::Level::Trace);
+    const auto prev_log_mask{LogInstance().GetCategoryMask()};
+    const auto prev_log_trace_mask{LogInstance().GetCategoryTraceMask()};
+    LogInstance().TraceCategory(BCLog::LogFlags::ALL);
     auto CreateSockOrig = CreateSock;
 
     // Mock CreateSock() to create MockSock.
@@ -42,7 +43,7 @@ BOOST_AUTO_TEST_CASE(unlimited_recv)
     }
 
     CreateSock = CreateSockOrig;
-    LogInstance().SetLogLevel(prev_log_level);
+    LogInstance().ResetLogLevels(prev_log_mask, prev_log_trace_mask);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

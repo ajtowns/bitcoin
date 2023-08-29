@@ -93,12 +93,6 @@ void BCLog::Logger::DisconnectTestLogger()
     m_print_callbacks.clear();
 }
 
-void BCLog::Logger::EnableCategory(BCLog::LogFlags flag)
-{
-    m_categories |= flag;
-    SetCategoryLogLevel(flag, Level::Debug);
-}
-
 bool BCLog::Logger::EnableCategory(const std::string& str)
 {
     BCLog::LogFlags flag;
@@ -107,23 +101,12 @@ bool BCLog::Logger::EnableCategory(const std::string& str)
     return true;
 }
 
-void BCLog::Logger::TraceCategory(BCLog::LogFlags flag)
-{
-    m_categories |= flag;
-    SetCategoryLogLevel(flag, Level::Trace);
-}
-
 bool BCLog::Logger::TraceCategory(const std::string& str)
 {
     BCLog::LogFlags flag;
     if (!GetLogCategory(flag, str)) return false;
     TraceCategory(flag);
     return true;
-}
-
-void BCLog::Logger::DisableCategory(BCLog::LogFlags flag)
-{
-    m_categories &= ~flag;
 }
 
 bool BCLog::Logger::DisableCategory(const std::string& str)
@@ -141,15 +124,17 @@ bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
 
 bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level level) const
 {
-    // Log messages at Info, Warning and Error level unconditionally, so that
-    // important troubleshooting information doesn't get lost.
-    if (level >= BCLog::Level::Info) return true;
-
-    if (!WillLogCategory(category)) return false;
-
-    StdLockGuard scoped_lock(m_cs);
-    const auto it{m_category_log_levels.find(category)};
-    return level >= (it == m_category_log_levels.end() ? LogLevel() : it->second);
+    switch (level) {
+    case BCLog::Level::Error:
+    case BCLog::Level::Warning:
+    case BCLog::Level::Info:
+        break;
+    case BCLog::Level::Debug:
+        return WillLogCategory(category);
+    case BCLog::Level::Trace:
+        return (m_trace_categories.load(std::memory_order_relaxed) & category) != 0;
+    }
+    return true;
 }
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const
@@ -520,22 +505,23 @@ void BCLog::Logger::ShrinkDebugFile()
         fclose(file);
 }
 
-bool BCLog::Logger::SetLogLevel(const std::string& level_str)
-{
-    const auto level = GetLogLevel(level_str);
-    if (!level.has_value() || level.value() > MAX_USER_SETABLE_SEVERITY_LEVEL) return false;
-    m_log_level = level.value();
-    return true;
-}
-
 void BCLog::Logger::SetCategoryLogLevel(BCLog::LogFlags flag, BCLog::Level level)
 {
-    StdLockGuard scoped_lock(m_cs);
-    if (flag == LogFlags::ALL) {
-        SetLogLevel(level);
-        m_category_log_levels.clear();
-    } else {
-        m_category_log_levels[flag] = level;
+    switch (level) {
+    case BCLog::Level::Error:
+    case BCLog::Level::Warning:
+    case BCLog::Level::Info:
+        m_categories &= ~flag;
+        m_trace_categories &= ~flag;
+        break;
+    case BCLog::Level::Debug:
+        m_categories |= flag;
+        m_trace_categories &= ~flag;
+        break;
+    case BCLog::Level::Trace:
+        m_categories |= flag;
+        m_trace_categories |= flag;
+        break;
     }
 }
 

@@ -17,7 +17,6 @@
 #include <list>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 static const bool DEFAULT_LOGTIMEMICROS = false;
@@ -95,15 +94,10 @@ namespace BCLog {
          */
         std::atomic_bool m_started_new_line{true};
 
-        //! Category-specific log level. Overrides `m_log_level`.
-        std::unordered_map<LogFlags, Level> m_category_log_levels GUARDED_BY(m_cs);
-
-        //! If there is no category-specific log level, all logs with a severity
-        //! level lower than `m_log_level` will be ignored.
-        std::atomic<Level> m_log_level{Level::Debug};
-
         /** Log categories bitfield. */
         std::atomic<uint32_t> m_categories{0};
+        /** Tracing-enabled categories bitfield. */
+        std::atomic<uint32_t> m_trace_categories{0};
 
         std::string LogTimestampStr(const std::string& str);
 
@@ -154,30 +148,21 @@ namespace BCLog {
 
         void ShrinkDebugFile();
 
-        std::unordered_map<LogFlags, Level> CategoryLevels() const
-        {
-            StdLockGuard scoped_lock(m_cs);
-            return m_category_log_levels;
-        }
-        void SetCategoryLogLevel(const std::unordered_map<LogFlags, Level>& levels)
-        {
-            StdLockGuard scoped_lock(m_cs);
-            m_category_log_levels = levels;
-        }
         void SetCategoryLogLevel(LogFlags flag, Level level);
         bool SetCategoryLogLevel(const std::string& category_str, const std::string& level_str);
 
-        Level LogLevel() const { return m_log_level.load(); }
-        void SetLogLevel(Level level) { m_log_level = level; }
-        bool SetLogLevel(const std::string& level);
-
         uint32_t GetCategoryMask() const { return m_categories.load(); }
+        uint32_t GetCategoryTraceMask() const { return m_trace_categories.load(); }
+        void ResetLogLevels(uint32_t catmask, uint32_t tracemask) {
+            m_categories = catmask;
+            m_trace_categories = (catmask | tracemask);
+        }
 
-        void EnableCategory(LogFlags flag);
+        void EnableCategory(LogFlags flag) { SetCategoryLogLevel(flag, Level::Debug); }
         bool EnableCategory(const std::string& str);
-        void TraceCategory(LogFlags flag);
+        void TraceCategory(LogFlags flag) { SetCategoryLogLevel(flag, Level::Trace); }
         bool TraceCategory(const std::string& str);
-        void DisableCategory(LogFlags flag);
+        void DisableCategory(LogFlags flag) { SetCategoryLogLevel(flag, Level::Info); }
         bool DisableCategory(const std::string& str);
 
         bool WillLogCategory(LogFlags category) const;
