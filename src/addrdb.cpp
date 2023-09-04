@@ -174,15 +174,13 @@ bool CBanDB::Read(banmap_t& banSet)
 bool DumpPeerAddresses(const ArgsManager& args, const AddrMan& addr)
 {
     const auto pathAddr = args.GetDataDirNet() / "peers.dat";
-    return SerializeFileDB("peers", pathAddr, WithParams(CAddress::V1_DISK, addr));
+    return SerializeFileDB("peers", pathAddr, addr);
 }
 
-template <typename Addr>
-void ReadFromStreamUnitTests(Addr&& addr, DataStream& ssPeers)
+void ReadFromStream(AddrMan& addr, DataStream& ssPeers)
 {
     DeserializeDB(ssPeers, addr, false);
 }
-template void ReadFromStreamUnitTests(ParamsWrapper<CAddress::SerParams, AddrMan&>&&, DataStream&);
 
 util::Result<std::unique_ptr<AddrMan>> LoadAddrman(const NetGroupManager& netgroupman, const ArgsManager& args)
 {
@@ -192,7 +190,7 @@ util::Result<std::unique_ptr<AddrMan>> LoadAddrman(const NetGroupManager& netgro
     const auto start{SteadyClock::now()};
     const auto path_addr{args.GetDataDirNet() / "peers.dat"};
     try {
-        DeserializeFileDB(path_addr, WithParams(CAddress::V1_DISK, *addrman));
+        DeserializeFileDB(path_addr, *addrman);
         LogPrintf("Loaded %i addresses from peers.dat  %dms\n", addrman->Size(), Ticks<std::chrono::milliseconds>(SteadyClock::now() - start));
     } catch (const DbNotFoundError&) {
         // Addrman can be in an inconsistent state after failure, reset it

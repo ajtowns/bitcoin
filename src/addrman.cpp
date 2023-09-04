@@ -171,8 +171,7 @@ void AddrManImpl::Serialize(Stream& s_) const
      */
 
     // Always serialize in the latest version (FILE_FORMAT).
-    const CAddress::SerParams ser_params{{CNetAddr::Encoding::V2}, s_.GetParams().fmt};
-    ParamsStream s{ser_params, s_};
+    ParamsStream s{CAddress::V2_DISK, s_};
 
     s << static_cast<uint8_t>(FILE_FORMAT);
 
@@ -236,14 +235,7 @@ void AddrManImpl::Unserialize(Stream& s_)
     Format format;
     s_ >> Using<CustomUintFormatter<1>>(format);
 
-    auto stream_enc{CNetAddr::Encoding::V1};
-    if (format >= Format::V3_BIP155) {
-        // Set V2 so that the CNetAddr and CAddress
-        // unserialize methods know that an address in addrv2 format is coming.
-        stream_enc = CNetAddr::Encoding::V2;
-    }
-
-    const CAddress::SerParams ser_params{{stream_enc}, s_.GetParams().fmt};
+    const auto ser_params = (format >= Format::V3_BIP155 ? CAddress::V2_DISK : CAddress::V1_DISK);
     ParamsStream s{ser_params, s_};
 
     uint8_t compat;
@@ -1250,12 +1242,12 @@ void AddrMan::Unserialize(Stream& s_)
 }
 
 // explicit instantiation
-template void AddrMan::Serialize(ParamsStream<CAddress::SerParams, HashedSourceWriter<AutoFile>>&) const;
-template void AddrMan::Serialize(ParamsStream<CAddress::SerParams, DataStream>&) const;
-template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, AutoFile>&);
-template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, HashVerifier<AutoFile>>&);
-template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, DataStream>&);
-template void AddrMan::Unserialize(ParamsStream<CAddress::SerParams, HashVerifier<DataStream>>&);
+template void AddrMan::Serialize(HashedSourceWriter<AutoFile>&) const;
+template void AddrMan::Serialize(DataStream&) const;
+template void AddrMan::Unserialize(AutoFile&);
+template void AddrMan::Unserialize(HashVerifier<AutoFile>&);
+template void AddrMan::Unserialize(DataStream&);
+template void AddrMan::Unserialize(HashVerifier<DataStream>&);
 
 size_t AddrMan::Size(std::optional<Network> net, std::optional<bool> in_new) const
 {

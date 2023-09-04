@@ -53,7 +53,7 @@ FUZZ_TARGET(data_stream_addr_man, .init = initialize_addrman)
     NetGroupManager netgroupman{ConsumeNetGroupManager(fuzzed_data_provider)};
     AddrMan addr_man(netgroupman, /*deterministic=*/false, GetCheckRatio());
     try {
-        ReadFromStreamUnitTests(WithParams(CAddress::V1_DISK, addr_man), data_stream);
+        ReadFromStream(addr_man, data_stream);
     } catch (const std::exception&) {
     }
 }
@@ -242,9 +242,8 @@ FUZZ_TARGET(addrman, .init = initialize_addrman)
     if (fuzzed_data_provider.ConsumeBool()) {
         const std::vector<uint8_t> serialized_data{ConsumeRandomLengthByteVector(fuzzed_data_provider)};
         DataStream ds{serialized_data};
-        const bool ser_v2(fuzzed_data_provider.ConsumeIntegral<int32_t>() & 0x20000000);
         try {
-            ds >> WithParams(ser_v2 ? CAddress::V2_DISK : CAddress::V1_DISK, *addr_man_ptr);
+            ds >> *addr_man_ptr;
         } catch (const std::ios_base::failure&) {
             addr_man_ptr = std::make_unique<AddrManDeterministic>(netgroupman, fuzzed_data_provider);
         }
@@ -295,7 +294,7 @@ FUZZ_TARGET(addrman, .init = initialize_addrman)
     }
     (void)const_addr_man.Size(network, in_new);
     DataStream data_stream{};
-    data_stream << WithParams(CAddress::V1_NETWORK, const_addr_man);
+    data_stream << const_addr_man;
 }
 
 // Check that serialize followed by unserialize produces the same addrman.
@@ -311,7 +310,7 @@ FUZZ_TARGET(addrman_serdeser, .init = initialize_addrman)
     DataStream data_stream{};
 
     FillAddrman(addr_man1, fuzzed_data_provider);
-    data_stream << WithParams(CAddress::V1_NETWORK, addr_man1);
-    data_stream >> WithParams(CAddress::V1_NETWORK, addr_man2);
+    data_stream << addr_man1;
+    data_stream >> addr_man2;
     assert(addr_man1 == addr_man2);
 }
