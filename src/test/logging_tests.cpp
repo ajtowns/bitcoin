@@ -80,10 +80,10 @@ BOOST_AUTO_TEST_CASE(logging_timer)
 BOOST_FIXTURE_TEST_CASE(logging_LogPrintf_, LogSetup)
 {
     LogInstance().m_log_sourcelocations = true;
-    LogPrintf_("fn1", "src1", 1, BCLog::NET, BCLog::Level::Debug, "foo1: %s\n", "bar1");
-    LogPrintf_("fn2", "src2", 2, BCLog::NET, BCLog::Level::Info, "foo2: %s\n", "bar2");
-    LogPrintf_("fn3", "src3", 3, BCLog::NONE, BCLog::Level::Debug, "foo3: %s\n", "bar3");
-    LogPrintf_("fn4", "src4", 4, BCLog::NONE, BCLog::Level::Info, "foo4: %s\n", "bar4");
+    LogPrintf_("fn1", "src1", 1, LogInstance().GetLogPrefix(BCLog::NET, BCLog::Level::Debug), "foo1: %s\n", "bar1");
+    LogPrintf_("fn2", "src2", 2, LogInstance().GetLogPrefix(BCLog::NET, BCLog::Level::Info), "foo2: %s\n", "bar2");
+    LogPrintf_("fn3", "src3", 3, LogInstance().GetLogPrefix(BCLog::Level::Debug), "foo3: %s\n", "bar3");
+    LogPrintf_("fn4", "src4", 4, LogInstance().GetLogPrefix(BCLog::Level::Info), "foo4: %s\n", "bar4");
     std::ifstream file{tmp_log_path};
     std::vector<std::string> log_lines;
     for (std::string log; std::getline(file, log);) {
@@ -111,7 +111,6 @@ BOOST_FIXTURE_TEST_CASE(logging_LogPrintMacrosDeprecated, LogSetup)
     LogPrintLevel(BCLog::NET, BCLog::Level::Error, "foo10: %s\n", "bar10");
     LogPrintfCategory(BCLog::VALIDATION, "foo11: %s\n", "bar11");
     LogPrintfCategory(BCLog::ALL, "foo12: %s\n", "bar12");
-    LogPrintfCategory(BCLog::NONE, "foo13: %s\n", "bar13");
     std::ifstream file{tmp_log_path};
     std::vector<std::string> log_lines;
     for (std::string log; std::getline(file, log);) {
@@ -126,7 +125,6 @@ BOOST_FIXTURE_TEST_CASE(logging_LogPrintMacrosDeprecated, LogSetup)
         "[net:error] foo10: bar10",
         "[validation:info] foo11: bar11",
         "[all:info] foo12: bar12",
-        "foo13: bar13",
     };
     BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(), expected.begin(), expected.end());
 }

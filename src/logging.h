@@ -119,7 +119,7 @@ namespace BCLog {
         std::atomic<bool> m_reopen_file{false};
 
         /** Send a string to the log output */
-        void LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, std::optional<BCLog::LogFlags> category, BCLog::Level level);
+        void LogPrintStr(const std::string& prefix, const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line);
 
         /** Returns whether logs will be written to any output */
         bool Enabled() const
@@ -192,6 +192,9 @@ namespace BCLog {
             return true;
         }
 
+        std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level) const;
+        std::string GetLogPrefix(BCLog::Level level) const;
+
         /** Returns a vector of the log categories in alphabetical order. */
         std::vector<LogCategory> LogCategoriesList() const;
         /** Returns a string with the log categories in alphabetical order. */
@@ -224,7 +227,7 @@ static inline bool LogAcceptCategory(BCLog::LogFlags category, BCLog::Level leve
 // peer can fill up a user's disk with debug.log entries.
 
 template <typename... Args>
-static inline void LogPrintf_(const std::string& logging_function, const std::string& source_file, const int source_line, const std::optional<BCLog::LogFlags> flag, const BCLog::Level level, const char* fmt, const Args&... args)
+static inline void LogPrintf_(const std::string& logging_function, const std::string& source_file, const int source_line, const std::string& prefix, const char* fmt, const Args&... args)
 {
     if (LogInstance().Enabled()) {
         std::string log_msg;
@@ -234,37 +237,39 @@ static inline void LogPrintf_(const std::string& logging_function, const std::st
             /* Original format string will have newline so don't add one here */
             log_msg = "Error \"" + std::string(fmterr.what()) + "\" while formatting log message: " + fmt;
         }
-        LogInstance().LogPrintStr(log_msg, logging_function, source_file, source_line, flag, level);
+        LogInstance().LogPrintStr(prefix, log_msg, logging_function, source_file, source_line);
     }
 }
 
-#define LogPrintLevel_(category, level, ...) LogPrintf_(__func__, __FILE__, __LINE__, category, level, __VA_ARGS__)
 
 // Use a macro instead of a function for conditional logging to prevent
 // evaluating arguments when logging for the category is not enabled.
 
+// Log unconditionally.
+
+#define LogPrintUnconditional_(level, ...) LogPrintf_(__func__, __FILE__, __LINE__, LogInstance().GetLogPrefix((level)), __VA_ARGS__)
+
+#define LogError(...) LogPrintUnconditional_(BCLog::Level::Error, __VA_ARGS__)
+#define LogWarning(...) LogPrintUnconditional_(BCLog::Level::Warning, __VA_ARGS__)
+#define LogInfo(...) LogPrintUnconditional_(BCLog::Level::Info, __VA_ARGS__)
+
 // Log conditionally, prefixing the output with the passed category name and severity level.
-#define LogPrintLevel(category, level, ...)               \
+#define LogPrintConditional_(category, level, ...)         \
     do {                                                  \
         if (LogAcceptCategory((category), (level))) {     \
-            LogPrintLevel_(category, level, __VA_ARGS__); \
+            LogPrintf_(__func__, __FILE__, __LINE__, LogInstance().GetLogPrefix((category), (level)), __VA_ARGS__); \
         }                                                 \
     } while (0)
 
-// Log unconditionally.
-
-#define LogError(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Error, __VA_ARGS__)
-#define LogWarning(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Warning, __VA_ARGS__)
-#define LogInfo(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Info, __VA_ARGS__)
+#define LogTrace(category, ...) LogPrintConditional_(category, BCLog::Level::Trace, __VA_ARGS__)
+#define LogDebug(category, ...) LogPrintConditional_(category, BCLog::Level::Debug, __VA_ARGS__)
 
 // Deprecated unconditional logging
 #define LogPrintf(...) LogInfo(__VA_ARGS__)
-#define LogPrintfCategory(category, ...) LogPrintLevel_(category, BCLog::Level::Info, __VA_ARGS__)
 
-#define LogTrace(category, ...) LogPrintLevel(category, BCLog::Level::Trace, __VA_ARGS__)
-#define LogDebug(category, ...) LogPrintLevel(category, BCLog::Level::Debug, __VA_ARGS__)
-
-// Deprecated conditional logging
+// Deprecated categorised logging
+#define LogPrintfCategory(category, ...) LogPrintConditional_(category, BCLog::Level::Info, __VA_ARGS__)
+#define LogPrintLevel(category, level, ...) LogPrintConditional_(category, level, __VA_ARGS__)
 #define LogPrint(category, ...)  LogDebug(category, __VA_ARGS__)
 
 template <typename... Args>

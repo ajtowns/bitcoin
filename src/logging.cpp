@@ -364,39 +364,38 @@ namespace BCLog {
     }
 } // namespace BCLog
 
-static std::string GetLogPrefix(std::optional<BCLog::LogFlags> category, BCLog::Level level)
+std::string BCLog::Logger::GetLogPrefix(BCLog::Level level) const
 {
-    const bool has_category{category.has_value()};
-
     // If there is no category, Info is implied
-    if (!has_category && level == BCLog::Level::Info) return {};
+    if (level == Level::Info) return {};
 
     std::string s{"["};
-    if (has_category) {
-        s += LogCategoryToStr(category.value());
-    }
+    s += LogLevelToStr(level);
+    s += "] ";
+    return s;
+}
 
-    if (!has_category || level != BCLog::Level::Debug) {
-        // If there is a category, Debug is implied, so don't add the category
-        if (has_category) {
-            // Only add separator if both flag and level are not NONE
-            s += ":";
-        }
-        s += BCLog::Logger::LogLevelToStr(level);
+std::string BCLog::Logger::GetLogPrefix(BCLog::LogFlags category, BCLog::Level level) const
+{
+    std::string s{"["};
+    s += LogCategoryToStr(category);
+
+    if (level != Level::Debug) {
+        // Only add the category if it's not Debug
+        s += ":";
+        s += LogLevelToStr(level);
     }
 
     s += "] ";
     return s;
 }
 
-void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, std::optional<BCLog::LogFlags> category, BCLog::Level level)
+void BCLog::Logger::LogPrintStr(const std::string& prefix, const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line)
 {
     StdLockGuard scoped_lock(m_cs);
     std::string str_prefixed = LogEscapeMessage(str);
 
-    if (m_started_new_line) {
-        str_prefixed.insert(0, GetLogPrefix(category, level));
-    }
+    if (m_started_new_line) str_prefixed.insert(0, prefix);
 
     if (m_log_sourcelocations && m_started_new_line) {
         str_prefixed.insert(0, "[" + RemovePrefix(source_file, "./") + ":" + ToString(source_line) + "] [" + logging_function + "] ");
