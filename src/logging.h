@@ -36,7 +36,6 @@ struct LogCategory {
 
 namespace BCLog {
     enum LogFlags : uint32_t {
-        //NONE        = 0,
         NET         = (1 <<  0),
         TOR         = (1 <<  1),
         MEMPOOL     = (1 <<  2),
@@ -71,7 +70,6 @@ namespace BCLog {
         TXPACKAGES  = (1 << 29),
         ALL         = ~(uint32_t)0,
     };
-    static constexpr std::optional<LogFlags> NONE{};
     enum class Level {
         Trace = 0, // High-volume or detailed logging for development/debugging
         Debug,     // Reasonably noisy logging, but still usable in production
