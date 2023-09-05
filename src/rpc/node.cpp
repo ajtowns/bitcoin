@@ -184,21 +184,15 @@ static RPCHelpMan getmemoryinfo()
     };
 }
 
-static void EnableOrDisableLogCategories(UniValue cats, bool enable) {
-    cats = cats.get_array();
-    for (unsigned int i = 0; i < cats.size(); ++i) {
-        std::string cat = cats[i].get_str();
-
-        bool success;
-        if (enable) {
-            success = LogInstance().EnableCategory(cat);
-        } else {
-            success = LogInstance().DisableCategory(cat);
-        }
-
-        if (!success) {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, "unknown logging category " + cat);
-        }
+// Maintain similar logic in both of the EnableOrDisableLogCategories() functions in the codebase.
+static void EnableOrDisableLogCategories(const UniValue& categories, bool enable)
+{
+    const std::vector<UniValue>& cats{categories.get_array().getValues()};
+    if (std::any_of(cats.cbegin(), cats.cend(), [](const auto& c) { return LogInstance().IsNoneCategory(c.get_str()); })) return;
+    for (const auto& cat : cats) {
+        const std::string& c{cat.get_str()};
+        const bool success{enable ? LogInstance().EnableCategory(c) : LogInstance().DisableCategory(c)};
+        if (!success) throw JSONRPCError(RPC_INVALID_PARAMETER, "Unsupported logging category: " + c);
     }
 }
 
@@ -206,34 +200,43 @@ static RPCHelpMan logging()
 {
     return RPCHelpMan{"logging",
             "Gets and sets the logging configuration.\n"
-            "When called without an argument, returns the list of categories with status that are currently being debug logged or not.\n"
-            "When called with arguments, adds or removes categories from debug logging and return the lists above.\n"
-            "The arguments are evaluated in order \"include\", \"exclude\".\n"
+            "When called without an argument, returns the list of categories with the status for each whether debug logging is active or not.\n"
+            "When called with arguments, adds or removes categories from debug logging and returns the updated list above.\n"
+            "The arguments are evaluated in the order of \"include\", then \"exclude\".\n"
             "If an item is both included and excluded, it will thus end up being excluded.\n"
             "The valid logging categories are: " + LogInstance().LogCategoriesString() + "\n"
             "In addition, the following are available as category names with special meanings:\n"
             "  - \"all\",  \"1\" : represent all logging categories.\n"
-            "  - \"none\", \"0\" : even if other logging categories are specified, ignore all of them.\n"
+            "  - \"none\", \"0\" : even if other logging categories are specified (including \"all\" and \"1\"), ignore all of them.\n"
             ,
                 {
                     {"include", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "The categories to add to debug logging",
                         {
-                            {"include_category", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "the valid logging category"},
+                            {"include_category", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "a valid logging category"},
                         }},
                     {"exclude", RPCArg::Type::ARR, RPCArg::Optional::OMITTED, "The categories to remove from debug logging",
                         {
-                            {"exclude_category", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "the valid logging category"},
+                            {"exclude_category", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "a valid logging category"},
                         }},
                 },
                 RPCResult{
-                    RPCResult::Type::OBJ_DYN, "", "keys are the logging categories, and values indicates its status",
+                    RPCResult::Type::OBJ_DYN, "", "keys are the logging categories and values indicate their status",
                     {
-                        {RPCResult::Type::BOOL, "category", "if being debug logged or not. false:inactive, true:active"},
+                        {RPCResult::Type::BOOL, "category", "whether debug logging is active for the category"},
                     }
                 },
                 RPCExamples{
-                    HelpExampleCli("logging", "\"[\\\"all\\\"]\" \"[\\\"http\\\"]\"")
-            + HelpExampleRpc("logging", "[\"all\"], [\"libevent\"]")
+                   "\nTurn on tor and i2p logging categories\n"
+                   + HelpExampleCli("logging", "'[\"tor\", \"i2p\"]'")
+                   + HelpExampleCli("-named logging", "include='[\"tor\", \"i2p\"]'")
+                   + "\nTurn on all logging categories, except http\n"
+                   + HelpExampleCli("logging", "'[\"all\"]' '[\"http\"]'")
+                   + HelpExampleCli("-named logging", "include='[\"all\"]' exclude='[\"http\"]'")
+                   + "\nTurn off all logging categories\n"
+                   + HelpExampleCli("logging", "'[]' '[\"all\"]'")
+                   + HelpExampleCli("-named logging", "exclude='[\"all\"]'")
+                   + "\nTurn on all logging categories, except libevent\n"
+                   + HelpExampleRpc("logging", "[\"all\"], [\"libevent\"]")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {

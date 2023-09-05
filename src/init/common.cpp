@@ -26,10 +26,8 @@ namespace init {
 void AddLoggingArgs(ArgsManager& argsman)
 {
     argsman.AddArg("-debuglogfile=<file>", strprintf("Specify location of debug log file (default: %s). Relative paths will be prefixed by a net-specific datadir location. Pass -nodebuglogfile to disable writing the log to a file.", DEFAULT_DEBUGLOGFILE), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-debug=<category>", "Output debug and trace logging (default: -nodebug, supplying <category> is optional). "
-        "If <category> is not supplied or if <category> = 1, output all debug and trace logging. <category> can be: " + LogInstance().LogCategoriesString() + ". This option can be specified multiple times to output multiple categories.",
-        ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
-    argsman.AddArg("-debugexclude=<category>", "Exclude debug and trace logging for a category. Can be used in conjunction with -debug=1 to output debug and trace logging for all categories except the specified category. This option can be specified multiple times to exclude multiple categories.", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
+    argsman.AddArg("-debug=<category>", "Output debug and trace logging (default: 0). If <category> is omitted, or is 1 or \"all\", output all debug and trace logging. If <category> is 0 or \"none\", any other categories passed are ignored. Other valid values for <category> are: " + LogInstance().LogCategoriesString() + ". This option can be specified multiple times to output multiple categories. See also the -debugexclude configuration option that takes priority over -debug.", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
+    argsman.AddArg("-debugexclude=<category>", "Exclude debug and trace logging for a category (default: 1). Takes priority over -debug and can be used in conjunction with -debug=1 to output debug and trace logging for all categories except the specified category. If <category> is 1 or \"all\", exclude all debug and trace logging. If <category> is 0 or \"none\", any other categories passed are ignored. Other valid values for <category> are: " + LogInstance().LogCategoriesString() + ". This option can be specified multiple times to exclude multiple categories.", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-logips", strprintf("Include IP addresses in debug output (default: %u)", DEFAULT_LOGIPS), ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-loglevel=<level>|<category>:<level>", strprintf("Set the global or per-category severity level for logging categories enabled with the -debug configuration option or the logging RPC: %s (default=%s); warning and error levels are always logged. If <category>:<level> is supplied, the setting will override the global one and may be specified multiple times to set multiple category-specific levels. <category> can be: %s.", LogInstance().LogLevelsString(), LogInstance().LogLevelToStr(BCLog::DEFAULT_LOG_LEVEL), LogInstance().LogCategoriesString()), ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-logtimestamps", strprintf("Prepend debug output with timestamp (default: %u)", DEFAULT_LOGTIMESTAMPS), ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
@@ -80,29 +78,29 @@ util::Result<void> SetLoggingLevel(const ArgsManager& args)
     return {};
 }
 
+// Maintain similar logic in both of the EnableOrDisableLogCategories() functions in the codebase.
+static void EnableOrDisableLogCategories(util::Result<void>& result, const ArgsManager& args, const std::string& opt, bool enable)
+{
+    if (!result || !args.IsArgSet(opt)) return;
+    const std::vector<std::string>& categories{args.GetArgs(opt)};
+    if (std::any_of(categories.cbegin(), categories.cend(), [](const auto& c) { return LogInstance().IsNoneCategory(c); })) return;
+    for (const auto& c : categories) {
+        const bool success{enable ? LogInstance().EnableCategory(c) : LogInstance().DisableCategory(c)};
+        if (!success) {
+            result = util::Error{strprintf(_("Unsupported logging category %s=%s."), opt, c)};
+            return;
+        }
+    }
+    return;
+}
+
 util::Result<void> SetLoggingCategories(const ArgsManager& args)
 {
-    if (args.IsArgSet("-debug")) {
-        // Special-case: if -debug=0/-nodebug is set, turn off debugging messages
-        const std::vector<std::string> categories = args.GetArgs("-debug");
-
-        if (std::none_of(categories.begin(), categories.end(),
-            [](std::string cat){return cat == "0" || cat == "none";})) {
-            for (const auto& cat : categories) {
-                if (!LogInstance().EnableCategory(cat)) {
-                    return util::Error{strprintf(_("Unsupported logging category %s=%s."), "-debug", cat)};
-                }
-            }
-        }
-    }
-
-    // Now remove the logging categories which were explicitly excluded
-    for (const std::string& cat : args.GetArgs("-debugexclude")) {
-        if (!LogInstance().DisableCategory(cat)) {
-            return util::Error{strprintf(_("Unsupported logging category %s=%s."), "-debugexclude", cat)};
-        }
-    }
-    return {};
+    util::Result<void> result;
+    // debugexclude settings take priority over debug ones, so run debugexclude last
+    EnableOrDisableLogCategories(result, args, "-debug", /*enable=*/true);
+    EnableOrDisableLogCategories(result, args, "-debugexclude", /*enable=*/false);
+    return result;
 }
 
 bool StartLogging(const ArgsManager& args)
