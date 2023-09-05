@@ -122,7 +122,7 @@ bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
     return (m_categories.load(std::memory_order_relaxed) & category) != 0;
 }
 
-bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level level) const
+bool BCLog::Logger::WillLogCategoryLevel(std::optional<BCLog::LogFlags> category, BCLog::Level level) const
 {
     switch (level) {
     case BCLog::Level::Error:
@@ -130,16 +130,16 @@ bool BCLog::Logger::WillLogCategoryLevel(BCLog::LogFlags category, BCLog::Level 
     case BCLog::Level::Info:
         break;
     case BCLog::Level::Debug:
-        return WillLogCategory(category);
+        return category.has_value() ? WillLogCategory(category.value()) : false;
     case BCLog::Level::Trace:
-        return (m_trace_categories.load(std::memory_order_relaxed) & category) != 0;
+        return category.has_value() ? (m_trace_categories.load(std::memory_order_relaxed) & category.value()) != 0 : false;
     }
     return true;
 }
 
 bool BCLog::Logger::DefaultShrinkDebugFile() const
 {
-    return m_categories == BCLog::NONE;
+    return m_categories == 0;
 }
 
 struct CLogCategoryDesc {
@@ -185,7 +185,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::ALL, "all"},
 };
 
-bool GetLogCategory(BCLog::LogFlags& flag, const std::string& str)
+bool BCLog::Logger::GetLogCategory(BCLog::LogFlags& flag, const std::string& str)
 {
     if (str.empty()) {
         flag = BCLog::ALL;
@@ -285,8 +285,6 @@ std::string LogCategoryToStr(BCLog::LogFlags category)
         return "txpackages";
     case BCLog::LogFlags::ALL:
         return "all";
-    case BCLog::LogFlags::NONE:
-        assert(false);
     } // no default case, so the compiler can warn about missing cases
     assert(false);
 }
@@ -386,16 +384,16 @@ namespace BCLog {
     }
 } // namespace BCLog
 
-static std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level)
+static std::string GetLogPrefix(std::optional<BCLog::LogFlags> category, BCLog::Level level)
 {
-    const bool has_category{category != BCLog::LogFlags::NONE};
+    const bool has_category{category.has_value()};
 
     // If there is no category, Info is implied
     if (!has_category && level == BCLog::Level::Info) return {};
 
     std::string s{"["};
     if (has_category) {
-        s += LogCategoryToStr(category);
+        s += LogCategoryToStr(category.value());
     }
 
     if (!has_category || level != BCLog::Level::Debug) {
@@ -411,7 +409,7 @@ static std::string GetLogPrefix(BCLog::LogFlags category, BCLog::Level level)
     return s;
 }
 
-void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, BCLog::LogFlags category, BCLog::Level level)
+void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, std::optional<BCLog::LogFlags> category, BCLog::Level level)
 {
     StdLockGuard scoped_lock(m_cs);
     std::string str_prefixed = LogEscapeMessage(str);

@@ -80,10 +80,10 @@ BOOST_AUTO_TEST_CASE(logging_timer)
 BOOST_FIXTURE_TEST_CASE(logging_LogPrintf_, LogSetup)
 {
     LogInstance().m_log_sourcelocations = true;
-    LogPrintf_("fn1", "src1", 1, BCLog::LogFlags::NET, BCLog::Level::Debug, "foo1: %s\n", "bar1");
-    LogPrintf_("fn2", "src2", 2, BCLog::LogFlags::NET, BCLog::Level::Info, "foo2: %s\n", "bar2");
-    LogPrintf_("fn3", "src3", 3, BCLog::LogFlags::NONE, BCLog::Level::Debug, "foo3: %s\n", "bar3");
-    LogPrintf_("fn4", "src4", 4, BCLog::LogFlags::NONE, BCLog::Level::Info, "foo4: %s\n", "bar4");
+    LogPrintf_("fn1", "src1", 1, BCLog::NET, BCLog::Level::Debug, "foo1: %s\n", "bar1");
+    LogPrintf_("fn2", "src2", 2, BCLog::NET, BCLog::Level::Info, "foo2: %s\n", "bar2");
+    LogPrintf_("fn3", "src3", 3, BCLog::NONE, BCLog::Level::Debug, "foo3: %s\n", "bar3");
+    LogPrintf_("fn4", "src4", 4, BCLog::NONE, BCLog::Level::Info, "foo4: %s\n", "bar4");
     std::ifstream file{tmp_log_path};
     std::vector<std::string> log_lines;
     for (std::string log; std::getline(file, log);) {
@@ -163,7 +163,7 @@ BOOST_FIXTURE_TEST_CASE(logging_LogPrintMacros_CategoryName, LogSetup)
     for (const auto& category_name : category_names) {
         BCLog::LogFlags category;
         const auto trimmed_category_name = TrimString(category_name);
-        BOOST_REQUIRE(GetLogCategory(category, trimmed_category_name));
+        BOOST_REQUIRE(BCLog::Logger::GetLogCategory(category, trimmed_category_name));
         expected_category_names.emplace_back(category, trimmed_category_name);
     }
 
@@ -236,8 +236,8 @@ BOOST_FIXTURE_TEST_CASE(logging_Conf, LogSetup)
         auto result = init::SetLoggingCategories(args);
         BOOST_REQUIRE(result);
 
-        BOOST_CHECK_EQUAL(LogInstance().GetCategoryMask(), BCLog::LogFlags::NONE);
-        BOOST_CHECK_EQUAL(LogInstance().GetCategoryTraceMask(), BCLog::LogFlags::NONE);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryMask(), 0);
+        BOOST_CHECK_EQUAL(LogInstance().GetCategoryTraceMask(), 0);
     }
 
     // All traced categories

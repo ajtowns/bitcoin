@@ -16,6 +16,7 @@
 #include <functional>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,7 +36,7 @@ struct LogCategory {
 
 namespace BCLog {
     enum LogFlags : uint32_t {
-        NONE        = 0,
+        //NONE        = 0,
         NET         = (1 <<  0),
         TOR         = (1 <<  1),
         MEMPOOL     = (1 <<  2),
@@ -70,6 +71,7 @@ namespace BCLog {
         TXPACKAGES  = (1 << 29),
         ALL         = ~(uint32_t)0,
     };
+    static constexpr std::optional<LogFlags> NONE{};
     enum class Level {
         Trace = 0, // High-volume or detailed logging for development/debugging
         Debug,     // Reasonably noisy logging, but still usable in production
@@ -117,7 +119,7 @@ namespace BCLog {
         std::atomic<bool> m_reopen_file{false};
 
         /** Send a string to the log output */
-        void LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, BCLog::LogFlags category, BCLog::Level level);
+        void LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, std::optional<BCLog::LogFlags> category, BCLog::Level level);
 
         /** Returns whether logs will be written to any output */
         bool Enabled() const
@@ -158,6 +160,11 @@ namespace BCLog {
             m_trace_categories = (catmask | tracemask);
         }
 
+        [[nodiscard]] static bool IsNoneCategory(const std::string& s) { return s == "0" || s == "none"; }
+
+        /** Return true if str parses as a (non-none) log category and set the flag */
+        [[nodiscard]] static bool GetLogCategory(BCLog::LogFlags& flag, const std::string& str);
+
         void EnableCategory(LogFlags flag) { SetCategoryLogLevel(flag, Level::Debug); }
         bool EnableCategory(const std::string& str);
         void TraceCategory(LogFlags flag) { SetCategoryLogLevel(flag, Level::Trace); }
@@ -166,8 +173,7 @@ namespace BCLog {
         bool DisableCategory(const std::string& str);
 
         bool WillLogCategory(LogFlags category) const;
-        bool WillLogCategoryLevel(LogFlags category, Level level) const;
-        [[nodiscard]] static bool IsNoneCategory(const std::string& s) { return s == "0" || s == "none"; }
+        bool WillLogCategoryLevel(std::optional<LogFlags> category, Level level) const;
 
         /** Returns a vector of the log categories in alphabetical order. */
         std::vector<LogCategory> LogCategoriesList() const;
@@ -191,20 +197,17 @@ namespace BCLog {
 BCLog::Logger& LogInstance();
 
 /** Return true if log accepts specified category, at the specified level. */
-static inline bool LogAcceptCategory(BCLog::LogFlags category, BCLog::Level level)
+static inline bool LogAcceptCategory(std::optional<BCLog::LogFlags> category, BCLog::Level level)
 {
     return LogInstance().WillLogCategoryLevel(category, level);
 }
-
-/** Return true if str parses as a log category and set the flag */
-bool GetLogCategory(BCLog::LogFlags& flag, const std::string& str);
 
 // Be conservative when using LogPrintf/error or other things which
 // unconditionally log to debug.log! It should not be the case that an inbound
 // peer can fill up a user's disk with debug.log entries.
 
 template <typename... Args>
-static inline void LogPrintf_(const std::string& logging_function, const std::string& source_file, const int source_line, const BCLog::LogFlags flag, const BCLog::Level level, const char* fmt, const Args&... args)
+static inline void LogPrintf_(const std::string& logging_function, const std::string& source_file, const int source_line, const std::optional<BCLog::LogFlags> flag, const BCLog::Level level, const char* fmt, const Args&... args)
 {
     if (LogInstance().Enabled()) {
         std::string log_msg;
@@ -222,9 +225,9 @@ static inline void LogPrintf_(const std::string& logging_function, const std::st
 
 // Log unconditionally.
 
-#define LogError(...) LogPrintLevel_(BCLog::LogFlags::NONE, BCLog::Level::Error, __VA_ARGS__)
-#define LogWarning(...) LogPrintLevel_(BCLog::LogFlags::NONE, BCLog::Level::Warning, __VA_ARGS__)
-#define LogInfo(...) LogPrintLevel_(BCLog::LogFlags::NONE, BCLog::Level::Info, __VA_ARGS__)
+#define LogError(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Error, __VA_ARGS__)
+#define LogWarning(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Warning, __VA_ARGS__)
+#define LogInfo(...) LogPrintLevel_(BCLog::NONE, BCLog::Level::Info, __VA_ARGS__)
 
 // Deprecated unconditional logging
 #define LogPrintf(...) LogInfo(__VA_ARGS__)
