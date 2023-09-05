@@ -117,26 +117,6 @@ bool BCLog::Logger::DisableCategory(const std::string& str)
     return true;
 }
 
-bool BCLog::Logger::WillLogCategory(BCLog::LogFlags category) const
-{
-    return (m_categories.load(std::memory_order_relaxed) & category) != 0;
-}
-
-bool BCLog::Logger::WillLogCategoryLevel(std::optional<BCLog::LogFlags> category, BCLog::Level level) const
-{
-    switch (level) {
-    case BCLog::Level::Error:
-    case BCLog::Level::Warning:
-    case BCLog::Level::Info:
-        break;
-    case BCLog::Level::Debug:
-        return category.has_value() ? WillLogCategory(category.value()) : false;
-    case BCLog::Level::Trace:
-        return category.has_value() ? (m_trace_categories.load(std::memory_order_relaxed) & category.value()) != 0 : false;
-    }
-    return true;
-}
-
 bool BCLog::Logger::DefaultShrinkDebugFile() const
 {
     return m_categories == 0;
