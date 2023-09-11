@@ -37,6 +37,8 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
+    argsman.AddCommand("tx-strip-witness", "Strip witness from hex encoded transaction");
+    argsman.AddCommand("block-strip-witness", "Strip witness from hex encoded block");
 
     SetupChainParamsBaseOptions(argsman);
 }
@@ -148,6 +150,53 @@ static int Grind(const std::vector<std::string>& args, std::string& strPrint)
     return EXIT_SUCCESS;
 }
 
+static std::string GetFirstArgOrStdin(const std::vector<std::string>& args)
+{
+    if (args.size() == 0) {
+        std::string res;
+        std::getline(std::cin, res);
+        return res;
+    } else {
+        return args[0];
+    }
+}
+
+static int TxStripWitness(const std::vector<std::string>& args, std::string& strPrint)
+{
+    CMutableTransaction mtx;
+    if (args.size() > 1) {
+        strPrint = "Can only specify one tx";
+        return EXIT_FAILURE;
+    }
+    std::string hex = GetFirstArgOrStdin(args);
+    if (!DecodeHexTx(mtx, hex)) {
+        strPrint = "Could not decode tx";
+        return EXIT_FAILURE;
+    }
+    strPrint = EncodeHexTx(CTransaction(mtx), SERIALIZE_TRANSACTION_NO_WITNESS);
+    return EXIT_SUCCESS;
+}
+
+static int BlockStripWitness(const std::vector<std::string>& args, std::string& strPrint)
+{
+    if (args.size() > 1) {
+        strPrint = "Can only specify one block";
+        return EXIT_FAILURE;
+    }
+    std::string hex = GetFirstArgOrStdin(args);
+
+    CBlock block;
+    if (!DecodeHexBlk(block, hex)) {
+        strPrint = "Could not decode block";
+        return EXIT_FAILURE;
+    }
+
+    CDataStream ss(SER_NETWORK, SERIALIZE_TRANSACTION_NO_WITNESS);
+    ss << block;
+    strPrint = HexStr(ss);
+    return EXIT_SUCCESS;
+}
+
 MAIN_FUNCTION
 {
     ArgsManager& args = gArgs;
@@ -177,6 +226,10 @@ MAIN_FUNCTION
     try {
         if (cmd->command == "grind") {
             ret = Grind(cmd->args, strPrint);
+        } else if (cmd->command == "tx-strip-witness") {
+            ret = TxStripWitness(cmd->args, strPrint);
+        } else if (cmd->command == "block-strip-witness") {
+            ret = BlockStripWitness(cmd->args, strPrint);
         } else {
             assert(false); // unknown command should be caught earlier
         }
