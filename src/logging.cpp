@@ -149,8 +149,6 @@ struct CLogCategoryDesc {
 
 const CLogCategoryDesc LogCategories[] =
 {
-    {BCLog::NONE, "0"},
-    {BCLog::NONE, ""},
     {BCLog::NET, "net"},
     {BCLog::TOR, "tor"},
     {BCLog::MEMPOOL, "mempool"},
