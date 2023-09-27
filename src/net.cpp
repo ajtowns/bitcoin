@@ -465,6 +465,46 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         pszDest ? pszDest : addrConnect.ToStringAddrPort(),
         Ticks<HoursDouble>(pszDest ? 0h : Now<NodeSeconds>() - addrConnect.nTime));
 
+    auto conninfo = xxxConnectNode(addrConnect, pszDest, fCountFailure, conn_type);
+    if (!conninfo) return nullptr; // connection failed
+
+    // Add node
+    NodeId id = GetNewNodeId();
+    uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
+
+    CNode* pnode = new CNode(id,
+                             std::move(conninfo->sock),
+                             addrConnect,
+                             CalculateKeyedNetGroup(addrConnect),
+                             nonce,
+                             conninfo->addr_bind,
+                             pszDest ? pszDest : "",
+                             conn_type,
+                             /*inbound_onion=*/false,
+                             CNodeOptions{
+                                 .i2p_sam_session = std::move(conninfo->i2p_transient_session),
+                                 .recv_flood_size = nReceiveFloodSize,
+                                 .use_v2transport = use_v2transport,
+                                 .count_failure_after_reconnect = fCountFailure,
+                             });
+    pnode->AddRef();
+
+    // We're making a new connection, harvest entropy from the time (and our peer count)
+    RandAddEvent((uint32_t)id);
+
+    return pnode;
+}
+
+void CNode::xxxUpdateNodeConnectionInfo(CNode::ConnectionInfo& conninfo)
+{
+    LOCK(m_sock_mutex);
+    m_sock = std::move(conninfo.sock);
+    addrBind = conninfo.addr_bind;
+    m_i2p_sam_session = std::move(conninfo.i2p_transient_session);
+}
+
+std::optional<CNode::ConnectionInfo> CConnman::xxxConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type)
+{
     // Resolve
     const uint16_t default_port{pszDest != nullptr ? GetDefaultPort(pszDest) :
                                                      m_params.GetDefaultPort()};
@@ -475,7 +515,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             addrConnect = CAddress{MaybeFlipIPv6toCJDNS(rnd), addrConnect.nServices};
             if (!addrConnect.IsValid()) {
                 LogPrint(BCLog::NET, "Resolver returned invalid address %s for %s\n", addrConnect.ToStringAddrPort(), pszDest);
-                return nullptr;
+                return std::nullopt;
             }
             // It is possible that we already have a connection to the IP/port pszDest resolved to.
             // In that case, drop the connection that was just created.
@@ -483,7 +523,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             CNode* pnode = FindNode(static_cast<CService>(addrConnect));
             if (pnode) {
                 LogPrintf("Failed to open new connection, already connected\n");
-                return nullptr;
+                return std::nullopt;
             }
         }
     }
@@ -532,7 +572,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         } else if (use_proxy) {
             sock = CreateSock(proxy.proxy);
             if (!sock) {
-                return nullptr;
+                return std::nullopt;
             }
             connected = ConnectThroughProxy(proxy, addrConnect.ToStringAddr(), addrConnect.GetPort(),
                                             *sock, nConnectTimeout, proxyConnectionFailed);
@@ -540,7 +580,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             // no proxy needed (none set for target network)
             sock = CreateSock(addrConnect);
             if (!sock) {
-                return nullptr;
+                return std::nullopt;
             }
             connected = ConnectSocketDirectly(addrConnect, *sock, nConnectTimeout,
                                               conn_type == ConnectionType::MANUAL);
@@ -553,7 +593,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     } else if (pszDest && GetNameProxy(proxy)) {
         sock = CreateSock(proxy.proxy);
         if (!sock) {
-            return nullptr;
+            return std::nullopt;
         }
         std::string host;
         uint16_t port{default_port};
@@ -562,38 +602,16 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         connected = ConnectThroughProxy(proxy, host, port, *sock, nConnectTimeout,
                                         proxyConnectionFailed);
     }
+
     if (!connected) {
-        return nullptr;
+        return std::nullopt;
     }
 
-    // Add node
-    NodeId id = GetNewNodeId();
-    uint64_t nonce = GetDeterministicRandomizer(RANDOMIZER_ID_LOCALHOSTNONCE).Write(id).Finalize();
     if (!addr_bind.IsValid()) {
         addr_bind = GetBindAddress(*sock);
     }
 
-    CNode* pnode = new CNode(id,
-                             std::move(sock),
-                             addrConnect,
-                             CalculateKeyedNetGroup(addrConnect),
-                             nonce,
-                             addr_bind,
-                             pszDest ? pszDest : "",
-                             conn_type,
-                             /*inbound_onion=*/false,
-                             CNodeOptions{
-                                 .i2p_sam_session = std::move(i2p_transient_session),
-                                 .recv_flood_size = nReceiveFloodSize,
-                                 .use_v2transport = use_v2transport,
-                                 .count_failure_after_reconnect = fCountFailure,
-                             });
-    pnode->AddRef();
-
-    // We're making a new connection, harvest entropy from the time (and our peer count)
-    RandAddEvent((uint32_t)id);
-
-    return pnode;
+    return CNode::ConnectionInfo{.sock=std::move(sock), .addr_bind=addr_bind, .i2p_transient_session=std::move(i2p_transient_session)};
 }
 
 void CNode::CloseSocketDisconnect()

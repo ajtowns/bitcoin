@@ -737,7 +737,7 @@ public:
     // Address of this peer
     const CAddress addr;
     // Bind address of our side of the connection
-    const CAddress addrBind;
+    CAddress addrBind; // XXX semi-const, only modified at reconnection
     const std::string m_addr_name;
     /** The pszDest argument provided ConnectNode(). Only used for reconnections. */
     const std::string m_dest;
@@ -984,6 +984,13 @@ public:
         m_last_ping_time = ping_time;
         m_min_ping_time = std::min(m_min_ping_time.load(), ping_time);
     }
+
+    struct ConnectionInfo {
+        std::unique_ptr<Sock> sock;
+        CAddress addr_bind;
+        std::unique_ptr<i2p::sam::Session> i2p_transient_session;
+    };
+    void xxxUpdateNodeConnectionInfo(ConnectionInfo& conninfo) EXCLUSIVE_LOCKS_REQUIRED(!m_sock_mutex);
 
 private:
     const NodeId id;
@@ -1360,6 +1367,8 @@ private:
     bool AlreadyConnectedToAddress(const CAddress& addr);
 
     bool AttemptToEvictConnection();
+
+    std::optional<CNode::ConnectionInfo> xxxConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
     CNode* ConnectNode(CAddress addrConnect, const char *pszDest, bool fCountFailure, ConnectionType conn_type) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
     void AddWhitelistPermissionFlags(NetPermissionFlags& flags, const CNetAddr &addr) const;
 
