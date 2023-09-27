@@ -379,6 +379,9 @@ public:
 
     /** Whether upon disconnections, a reconnect with V1 is warranted. */
     virtual bool ShouldReconnectV1() const noexcept = 0;
+
+    /** Reset as new V1 connection */
+    virtual void ReconnectAsV1() noexcept = 0;
 };
 
 class V1Transport final : public Transport
@@ -461,6 +464,7 @@ public:
     void MarkBytesSent(size_t bytes_sent) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_send_mutex);
     size_t GetSendMemoryUsage() const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_send_mutex);
     bool ShouldReconnectV1() const noexcept override { return false; }
+    void ReconnectAsV1() noexcept override { return; }
 };
 
 class V2Transport final : public Transport
@@ -684,6 +688,7 @@ public:
 
     // Miscellaneous functions.
     bool ShouldReconnectV1() const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex, !m_send_mutex);
+    void ReconnectAsV1() noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex, !m_send_mutex);
     Info GetInfo() const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
 };
 
@@ -989,6 +994,7 @@ public:
         std::unique_ptr<Sock> sock;
         CAddress addr_bind;
         std::unique_ptr<i2p::sam::Session> i2p_transient_session;
+        bool use_v2_transport;
     };
     void xxxUpdateNodeConnectionInfo(ConnectionInfo& conninfo) EXCLUSIVE_LOCKS_REQUIRED(!m_sock_mutex);
 
@@ -1140,8 +1146,8 @@ public:
     bool Start(CScheduler& scheduler, const Options& options) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !m_added_nodes_mutex, !m_addr_fetches_mutex, !mutexMsgProc);
 
     void StopThreads();
-    void StopNodes();
-    void Stop()
+    void StopNodes() EXCLUSIVE_LOCKS_REQUIRED(!m_reconnections_mutex);
+    void Stop() EXCLUSIVE_LOCKS_REQUIRED(!m_reconnections_mutex)
     {
         StopThreads();
         StopNodes();
@@ -1591,13 +1597,7 @@ private:
     /**
      * List of reconnections we have to make.
      */
-    std::list<std::tuple<
-        CAddress /*addr_connect*/,
-        bool /*count_failure*/,
-        CSemaphoreGrant /*grant*/,
-        std::string /*dest*/,
-        ConnectionType /*conn_type*/
-    >> m_reconnections GUARDED_BY(m_reconnections_mutex);
+    std::list<CNode*> m_reconnections GUARDED_BY(m_reconnections_mutex);
 
     /** Attempt reconnections, if m_reconnections non-empty. */
     void PerformReconnections() EXCLUSIVE_LOCKS_REQUIRED(!m_reconnections_mutex, !m_unused_i2p_sessions_mutex);

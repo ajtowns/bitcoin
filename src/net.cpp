@@ -1634,6 +1634,14 @@ bool V2Transport::ShouldReconnectV1() const noexcept
     return m_sent_v1_header_worth;
 }
 
+void V2Transport::ReconnectAsV1() noexcept
+{
+    AssertLockNotHeld(m_send_mutex);
+    AssertLockNotHeld(m_recv_mutex);
+    WITH_LOCK(m_recv_mutex, m_recv_state = RecvState::V1);
+    WITH_LOCK(m_send_mutex, m_send_state = SendState::V1);
+}
+
 size_t V2Transport::GetSendMemoryUsage() const noexcept
 {
     AssertLockNotHeld(m_send_mutex);
@@ -1999,13 +2007,11 @@ void CConnman::DisconnectNodes()
                 // the creation of a connection is a blocking operation (up to several seconds),
                 // and we don't want to hold up the socket handler thread for that long.
                 if (pnode->m_transport->ShouldReconnectV1()) {
-                    reconnections_to_add.emplace_back(
-                        /*addr_connect=*/CAddress{pnode->addr, ServiceFlags{pnode->addr.nServices & ~NODE_P2P_V2}},
-                        /*count_failure=*/pnode->m_count_failure_after_reconnect,
-                        /*grant=*/std::move(pnode->grantOutbound),
-                        /*dest=*/pnode->m_dest,
-                        /*conn_type=*/pnode->m_conn_type);
-                    LogPrint(BCLog::NET, "retrying with v1 transport protocol for peer=%d\n", pnode->GetId());
+                    reconnections_to_add.emplace_back(pnode);
+                    LogPrint(BCLog::NET, "will retry with v1 transport protocol for peer=%d\n", pnode->GetId());
+                    pnode->CloseSocketDisconnect();
+                    pnode->Release();
+                    continue;
                 }
 
                 // release outbound grant (if any)
@@ -3433,6 +3439,18 @@ void CConnman::StopNodes()
     }
 
     // Delete peer connections.
+
+    {
+        std::list<CNode*> recon;
+        WITH_LOCK(m_reconnections_mutex, recon.splice(recon.begin(), m_reconnections));
+        LOCK(m_nodes_mutex);
+        for (CNode* pnode : recon) {
+            pnode->grantOutbound.Release();
+            if (pnode->IsManualOrFullOutboundConn()) --m_network_conn_counts[pnode->addr.GetNetwork()];
+            m_nodes_disconnected.push_back(pnode);
+        }
+    }
+
     std::vector<CNode*> nodes;
     WITH_LOCK(m_nodes_mutex, nodes.swap(m_nodes));
     for (CNode* pnode : nodes) {
@@ -3892,8 +3910,36 @@ void CConnman::PerformReconnections()
             todo.splice(todo.end(), m_reconnections, m_reconnections.begin());
         }
 
-        auto& [addr_connect, count_failure, grant, dest, conn_type] = *todo.begin();
-        OpenNetworkConnection(addr_connect, count_failure, &grant, dest.empty() ? nullptr : dest.c_str(), conn_type);
+        CNode* pnode = *todo.begin();
+
+        while (pnode->GetRefCount() > 0) {
+            if (!interruptNet.sleep_for(std::chrono::milliseconds(500))) {
+                LOCK(m_reconnections_mutex);
+                // put it back, try again later
+                m_reconnections.splice(m_reconnections.begin(), todo);
+                return;
+            }
+        }
+
+        const char* pszDest = (pnode->m_dest.empty() ? nullptr : pnode->m_dest.c_str());
+        auto conninfo = xxxConnectNode(pnode->addr, pszDest, pnode->m_count_failure_after_reconnect, pnode->m_conn_type);
+        if (!conninfo) {
+            LogPrint(BCLog::NET, "reconnection with v1 transport protocol failed for peer=%d; disconnecting\n", pnode->GetId());
+            pnode->grantOutbound.Release();
+            if (pnode->IsManualOrFullOutboundConn()) {
+                LOCK(m_nodes_mutex);
+                --m_network_conn_counts[pnode->addr.GetNetwork()];
+            }
+            DeleteNode(pnode);
+        } else {
+            LogPrint(BCLog::NET, "reconnected with v1 transport protocol for peer=%d\n", pnode->GetId());
+            pnode->xxxUpdateNodeConnectionInfo(*conninfo);
+            pnode->m_transport->ReconnectAsV1();
+            pnode->fDisconnect = false;
+            pnode->AddRef();
+            LOCK(m_nodes_mutex);
+            m_nodes.push_back(pnode);
+        }
     }
 }
 
