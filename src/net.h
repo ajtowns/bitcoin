@@ -762,6 +762,9 @@ public:
 
     const ConnectionType m_conn_type;
 
+    size_t DynamicMemoryUsage();
+    size_t ConstantMemoryUsage();
+
     /** Move all messages from the received queue to the processing queue. */
     void MarkReceivedMsgsForProcessing()
         EXCLUSIVE_LOCKS_REQUIRED(!m_msg_process_queue_mutex);
