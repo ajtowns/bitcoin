@@ -110,9 +110,8 @@ static RPCHelpMan getpeermemoryinfo()
                 {RPCResult::Type::OBJ, "", "",
                 {
                     {
-                    {RPCResult::Type::NUM, "id", "Peer index"},
-                    {RPCResult::Type::STR, "addr", "(host:port) The IP address and port of the peer"},
-                    {RPCResult::Type::BOOL, "addr_relay_enabled", "Whether we participate in address relay with this peer"},
+                    {RPCResult::Type::NUM, "id", "Peer id"},
+                    {RPCResult::Type::NUM, "memory", "the result of GetDynamicMemoryUsage for that node"},
                 }},
             }},
         },
@@ -124,29 +123,31 @@ static RPCHelpMan getpeermemoryinfo()
 {
     NodeContext& node = EnsureAnyNodeContext(request.context);
     const CConnman& connman = EnsureConnman(node);
-    const PeerManager& peerman = EnsurePeerman(node);
+    //const PeerManager& peerman = EnsurePeerman(node);
 
-    std::vector<CNodeStats> vstats;
-    connman.GetNodeStats(vstats);
+    //std::vector<CNodeStats> vstats;
+    //connman.GetNodeStats(vstats);
+
+    // map of node id -> memory usage
+    std::map<int64_t, size_t> info;
+    connman.GetNodeMemory(info);
 
     UniValue ret(UniValue::VARR);
 
-    for (const CNodeStats& stats : vstats) {
-        UniValue obj(UniValue::VOBJ);
-        CNodeStateStats statestats;
-        bool fStateStats = peerman.GetNodeStateStats(stats.nodeid, statestats);
-        // GetNodeStateStats() requires the existence of a CNodeState and a Peer object
-        // to succeed for this peer. These are created at connection initialisation and
-        // exist for the duration of the connection - except if there is a race where the
-        // peer got disconnected in between the GetNodeStats() and the GetNodeStateStats()
-        // calls. In this case, the peer doesn't need to be reported here.
-        if (!fStateStats) {
-            continue;
-        }
-        obj.pushKV("id", stats.nodeid);
-        obj.pushKV("addr", stats.m_addr_name);
-        obj.pushKV("addr_relay_enabled", statestats.m_addr_relay_enabled);
+    //for (const CNodeStats& stats : vstats) {
+        //UniValue obj(UniValue::VOBJ);
+        //CNodeStateStats statestats;
+        //obj.pushKV("id", stats.nodeid);
+        //obj.pushKV("addr", stats.m_addr_name);
+        //obj.pushKV("addr_relay_enabled", statestats.m_addr_relay_enabled);
 
+        //ret.push_back(obj);
+    //}
+
+    for (const auto& vals : info) {
+        UniValue obj(UniValue::VOBJ);
+        obj.pushKV("id", vals.first);
+        obj.pushKV("memory", vals.second);
         ret.push_back(obj);
     }
 

@@ -18,7 +18,7 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
-
+#include <deque>
 
 namespace memusage
 {
@@ -88,6 +88,18 @@ template<typename X>
 static inline size_t DynamicUsage(const std::vector<X>& v)
 {
     return MallocUsage(v.capacity() * sizeof(X));
+}
+
+template<typename X>
+static inline size_t DynamicUsage(const std::list<X>& v)
+{
+    return MallocUsage(v.size() * sizeof(X));
+}
+
+template<typename X>
+static inline size_t DynamicUsage(const std::deque<X>& v)
+{
+    return MallocUsage(v.size() * sizeof(X));
 }
 
 template<unsigned int N, typename X, typename S, typename D>

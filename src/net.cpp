@@ -121,15 +121,21 @@ std::string strSubVersion;
 size_t CNode::DynamicMemoryUsage() {
     size_t val = 0;
 
-    val += memusage::DynamicUsage(m_transport);
+    //LOCK(m_sock_mutex);
+    //LOCK(cs_vSend);
+    //LOCK(m_msg_process_queue_mutex);
+    //LOCK(cs_vRecv);
 
-    // m_transport is going to be assigned dynamically as V1Transport or V2Transport
-    //WITH_LOCK(cs_vSend, val += m_send_memusage); //tracks the memory usage of all vSendMsg entries -> send buffer
-    // vRecvMsg
-    // m_msg_process_queue -> m_msg_process_queue_size
-    // mapSendBytesPerMsgType
-    // mapRecvBytesPerMsgType
-    // m_i2p_sam_session
+    val += memusage::DynamicUsage(m_transport);
+    val += memusage::DynamicUsage(m_sock);
+    val += m_send_memusage; // should represent memory usage of vSendMsg
+    auto calc_val = memusage::DynamicUsage(vSendMsg);
+    LogPrintf("ABCD m_send_memusage: %d, calculated value of vSendMsg %d\n", m_send_memusage, calc_val);
+    val += memusage::DynamicUsage(vRecvMsg);
+    val += memusage::DynamicUsage(m_msg_process_queue);
+    val += memusage::DynamicUsage(mapSendBytesPerMsgType);
+    val += memusage::DynamicUsage(mapRecvBytesPerMsgType);
+    val += memusage::DynamicUsage(m_i2p_sam_session);
 
     return val;
 }
@@ -3587,6 +3593,14 @@ size_t CConnman::GetNodeCount(ConnectionDirection flags) const
 uint32_t CConnman::GetMappedAS(const CNetAddr& addr) const
 {
     return m_netgroupman.GetMappedAS(addr);
+}
+
+void CConnman::GetNodeMemory(std::map<NodeId, size_t>& info) const
+{
+    LOCK(m_nodes_mutex);
+    for (CNode* pnode : m_nodes) {
+        info[pnode->GetId()] = pnode->DynamicMemoryUsage();
+    }
 }
 
 void CConnman::GetNodeStats(std::vector<CNodeStats>& vstats) const
