@@ -120,6 +120,9 @@ std::string strSubVersion;
 
 size_t CNode::DynamicMemoryUsage() {
     size_t val = 0;
+
+    val += memusage::DynamicUsage(m_transport);
+
     // m_transport is going to be assigned dynamically as V1Transport or V2Transport
     //WITH_LOCK(cs_vSend, val += m_send_memusage); //tracks the memory usage of all vSendMsg entries -> send buffer
     // vRecvMsg

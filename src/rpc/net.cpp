@@ -98,6 +98,62 @@ static RPCHelpMan ping()
     };
 }
 
+static RPCHelpMan getpeermemoryinfo()
+{
+    return RPCHelpMan{
+        "getpeermemoryinfo",
+        "\n how much memory does each peer use? \n",
+        {},
+        RPCResult{
+            RPCResult::Type::ARR, "", "",
+            {
+                {RPCResult::Type::OBJ, "", "",
+                {
+                    {
+                    {RPCResult::Type::NUM, "id", "Peer index"},
+                    {RPCResult::Type::STR, "addr", "(host:port) The IP address and port of the peer"},
+                    {RPCResult::Type::BOOL, "addr_relay_enabled", "Whether we participate in address relay with this peer"},
+                }},
+            }},
+        },
+        RPCExamples{
+            HelpExampleCli("getpeermemoryinfo", "")
+            + HelpExampleRpc("getpeermemoryinfo", "")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureAnyNodeContext(request.context);
+    const CConnman& connman = EnsureConnman(node);
+    const PeerManager& peerman = EnsurePeerman(node);
+
+    std::vector<CNodeStats> vstats;
+    connman.GetNodeStats(vstats);
+
+    UniValue ret(UniValue::VARR);
+
+    for (const CNodeStats& stats : vstats) {
+        UniValue obj(UniValue::VOBJ);
+        CNodeStateStats statestats;
+        bool fStateStats = peerman.GetNodeStateStats(stats.nodeid, statestats);
+        // GetNodeStateStats() requires the existence of a CNodeState and a Peer object
+        // to succeed for this peer. These are created at connection initialisation and
+        // exist for the duration of the connection - except if there is a race where the
+        // peer got disconnected in between the GetNodeStats() and the GetNodeStateStats()
+        // calls. In this case, the peer doesn't need to be reported here.
+        if (!fStateStats) {
+            continue;
+        }
+        obj.pushKV("id", stats.nodeid);
+        obj.pushKV("addr", stats.m_addr_name);
+        obj.pushKV("addr_relay_enabled", statestats.m_addr_relay_enabled);
+
+        ret.push_back(obj);
+    }
+
+    return ret;
+},
+    };
+}
 static RPCHelpMan getpeerinfo()
 {
     return RPCHelpMan{
@@ -1154,6 +1210,7 @@ void RegisterNetRPCCommands(CRPCTable& t)
         {"network", &getconnectioncount},
         {"network", &ping},
         {"network", &getpeerinfo},
+        {"network", &getpeermemoryinfo},
         {"network", &addnode},
         {"network", &disconnectnode},
         {"network", &getaddednodeinfo},
