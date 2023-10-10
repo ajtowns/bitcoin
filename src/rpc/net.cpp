@@ -111,7 +111,8 @@ static RPCHelpMan getpeermemoryinfo()
                 {
                     {
                     {RPCResult::Type::NUM, "id", "Peer id"},
-                    {RPCResult::Type::NUM, "memory", "the result of GetDynamicMemoryUsage for that node"},
+                    {RPCResult::Type::NUM, "dynamic-cnode-memory", "the result of CNode::DynamicMemoryUsage"},
+                    {RPCResult::Type::NUM, "dynamic-peer-memory", "the result of PeerManagerImpl::DynamicMemoryUsage"},
                 }},
             }},
         },
@@ -123,31 +124,22 @@ static RPCHelpMan getpeermemoryinfo()
 {
     NodeContext& node = EnsureAnyNodeContext(request.context);
     const CConnman& connman = EnsureConnman(node);
-    //const PeerManager& peerman = EnsurePeerman(node);
-
-    //std::vector<CNodeStats> vstats;
-    //connman.GetNodeStats(vstats);
-
-    // map of node id -> memory usage
-    std::map<int64_t, size_t> info;
-    connman.GetNodeMemory(info);
+    const PeerManager& peerman = EnsurePeerman(node);
 
     UniValue ret(UniValue::VARR);
 
-    //for (const CNodeStats& stats : vstats) {
-        //UniValue obj(UniValue::VOBJ);
-        //CNodeStateStats statestats;
-        //obj.pushKV("id", stats.nodeid);
-        //obj.pushKV("addr", stats.m_addr_name);
-        //obj.pushKV("addr_relay_enabled", statestats.m_addr_relay_enabled);
-
-        //ret.push_back(obj);
-    //}
-
-    for (const auto& vals : info) {
+    // map of node id -> memory usage
+    std::map<int64_t, size_t> info;
+    // call DynamicMemoryUsage on all CNode objects
+    connman.GetNodeMemory(info);
+    for (const auto& [node_id, node_memory] : info) {
         UniValue obj(UniValue::VOBJ);
-        obj.pushKV("id", vals.first);
-        obj.pushKV("memory", vals.second);
+        obj.pushKV("id", node_id);
+        obj.pushKV("dynamic-cnode-memory", node_memory);
+
+        auto peer_memory = peerman.GetPeerMemory(node_id);
+        obj.pushKV("dynamic-peer-memory", peer_memory);
+
         ret.push_back(obj);
     }
 
