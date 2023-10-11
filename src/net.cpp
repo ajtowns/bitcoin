@@ -3908,6 +3908,24 @@ bool CConnman::ForNode(NodeId id, std::function<bool(CNode* pnode)> func)
     return found != nullptr && NodeFullyConnected(found) && func(found);
 }
 
+std::string CConnman::NodeToString(NodeId id) const
+{
+    CNode* found = nullptr;
+    LOCK(m_nodes_mutex);
+    for (auto&& pnode : m_nodes) {
+        if(pnode->GetId() == id) {
+            found = pnode;
+            break;
+        }
+    }
+
+    if (found != nullptr) {
+        return ConnectionTypeAsString(found->m_conn_type);
+    } else {
+        return "";
+    }
+}
+
 CSipHasher CConnman::GetDeterministicRandomizer(uint64_t id) const
 {
     return CSipHasher(nSeed0, nSeed1).Write(id);

@@ -1224,6 +1224,7 @@ public:
     uint32_t GetMappedAS(const CNetAddr& addr) const;
     void GetNodeStats(std::vector<CNodeStats>& vstats) const;
     void GetNodeMemory(std::map<NodeId, size_t>& info) const;
+    std::string NodeToString(NodeId id) const;
     bool DisconnectNode(const std::string& node);
     bool DisconnectNode(const CSubNet& subnet);
     bool DisconnectNode(const CNetAddr& addr);

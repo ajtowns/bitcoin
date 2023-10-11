@@ -111,8 +111,9 @@ static RPCHelpMan getpeermemoryinfo()
                 {
                     {
                     {RPCResult::Type::NUM, "id", "Peer id"},
-                    {RPCResult::Type::NUM, "dynamic-cnode-memory", "the result of CNode::DynamicMemoryUsage"},
-                    {RPCResult::Type::NUM, "dynamic-peer-memory", "the result of PeerManagerImpl::DynamicMemoryUsage"},
+                    {RPCResult::Type::NUM, "dynamic_cnode_memory", "the result of CNode::DynamicMemoryUsage"},
+                    {RPCResult::Type::NUM, "dynamic_peer_memory", "the result of PeerManagerImpl::DynamicMemoryUsage"},
+                    {RPCResult::Type::STR, "connection_type", "Type of connection: \n" + Join(CONNECTION_TYPE_DOC, ",\n") + ".\n"},
                 }},
             }},
         },
@@ -135,11 +136,12 @@ static RPCHelpMan getpeermemoryinfo()
     for (const auto& [node_id, node_memory] : info) {
         UniValue obj(UniValue::VOBJ);
         obj.pushKV("id", node_id);
-        obj.pushKV("dynamic-cnode-memory", node_memory);
+        obj.pushKV("dynamic_cnode_memory", node_memory);
 
         auto peer_memory = peerman.GetPeerMemory(node_id);
-        obj.pushKV("dynamic-peer-memory", peer_memory);
+        obj.pushKV("dynamic_peer_memory", peer_memory);
 
+        obj.pushKV("connection_type", connman.NodeToString(node_id));
         ret.push_back(obj);
     }
 
