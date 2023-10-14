@@ -392,7 +392,6 @@ struct Peer {
         , m_our_services{our_services}
     {}
 
-private:
     mutable Mutex m_tx_relay_mutex;
 
     /** Transaction relay data. May be a nullptr. */
@@ -509,7 +508,7 @@ public:
     std::optional<std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    size_t GetPeerMemory(NodeId nodeid) const override;
+    std::pair<size_t, size_t> GetPeerMemory(NodeId nodeid) const override;
     bool IgnoresIncomingTxs() override { return m_opts.ignore_incoming_txs; }
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayTransaction(const uint256& txid, const uint256& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -1662,9 +1661,22 @@ PeerRef PeerManagerImpl::RemovePeer(NodeId id)
     return ret;
 }
 
-size_t PeerManagerImpl::GetPeerMemory(NodeId nodeid) const
+std::pair<size_t, size_t> PeerManagerImpl::GetPeerMemory(NodeId nodeid) const
 {
-    return 0;
+    PeerRef peer = GetPeerRef(nodeid);
+    size_t static_peer_memory = sizeof(peer.get());
+    size_t dy = 0;
+
+    dy += memusage::DynamicUsage(peer->m_blocks_for_inv_relay);
+    dy += memusage::DynamicUsage(peer->m_blocks_for_headers_relay);
+    dy += memusage::DynamicUsage(peer->m_addrs_to_send);
+    // m_addr_known size
+    dy += memusage::DynamicUsage(peer->m_getdata_requests);
+    dy += memusage::DynamicUsage(peer->m_headers_sync);
+    // m_tx_relay
+    dy += memusage::DynamicUsage(peer->m_tx_relay.get());
+
+    return std::make_pair(static_peer_memory, dy);
 }
 
 bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const

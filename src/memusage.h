@@ -91,12 +91,6 @@ static inline size_t DynamicUsage(const std::vector<X>& v)
 }
 
 template<typename X>
-static inline size_t DynamicUsage(const std::list<X>& v)
-{
-    return MallocUsage(v.size() * sizeof(X));
-}
-
-template<typename X>
 static inline size_t DynamicUsage(const std::deque<X>& v)
 {
     return MallocUsage(v.size() * sizeof(X));

@@ -83,7 +83,7 @@ public:
     /** Get statistics from node state */
     virtual bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const = 0;
 
-    virtual size_t GetPeerMemory(NodeId nodeid) const = 0;
+    virtual std::pair<size_t, size_t> GetPeerMemory(NodeId nodeid) const = 0;
 
     /** Whether this node ignores txs received over p2p. */
     virtual bool IgnoresIncomingTxs() = 0;
