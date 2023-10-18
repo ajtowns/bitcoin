@@ -127,12 +127,15 @@ size_t CNode::DynamicMemoryUsage() {
     //LOCK(cs_vRecv);
 
     val += memusage::DynamicUsage(m_transport);
+    //LogPrintf("ABCD DynamicUsage(m_transport): %d\n", memusage::DynamicUsage(m_transport));
     val += memusage::DynamicUsage(m_sock);
     val += m_send_memusage; // should represent memory usage of vSendMsg
     auto calc_val = memusage::DynamicUsage(vSendMsg);
-    LogPrintf("ABCD m_send_memusage: %d, calculated value of vSendMsg %d\n", m_send_memusage, calc_val);
+    LogPrintf("ABCD m_send_memusage: %d, calculated value of vSendMsg %d, ID: %d\n", m_send_memusage, calc_val, GetId());
     val += memusage::DynamicUsage(vRecvMsg);
-    val += memusage::DynamicUsage(m_msg_process_queue);
+    val += m_msg_process_queue_size; // should represent memory usage of m_msg_process_queue
+    auto calc_val_2 = memusage::DynamicUsage(m_msg_process_queue);
+    LogPrintf("ABCD m_msg_process_queue_size: %d, calculated value of m_msg_process_queue %d, ID: %d\n", m_msg_process_queue_size, calc_val_2, GetId());
     val += memusage::DynamicUsage(mapSendBytesPerMsgType);
     val += memusage::DynamicUsage(mapRecvBytesPerMsgType);
     val += memusage::DynamicUsage(m_i2p_sam_session);
