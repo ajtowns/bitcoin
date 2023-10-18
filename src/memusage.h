@@ -93,7 +93,9 @@ static inline size_t DynamicUsage(const std::vector<X>& v)
 template<typename X>
 static inline size_t DynamicUsage(const std::deque<X>& v)
 {
-    return MallocUsage(v.size() * sizeof(X));
+    // represents worst case memory usage where every element of the deque is a separate chunk,
+    // so takes an additional pointer of overhead
+    return (MallocUsage(sizeof(X)) + sizeof(void*)) * v.size();
 }
 
 template<unsigned int N, typename X, typename S, typename D>
