@@ -191,7 +191,7 @@ public:
  */
 class DataStream
 {
-protected:
+public:
     using vector_type = SerializeData;
     vector_type vch;
     vector_type::size_type m_read_pos{0};

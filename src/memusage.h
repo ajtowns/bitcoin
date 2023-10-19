@@ -8,6 +8,9 @@
 #include <indirectmap.h>
 #include <prevector.h>
 #include <support/allocators/pool.h>
+#include <net.h>
+#include <support/allocators/zeroafterfree.h>
+#include <streams.h>
 
 #include <cassert>
 #include <cstdlib>
@@ -86,6 +89,12 @@ struct stl_shared_counter
 
 template<typename X>
 static inline size_t DynamicUsage(const std::vector<X>& v)
+{
+    return MallocUsage(v.capacity() * sizeof(X));
+}
+
+template<typename X, typename Y>
+static inline size_t DynamicUsage(const std::vector<X, Y>& v)
 {
     return MallocUsage(v.capacity() * sizeof(X));
 }
@@ -170,6 +179,24 @@ template<typename X>
 static inline size_t DynamicUsage(const std::list<X>& l)
 {
     return MallocUsage(sizeof(list_node<X>)) * l.size();
+}
+
+static inline size_t DynamicUsage(const std::list<CNetMessage>& l)
+{
+    size_t total_bytes = 0;
+    size_t msg_bytes;
+
+    for (auto const& msg : l) {
+        msg_bytes = 0;
+        msg_bytes += sizeof(CNetMessage);
+        msg_bytes += msg.m_type.size();
+        msg_bytes += sizeof(CDataStream);
+        msg_bytes += DynamicUsage(msg.m_recv.vch);
+
+        total_bytes += MallocUsage(msg_bytes);
+    }
+
+    return total_bytes;
 }
 
 template<typename X>
