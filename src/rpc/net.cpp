@@ -112,7 +112,6 @@ static RPCHelpMan getpeermemoryinfo()
                     {
                     {RPCResult::Type::NUM, "id", "Peer id"},
                     {RPCResult::Type::NUM, "dynamic_cnode_memory", "the result of CNode::DynamicMemoryUsage"},
-                    {RPCResult::Type::NUM, "static_peer_memory", "the result of sizeof on the peer"},
                     {RPCResult::Type::NUM, "dynamic_peer_memory", "the result of PeerManagerImpl::GetPeerMemory"},
                     {RPCResult::Type::STR, "connection_type", "Type of connection: \n" + Join(CONNECTION_TYPE_DOC, ",\n") + ".\n"},
                 }},
@@ -125,8 +124,8 @@ static RPCHelpMan getpeermemoryinfo()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     NodeContext& node = EnsureAnyNodeContext(request.context);
-    const CConnman& connman = EnsureConnman(node);
-    const PeerManager& peerman = EnsurePeerman(node);
+    CConnman& connman = EnsureConnman(node);
+    PeerManager& peerman = EnsurePeerman(node);
 
     UniValue ret(UniValue::VARR);
 
@@ -134,13 +133,12 @@ static RPCHelpMan getpeermemoryinfo()
     std::map<int64_t, size_t> info;
     // call DynamicMemoryUsage on all CNode objects
     connman.GetNodeMemory(info);
-    for (const auto& [node_id, node_memory] : info) {
+    for (auto& [node_id, node_memory] : info) {
         UniValue obj(UniValue::VOBJ);
         obj.pushKV("id", node_id);
         obj.pushKV("dynamic_cnode_memory", node_memory);
 
-        auto [static_peer_memory, dynamic_peer_memory] = peerman.GetPeerMemory(node_id);
-        obj.pushKV("static_peer_memory", static_peer_memory);
+        auto dynamic_peer_memory = peerman.PeerDynamicMemoryUsage(node_id);
         obj.pushKV("dynamic_peer_memory", dynamic_peer_memory);
 
         obj.pushKV("connection_type", connman.NodeToString(node_id));

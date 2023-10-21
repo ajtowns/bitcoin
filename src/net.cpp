@@ -121,54 +121,85 @@ std::string strSubVersion;
 size_t CNode::DynamicMemoryUsage() {
     size_t val = 0;
 
-    //LOCK(m_sock_mutex);
-    //LOCK(cs_vSend);
-    //LOCK(m_msg_process_queue_mutex);
-    //LOCK(cs_vRecv);
-
     val += memusage::DynamicUsage(m_transport);
     //LogPrintf("ABCD DynamicUsage(m_transport): %d\n", memusage::DynamicUsage(m_transport));
-    val += memusage::DynamicUsage(m_sock);
-    val += m_send_memusage; // should represent memory usage of vSendMsg
-    auto calc_val = memusage::DynamicUsage(vSendMsg);
-    LogPrintf("ABCD m_send_memusage: %d, calculated value of vSendMsg %d, ID: %d\n", m_send_memusage, calc_val, GetId());
+
+    {
+        // m_send_memusage should represent memory usage of vSendMsg (minus some ptrs)
+        LOCK(cs_vSend);
+        val += m_send_memusage;
+        auto calc_val = memusage::DynamicUsage(vSendMsg);
+        LogPrintf("ABCD m_send_memusage: %d, calculated value of vSendMsg %d, ID: %d\n", m_send_memusage, calc_val, GetId());
+    }
+
+    // vRecvMsg doesn't have a lock because its only used by the SocketHandler thread
+    // this introduces access via RPC thread. might that cause an issue?
     val += memusage::DynamicUsage(vRecvMsg);
-    val += m_msg_process_queue_size; // should represent memory usage of m_msg_process_queue
-    auto calc_val_2 = memusage::DynamicUsage(m_msg_process_queue);
-    LogPrintf("ABCD m_msg_process_queue_size: %d, calculated value of m_msg_process_queue %d, ID: %d\n", m_msg_process_queue_size, calc_val_2, GetId());
-    val += memusage::DynamicUsage(mapSendBytesPerMsgType);
-    val += memusage::DynamicUsage(mapRecvBytesPerMsgType);
-    val += memusage::DynamicUsage(m_i2p_sam_session);
+
+    {
+        // m_msg_process_queue_size should represent memory usage of m_msg_process_queue (minus some ptrs)
+        LOCK(m_msg_process_queue_mutex);
+        val += m_msg_process_queue_size;
+        auto calc_val = memusage::DynamicUsage(m_msg_process_queue);
+        LogPrintf("ABCD m_msg_process_queue_size: %d, calculated value of m_msg_process_queue %d, ID: %d\n", m_msg_process_queue_size, calc_val, GetId());
+    }
+
+    WITH_LOCK(cs_vSend, val += memusage::DynamicUsage(mapSendBytesPerMsgType));
+    WITH_LOCK(cs_vRecv, val += memusage::DynamicUsage(mapRecvBytesPerMsgType));
+
+    {
+        LOCK(m_sock_mutex);
+        val += memusage::DynamicUsage(m_sock);
+        val += memusage::DynamicUsage(m_i2p_sam_session);
+    }
 
     return val;
 }
 
 // is returning 887. sizeof(CNode) returns 944.
+// why doesn't this give a warning "unused member function"?
 size_t CNode::ConstantMemoryUsage() {
     size_t val = 0;
     val += sizeof(m_transport); // unique ptr
     val += sizeof(m_permission_flags);
-    val += sizeof(m_sock); // shared ptr
-    val += sizeof(m_send_memusage);
-    val += sizeof(nSendBytes);
-    val += sizeof(vSendMsg); // deque of CSerializedNetMsg. dynamic memory stored via m_send_memusage.
-    val += sizeof(cs_vSend);
+
     val += sizeof(m_sock_mutex);
+    {
+        LOCK(m_sock_mutex);
+        val += sizeof(m_sock); // shared ptr
+        val += sizeof(m_i2p_sam_session);
+    }
+
+    val += sizeof(cs_vSend);
+    {
+        LOCK(cs_vSend);
+        val += sizeof(m_send_memusage);
+        val += sizeof(nSendBytes);
+        val += sizeof(vSendMsg); // deque of CSerializedNetMsg. dynamic memory stored via m_send_memusage.
+        val += sizeof(mapSendBytesPerMsgType);
+    }
+
     val += sizeof(cs_vRecv);
-    val += sizeof(nRecvBytes);
+    {
+        LOCK(cs_vRecv);
+        val += sizeof(nRecvBytes);
+        val += sizeof(mapRecvBytesPerMsgType);
+    }
+
     val += sizeof(m_last_send);
     val += sizeof(m_last_recv);
     val += sizeof(m_connected);
     val += sizeof(nTimeOffset);
+
     val += sizeof(addr);
     val += sizeof(addrBind);
     val += sizeof(m_addr_name);
+    val += sizeof(m_dest);
     val += sizeof(m_inbound_onion);
     val += sizeof(nVersion);
-    val += sizeof(m_subver_mutex);
 
-    //WITH_LOCK(m_subver_mutex, val += sizeof(cleanSubVer));
-    val += sizeof(cleanSubVer);
+    val += sizeof(m_subver_mutex);
+    WITH_LOCK(m_subver_mutex, val += sizeof(cleanSubVer));
 
     val += sizeof(m_prefer_evict);
     val += sizeof(fSuccessfullyConnected);
@@ -195,14 +226,16 @@ size_t CNode::ConstantMemoryUsage() {
     val += sizeof(m_greatest_common_version);
     val += sizeof(m_recv_flood_size);
     val += sizeof(vRecvMsg);
+
     val += sizeof(m_msg_process_queue_mutex);
-    val += sizeof(m_msg_process_queue);
-    val += sizeof(m_msg_process_queue_size);
-    val += sizeof(addrLocal);
+    {
+        LOCK(m_msg_process_queue_mutex);
+        val += sizeof(m_msg_process_queue);
+        val += sizeof(m_msg_process_queue_size);
+    }
+
     val += sizeof(m_addr_local_mutex);
-    val += sizeof(mapSendBytesPerMsgType);
-    val += sizeof(mapRecvBytesPerMsgType);
-    val += sizeof(m_i2p_sam_session);
+    WITH_LOCK(m_addr_local_mutex, val += sizeof(addrLocal));
 
     return val;
 }

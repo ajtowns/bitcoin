@@ -102,9 +102,8 @@ static inline size_t DynamicUsage(const std::vector<X, Y>& v)
 template<typename X>
 static inline size_t DynamicUsage(const std::deque<X>& v)
 {
-    // represents worst case memory usage where every element of the deque is a separate chunk,
-    // so takes an additional pointer of overhead
-    return (MallocUsage(sizeof(X)) + sizeof(void*)) * v.size();
+    // rough estimate of an additional 4 pointers of overhead
+    return (MallocUsage(sizeof(X))* v.size()) + 4*sizeof(void*);
 }
 
 template<unsigned int N, typename X, typename S, typename D>
@@ -181,22 +180,23 @@ static inline size_t DynamicUsage(const std::list<X>& l)
     return MallocUsage(sizeof(list_node<X>)) * l.size();
 }
 
-static inline size_t DynamicUsage(const std::list<CNetMessage>& l)
+// only handles dynamic memory usage of a CNetMessage object
+// static usage should be counted elsewhere
+static inline size_t OtherRecursiveDynamicUsage(CNetMessage& msg)
 {
-    size_t total_bytes = 0;
-    size_t msg_bytes;
+    // mallocusage of the m_type string
+    // and DynamicUsage(vector) calls MallocUsage(vector)
+    return MallocUsage(msg.m_type.capacity()) + DynamicUsage(msg.m_recv.vch);
+}
 
-    for (auto const& msg : l) {
-        msg_bytes = 0;
-        msg_bytes += sizeof(CNetMessage);
-        msg_bytes += msg.m_type.size();
-        msg_bytes += sizeof(CDataStream);
-        msg_bytes += DynamicUsage(msg.m_recv.vch);
-
-        total_bytes += MallocUsage(msg_bytes);
+static inline size_t RecursiveDynamicUsage(std::list<CNetMessage>& msg_list)
+{
+    size_t val = 0;
+    val = DynamicUsage(msg_list); // MallocUsage of the list
+    for (auto& msg : msg_list) {
+        val += OtherRecursiveDynamicUsage(msg);
     }
-
-    return total_bytes;
+    return val;
 }
 
 template<typename X>

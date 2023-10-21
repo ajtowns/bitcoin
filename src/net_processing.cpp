@@ -396,6 +396,10 @@ struct Peer {
 
     /** Transaction relay data. May be a nullptr. */
     std::unique_ptr<TxRelay> m_tx_relay GUARDED_BY(m_tx_relay_mutex);
+
+    size_t ConstantMemoryUsage()
+       EXCLUSIVE_LOCKS_REQUIRED(!m_misbehavior_mutex, !m_block_inv_mutex, !m_addr_send_times_mutex, !m_getdata_requests_mutex, !m_headers_sync_mutex);
+
 };
 
 using PeerRef = std::shared_ptr<Peer>;
@@ -508,7 +512,8 @@ public:
     std::optional<std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    std::pair<size_t, size_t> GetPeerMemory(NodeId nodeid) const override;
+    size_t PeerDynamicMemoryUsage(NodeId nodeid) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     bool IgnoresIncomingTxs() override { return m_opts.ignore_incoming_txs; }
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void RelayTransaction(const uint256& txid, const uint256& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -1661,22 +1666,106 @@ PeerRef PeerManagerImpl::RemovePeer(NodeId id)
     return ret;
 }
 
-std::pair<size_t, size_t> PeerManagerImpl::GetPeerMemory(NodeId nodeid) const
+// sanity check. should be comparable to sizeof(peer)
+size_t Peer::ConstantMemoryUsage()
+{
+    size_t val = 0;
+
+    val += sizeof(m_id);
+    val += sizeof(m_our_services);
+    val += sizeof(m_their_services);
+
+    val += sizeof(m_misbehavior_mutex);
+    {
+        LOCK(m_misbehavior_mutex);
+        val += sizeof(m_misbehavior_score);
+        val += sizeof(m_should_discourage);
+    }
+
+    val += sizeof(m_block_inv_mutex);
+    {
+        LOCK(m_block_inv_mutex);
+        val += sizeof(m_blocks_for_inv_relay);
+        val += sizeof(m_blocks_for_headers_relay);
+        // should this be in the dynamic function? uint256 base_block has an
+        // array, but size might be defined from the declaration?
+        val += sizeof(m_continuation_block);
+    }
+
+    val += sizeof(m_starting_height);
+    val += sizeof(m_ping_nonce_sent);
+    val += sizeof(m_ping_start);
+    val += sizeof(m_ping_queued);
+    val += sizeof(m_wtxid_relay);
+
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        val += sizeof(m_fee_filter_sent);
+        val += sizeof(m_next_send_feefilter);
+        val += sizeof(m_addrs_to_send);
+        val += sizeof(m_addr_known);
+        val += sizeof(m_getaddr_sent);
+        val += sizeof(m_getaddr_recvd);
+        val += sizeof(m_addr_token_bucket);
+        val += sizeof(m_addr_token_timestamp);
+        val += sizeof(m_inv_triggered_getheaders_before_sync);
+        val += sizeof(m_last_getheaders_timestamp);
+        val += sizeof(m_num_unconnecting_headers_msgs);
+        val += sizeof(m_headers_sync_timeout);
+        val += sizeof(m_prefers_headers);
+    }
+
+    val += sizeof(m_tx_relay_mutex);
+    // why doesn't this give a warning that I'm not holding the mutex?
+    val += sizeof(m_tx_relay);
+
+    val += sizeof(m_addr_relay_enabled);
+
+    val += sizeof(m_addr_send_times_mutex);
+    {
+        LOCK(m_addr_send_times_mutex);
+        val += sizeof(m_next_addr_send);
+        val += sizeof(m_next_local_addr_send);
+    }
+
+    val += sizeof(m_wants_addrv2);
+    val += sizeof(m_addr_rate_limited);
+    val += sizeof(m_addr_processed);
+
+    val += sizeof(m_getdata_requests_mutex);
+    WITH_LOCK(m_getdata_requests_mutex, val += sizeof(m_getdata_requests));
+
+    val += sizeof(m_headers_sync_mutex);
+    WITH_LOCK(m_headers_sync_mutex, val += sizeof(m_headers_sync));
+
+    val += sizeof(m_sent_sendheaders);
+
+    return val;
+}
+
+size_t PeerManagerImpl::PeerDynamicMemoryUsage(NodeId nodeid)
 {
     PeerRef peer = GetPeerRef(nodeid);
-    size_t static_peer_memory = sizeof(peer.get());
     size_t dy = 0;
 
-    dy += memusage::DynamicUsage(peer->m_blocks_for_inv_relay);
-    dy += memusage::DynamicUsage(peer->m_blocks_for_headers_relay);
-    dy += memusage::DynamicUsage(peer->m_addrs_to_send);
-    // m_addr_known size
-    dy += memusage::DynamicUsage(peer->m_getdata_requests);
-    dy += memusage::DynamicUsage(peer->m_headers_sync);
-    // m_tx_relay
-    dy += memusage::DynamicUsage(peer->m_tx_relay.get());
+    {
+        LOCK(peer->m_block_inv_mutex);
+        dy += memusage::DynamicUsage(peer->m_blocks_for_inv_relay);
+        dy += memusage::DynamicUsage(peer->m_blocks_for_headers_relay);
+    }
 
-    return std::make_pair(static_peer_memory, dy);
+    WITH_LOCK(peer->m_tx_relay_mutex, dy += memusage::DynamicUsage(peer->m_tx_relay.get()));
+
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        dy += memusage::DynamicUsage(peer->m_addrs_to_send);
+        dy += memusage::DynamicUsage(peer->m_addr_known);
+    }
+
+    WITH_LOCK(peer->m_getdata_requests_mutex, dy += memusage::DynamicUsage(peer->m_getdata_requests));
+    WITH_LOCK(peer->m_headers_sync_mutex, dy += memusage::DynamicUsage(peer->m_headers_sync));
+
+    return dy;
 }
 
 bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const

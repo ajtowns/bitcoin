@@ -762,8 +762,10 @@ public:
 
     const ConnectionType m_conn_type;
 
-    size_t DynamicMemoryUsage();
-    size_t ConstantMemoryUsage();
+    size_t DynamicMemoryUsage()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_vSend, !m_msg_process_queue_mutex, !cs_vRecv, !m_sock_mutex);
+    size_t ConstantMemoryUsage()
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_vSend, !m_msg_process_queue_mutex, !cs_vRecv, !m_sock_mutex, !m_subver_mutex, !m_addr_local_mutex);
 
     /** Move all messages from the received queue to the processing queue. */
     void MarkReceivedMsgsForProcessing()
