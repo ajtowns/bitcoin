@@ -1652,6 +1652,7 @@ static std::vector<unsigned int> AllConsensusFlags()
         if (i & 32) flag |= SCRIPT_VERIFY_WITNESS;
         if (i & 64) flag |= SCRIPT_VERIFY_TAPROOT;
         if (i & 128) flag |= SCRIPT_VERIFY_ANYPREVOUT;
+        if (i & 256) flag |= SCRIPT_VERIFY_TAPSCRIPT_OP_CAT;
 
         // SCRIPT_VERIFY_WITNESS requires SCRIPT_VERIFY_P2SH
         if (flag & SCRIPT_VERIFY_WITNESS && !(flag & SCRIPT_VERIFY_P2SH)) continue;
@@ -1840,8 +1841,8 @@ BOOST_AUTO_TEST_CASE(formatscriptflags)
     // quick check that FormatScriptFlags reports any unknown/unexpected bits
     BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_P2SH), "P2SH");
     BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_P2SH | (1u<<31)), "P2SH,0x80000000");
-    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_TAPROOT | (1u<<27)), "TAPROOT,0x08000000");
-    BOOST_CHECK_EQUAL(FormatScriptFlags(1u<<26), "0x04000000");
+    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_TAPROOT | (1u<<28)), "TAPROOT,0x10000000");
+    BOOST_CHECK_EQUAL(FormatScriptFlags(1u<<28), "0x10000000");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
