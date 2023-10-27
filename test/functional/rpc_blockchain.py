@@ -250,6 +250,7 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': True,
                 'height': 0,
             },
+            # XXX opcat
           }
         })
 
