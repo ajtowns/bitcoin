@@ -250,6 +250,7 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': True,
                 'height': 0,
             },
+            # TODO (armins) update result to include op_cat activation response
           }
         })
 
