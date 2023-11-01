@@ -292,7 +292,7 @@ inline CAmount CalculateOutputValue(const TxType& tx)
 /** The basic transaction that is broadcasted on the network and contained in
  * blocks.  A transaction can contain multiple inputs and outputs.
  */
-class CTransaction
+class CTransactionBase
 {
 public:
     // Default transaction version.
@@ -308,18 +308,14 @@ public:
     const int32_t nVersion;
     const uint32_t nLockTime;
 
-private:
-    /** Memory only. */
-    const Txid hash;
-    const Wtxid m_witness_hash;
-
+protected:
     Txid ComputeHash() const;
-    Wtxid ComputeWitnessHash() const;
+    Wtxid ComputeWitnessHash(const Txid& txid) const;
 
 public:
     /** Convert a CMutableTransaction into a CTransaction. */
-    explicit CTransaction(const CMutableTransaction& tx);
-    explicit CTransaction(CMutableTransaction&& tx);
+    explicit CTransactionBase(const CMutableTransaction& tx);
+    explicit CTransactionBase(CMutableTransaction&& tx);
 
     template <typename Stream>
     inline void Serialize(Stream& s) const {
@@ -329,14 +325,11 @@ public:
     /** This deserializing constructor is provided instead of an Unserialize method.
      *  Unserialize is not possible, since it would require overwriting const fields. */
     template <typename Stream>
-    CTransaction(deserialize_type, Stream& s) : CTransaction(CMutableTransaction(deserialize, s)) {}
+    CTransactionBase(deserialize_type, Stream& s) : CTransactionBase(CMutableTransaction(deserialize, s)) {}
 
     bool IsNull() const {
         return vin.empty() && vout.empty();
     }
-
-    const Txid& GetHash() const LIFETIMEBOUND { return hash; }
-    const Wtxid& GetWitnessHash() const LIFETIMEBOUND { return m_witness_hash; };
 
     // Return sum of txouts.
     CAmount GetValueOut() const;
@@ -353,18 +346,6 @@ public:
         return (vin.size() == 1 && vin[0].prevout.IsNull());
     }
 
-    friend bool operator==(const CTransaction& a, const CTransaction& b)
-    {
-        return a.hash == b.hash;
-    }
-
-    friend bool operator!=(const CTransaction& a, const CTransaction& b)
-    {
-        return a.hash != b.hash;
-    }
-
-    std::string ToString() const;
-
     bool HasWitness() const
     {
         for (size_t i = 0; i < vin.size(); i++) {
@@ -373,6 +354,37 @@ public:
             }
         }
         return false;
+    }
+};
+
+class CTransaction : public CTransactionBase
+{
+private:
+    /** Memory only. */
+    const Txid hash;
+    const Wtxid m_witness_hash;
+
+public:
+    explicit CTransaction(const CMutableTransaction& tx) : CTransactionBase(tx), hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash(hash)} {}
+    explicit CTransaction(CMutableTransaction&& tx) : CTransactionBase(std::move(tx)), hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash(hash)} {}
+
+    template <typename Stream>
+    CTransaction(deserialize_type, Stream& s) : CTransactionBase(deserialize, s), hash{ComputeHash()}, m_witness_hash{ComputeWitnessHash(hash)} {}
+
+    const Txid& GetHash() const LIFETIMEBOUND { return hash; }
+    const Wtxid& GetWitnessHash() const LIFETIMEBOUND { return m_witness_hash; };
+    bool HasWitness() const { return hash.ToUint256() != m_witness_hash.ToUint256(); }
+
+    std::string ToString() const;
+
+    friend bool operator==(const CTransaction& a, const CTransaction& b)
+    {
+        return a.hash == b.hash;
+    }
+
+    friend bool operator!=(const CTransaction& a, const CTransaction& b)
+    {
+        return a.hash != b.hash;
     }
 };
 
