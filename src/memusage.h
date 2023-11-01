@@ -182,11 +182,16 @@ static inline size_t DynamicUsage(const std::list<X>& l)
 
 // only handles dynamic memory usage of a CNetMessage object
 // static usage should be counted elsewhere
-static inline size_t OtherRecursiveDynamicUsage(CNetMessage& msg)
+static inline size_t RecursiveDynamicUsage(CNetMessage& msg)
 {
     // mallocusage of the m_type string
     // and DynamicUsage(vector) calls MallocUsage(vector)
     return MallocUsage(msg.m_type.capacity()) + DynamicUsage(msg.m_recv.vch);
+}
+
+static inline size_t DynamicUsage(const std::string s)
+{
+    return MallocUsage(s.capacity());
 }
 
 static inline size_t RecursiveDynamicUsage(std::list<CNetMessage>& msg_list)
@@ -194,7 +199,7 @@ static inline size_t RecursiveDynamicUsage(std::list<CNetMessage>& msg_list)
     size_t val = 0;
     val = DynamicUsage(msg_list); // MallocUsage of the list
     for (auto& msg : msg_list) {
-        val += OtherRecursiveDynamicUsage(msg);
+        val += RecursiveDynamicUsage(msg);
     }
     return val;
 }

@@ -281,6 +281,10 @@ public:
     /** Retrieve information about this transport. */
     virtual Info GetInfo() const noexcept = 0;
 
+
+    virtual size_t StaticMemoryUsage() = 0;
+    virtual size_t DynamicMemoryUsage() = 0;
+
     // 1. Receiver side functions, for decoding bytes received on the wire into transport protocol
     // agnostic CNetMessage (message type & payload) objects.
 
@@ -432,6 +436,9 @@ private:
 
 public:
     V1Transport(const NodeId node_id, int nTypeIn, int nVersionIn) noexcept;
+
+    size_t StaticMemoryUsage() override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex, !m_send_mutex);
+    size_t DynamicMemoryUsage() override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex, !m_send_mutex);
 
     bool ReceivedMessageComplete() const override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex)
     {
@@ -631,6 +638,9 @@ private:
     SendState m_send_state GUARDED_BY(m_send_mutex);
     /** Whether we've sent at least 24 bytes (which would trigger disconnect for V1 peers). */
     bool m_sent_v1_header_worth GUARDED_BY(m_send_mutex) {false};
+
+    size_t StaticMemoryUsage() override;
+    size_t DynamicMemoryUsage() override;
 
     /** Change the receive state. */
     void SetReceiveState(RecvState recv_state) noexcept EXCLUSIVE_LOCKS_REQUIRED(m_recv_mutex);
