@@ -1761,15 +1761,24 @@ size_t PeerManagerImpl::PeerDynamicMemoryUsage(NodeId nodeid)
 
     LOCK(peer->m_tx_relay_mutex);
     if (peer->m_tx_relay) {
-        dy += memusage::DynamicUsage(peer->m_tx_relay);
+        size_t zzzz{0}, xxxx{0}, yyyy{0};
+        zzzz += memusage::DynamicUsage(peer->m_tx_relay);
         {
         LOCK(peer->m_tx_relay->m_bloom_filter_mutex);
-        dy += memusage::DynamicUsage(peer->m_tx_relay->m_bloom_filter);
+        zzzz += memusage::DynamicUsage(peer->m_tx_relay->m_bloom_filter);
+        if (peer->m_tx_relay->m_bloom_filter) {
+            xxxx += peer->m_tx_relay->m_bloom_filter->DynamicUsage();
+        }
         }
         {
         LOCK(peer->m_tx_relay->m_tx_inventory_mutex);
-        dy += memusage::DynamicUsage(peer->m_tx_relay->m_tx_inventory_to_send);
+        yyyy += peer->m_tx_relay->m_tx_inventory_known_filter.DynamicUsage();
+        zzzz += memusage::DynamicUsage(peer->m_tx_relay->m_tx_inventory_to_send);
         }
+LogPrintf("ABCD: peer memusage %d m_tx_relay %d %d %d\n", dy, zzzz, xxxx, yyyy);
+        dy += zzzz + xxxx + yyyy;
+    } else {
+LogPrintf("ABCD: peer memusage %d no m_tx_relay??\n", dy);
     }
     return dy;
 }

@@ -5,6 +5,7 @@
 #ifndef BITCOIN_COMMON_BLOOM_H
 #define BITCOIN_COMMON_BLOOM_H
 
+#include <memusage.h>
 #include <serialize.h>
 #include <span.h>
 
@@ -52,6 +53,8 @@ private:
     unsigned int Hash(unsigned int nHashNum, Span<const unsigned char> vDataToHash) const;
 
 public:
+    size_t DynamicUsage() const { return memusage::DynamicUsage(vData); }
+
     /**
      * Creates a new bloom filter which will provide the given fp rate when filled with the given number of elements
      * Note that if the given parameters will result in a filter outside the bounds of the protocol limits,
@@ -114,6 +117,8 @@ public:
     bool contains(Span<const unsigned char> vKey) const;
 
     void reset();
+
+    size_t DynamicUsage() const { return memusage::DynamicUsage(data); }
 
 private:
     int nEntriesPerGeneration;
