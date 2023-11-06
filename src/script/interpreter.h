@@ -351,4 +351,6 @@ size_t CountWitnessSigOps(const CScript& scriptSig, const CScript& scriptPubKey,
 
 int FindAndDelete(CScript& script, const CScript& b);
 
+bool CastToBool(const std::vector<unsigned char>& vch);
+
 #endif // BITCOIN_SCRIPT_INTERPRETER_H
