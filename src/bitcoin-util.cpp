@@ -15,6 +15,8 @@
 #include <common/system.h>
 #include <compat/compat.h>
 #include <core_io.h>
+#include <deploymentinfo.h>
+#include <policy/policy.h>
 #include <script/interpreter.h>
 #include <streams.h>
 #include <univalue.h>
@@ -40,9 +42,10 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-sigversion", "Specify a script sigversion (base, witness_v0, tapscript).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-script_flags", "Specify SCRIPT_VERIFY flags.", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
 
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
-    argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion"});
+    argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion", "-script_flags"});
 
     SetupChainParamsBaseOptions(argsman);
 }
@@ -174,6 +177,23 @@ static std::string sigver2str(SigVersion sigver)
     return "unknown";
 }
 
+static uint32_t parse_verify_flags(const std::string& strFlags)
+{
+    if (strFlags.empty() || strFlags == "NONE") return 0;
+    if (strFlags == "STANDARD") return STANDARD_SCRIPT_VERIFY_FLAGS;
+    if (strFlags == "MANDATORY") return MANDATORY_SCRIPT_VERIFY_FLAGS;
+
+    unsigned int flags = 0;
+    std::vector<std::string> words = SplitString(strFlags, ',');
+
+    for (const std::string& word : words)
+    {
+        if (!g_verify_flag_names.count(word)) continue;
+        flags |= g_verify_flag_names.at(word);
+    }
+    return flags;
+}
+
 static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>& args, std::string& strPrint)
 {
     UniValue result{UniValue::VOBJ};
@@ -196,18 +216,22 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
 
     SigVersion sigversion = SigVersion::WITNESS_V0;
 
-    if (auto svstr = argsman.GetArg("-sigversion"); svstr.has_value()) {
-        if (*svstr == "base") {
+    if (const auto verstr = argsman.GetArg("-sigversion"); verstr.has_value()) {
+        if (*verstr == "base") {
             sigversion = SigVersion::BASE;
-        } else if (*svstr == "witness_v0") {
+        } else if (*verstr == "witness_v0") {
             sigversion = SigVersion::WITNESS_V0;
-        } else if (*svstr == "tapscript") {
+        } else if (*verstr == "tapscript") {
             sigversion = SigVersion::TAPSCRIPT;
         } else {
-            strPrint = strprintf("Unknown -sigversion=%s", *svstr);
+            strPrint = strprintf("Unknown -sigversion=%s", *verstr);
             return EXIT_FAILURE;
         }
     }
+    if (const auto verifystr = argsman.GetArg("-script_flags"); verifystr.has_value()) {
+        flags = parse_verify_flags(*verifystr);
+    }
+
     ScriptError serror{};
 
     if (args.size() > 0) {
@@ -223,6 +247,7 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
     ScriptToUniv(script, uv_script);
     result.pushKV("script", uv_script);
     result.pushKV("sigversion", sigver2str(sigversion));
+    result.pushKV("script_flags", FormatScriptFlags(flags));
 
     std::optional<bool> opsuccess_check;
     if (sigversion == SigVersion::TAPSCRIPT) {
