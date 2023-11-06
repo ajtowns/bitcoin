@@ -13,8 +13,6 @@
 #include <string>
 #include <vector>
 
-bool CastToBool(const std::vector<unsigned char>& vch);
-
 FUZZ_TARGET(script_interpreter)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
