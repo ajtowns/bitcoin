@@ -39,8 +39,10 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
 
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
+    argsman.AddArg("-sigversion", "Specify a script sigversion (base, witness_v0, tapscript).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
-    argsman.AddCommand("evalscript", "Interpret a bitcoin script");
+    argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion"});
 
     SetupChainParamsBaseOptions(argsman);
 }
@@ -161,7 +163,18 @@ static UniValue stack2uv(const std::vector<std::vector<unsigned char>>& stack)
     return result;
 }
 
-static int EvalScript(const std::vector<std::string>& args, std::string& strPrint)
+static std::string sigver2str(SigVersion sigver)
+{
+    switch(sigver) {
+    case SigVersion::BASE: return "base";
+    case SigVersion::WITNESS_V0: return "witness_v0";
+    case SigVersion::TAPROOT: return "taproot";
+    case SigVersion::TAPSCRIPT: return "tapscript";
+    }
+    return "unknown";
+}
+
+static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>& args, std::string& strPrint)
 {
     UniValue result{UniValue::VOBJ};
 
@@ -182,6 +195,19 @@ static int EvalScript(const std::vector<std::string>& args, std::string& strPrin
 //  GenericTransactionSignatureChecker checker(txTo, idx, amount, txdata, MissingDataBehavior::ASSERT_FAIL);
 
     SigVersion sigversion = SigVersion::WITNESS_V0;
+
+    if (auto svstr = argsman.GetArg("-sigversion"); svstr.has_value()) {
+        if (*svstr == "base") {
+            sigversion = SigVersion::BASE;
+        } else if (*svstr == "witness_v0") {
+            sigversion = SigVersion::WITNESS_V0;
+        } else if (*svstr == "tapscript") {
+            sigversion = SigVersion::TAPSCRIPT;
+        } else {
+            strPrint = strprintf("Unknown -sigversion=%s", *svstr);
+            return EXIT_FAILURE;
+        }
+    }
     ScriptError serror{};
 
     if (args.size() > 0) {
@@ -196,8 +222,32 @@ static int EvalScript(const std::vector<std::string>& args, std::string& strPrin
     UniValue uv_script{UniValue::VOBJ};
     ScriptToUniv(script, uv_script);
     result.pushKV("script", uv_script);
+    result.pushKV("sigversion", sigver2str(sigversion));
 
-    bool success = EvalScript(stack, script, flags, checker, sigversion, &serror);
+    std::optional<bool> opsuccess_check;
+    if (sigversion == SigVersion::TAPSCRIPT) {
+        opsuccess_check = CheckTapscriptOpSuccess(script, flags, &serror);
+    }
+
+    bool success = (opsuccess_check.has_value() ? *opsuccess_check : EvalScript(stack, script, flags, checker, sigversion, &serror));
+    if (opsuccess_check.has_value()) {
+         result.pushKV("opsuccess_found", true);
+    }
+
+    if (success) {
+        if (stack.empty() || !CastToBool(stack.back())) {
+            success = false;
+            serror = SCRIPT_ERR_EVAL_FALSE;
+        } else if (stack.size() > 1) {
+            if (sigversion == SigVersion::WITNESS_V0 || sigversion == SigVersion::TAPSCRIPT) {
+                success = false;
+                serror = SCRIPT_ERR_CLEANSTACK;
+            } else if ((flags & SCRIPT_VERIFY_CLEANSTACK) != 0) {
+                success = false;
+                serror = SCRIPT_ERR_CLEANSTACK;
+            }
+        }
+    }
 
     result.pushKV("stack-after", stack2uv(stack));
 
@@ -241,7 +291,7 @@ MAIN_FUNCTION
         if (cmd->command == "grind") {
             ret = Grind(cmd->args, strPrint);
         } else if (cmd->command == "evalscript") {
-            ret = EvalScript(cmd->args, strPrint);
+            ret = EvalScript(args, cmd->args, strPrint);
         } else {
             assert(false); // unknown command should be caught earlier
         }
