@@ -15,7 +15,9 @@
 #include <common/system.h>
 #include <compat/compat.h>
 #include <core_io.h>
+#include <script/interpreter.h>
 #include <streams.h>
+#include <univalue.h>
 #include <util/exception.h>
 #include <util/strencodings.h>
 #include <util/translation.h>
@@ -38,6 +40,7 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
+    argsman.AddCommand("evalscript", "Interpret a bitcoin script");
 
     SetupChainParamsBaseOptions(argsman);
 }
@@ -149,6 +152,65 @@ static int Grind(const std::vector<std::string>& args, std::string& strPrint)
     return EXIT_SUCCESS;
 }
 
+static UniValue stack2uv(const std::vector<std::vector<unsigned char>>& stack)
+{
+    UniValue result{UniValue::VARR};
+    for (const auto& v : stack) {
+        result.push_back(HexStr(v));
+    }
+    return result;
+}
+
+static int EvalScript(const std::vector<std::string>& args, std::string& strPrint)
+{
+    UniValue result{UniValue::VOBJ};
+
+    std::vector<std::vector<unsigned char> > stack{};
+    CScript script{};
+    uint32_t flags{0};
+    BaseSignatureChecker checker;
+
+//  CTransaction txTo;
+//
+//  PrecomputedTransactionData txdata;
+//  std::vector<CTxOut> spent_outputs;
+//  txdata.Init(txTo, std::move(spent_outputs), /*force=*/true);
+//
+//  unsigned int idx;  // which input is being spent
+//  CAmount amountIn = spent_outputs.at(idx).nAmount; // ?  (assuming it's initialized, ofc)
+//
+//  GenericTransactionSignatureChecker checker(txTo, idx, amount, txdata, MissingDataBehavior::ASSERT_FAIL);
+
+    SigVersion sigversion = SigVersion::WITNESS_V0;
+    ScriptError serror{};
+
+    if (args.size() > 0) {
+        auto h = ParseHex(args[0]);
+        script = CScript(h.begin(), h.end());
+
+        for (size_t i = 1; i < args.size(); ++i) {
+            stack.push_back(ParseHex(args[i]));
+        }
+    }
+
+    UniValue uv_script{UniValue::VOBJ};
+    ScriptToUniv(script, uv_script);
+    result.pushKV("script", uv_script);
+
+    bool success = EvalScript(stack, script, flags, checker, sigversion, &serror);
+
+    result.pushKV("stack-after", stack2uv(stack));
+
+    result.pushKV("success", success);
+    if (!success) {
+        result.pushKV("error", ScriptErrorString(serror));
+    }
+
+    strPrint = result.write(2);
+
+    return EXIT_SUCCESS;
+}
+
 MAIN_FUNCTION
 {
     ArgsManager& args = gArgs;
@@ -178,6 +240,8 @@ MAIN_FUNCTION
     try {
         if (cmd->command == "grind") {
             ret = Grind(cmd->args, strPrint);
+        } else if (cmd->command == "evalscript") {
+            ret = EvalScript(cmd->args, strPrint);
         } else {
             assert(false); // unknown command should be caught earlier
         }
