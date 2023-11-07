@@ -8,6 +8,7 @@
 #include <consensus/params.h>
 
 #include <optional>
+#include <map>
 #include <string>
 
 struct VBDeploymentInfo {
@@ -28,5 +29,9 @@ inline std::string DeploymentName(Consensus::DeploymentPos pos)
 }
 
 std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view deployment_name);
+
+extern const std::map<std::string, uint32_t> g_verify_flag_names;
+
+std::string FormatScriptFlags(uint32_t flags);
 
 #endif // BITCOIN_DEPLOYMENTINFO_H
