@@ -20,6 +20,7 @@
 #include <script/interpreter.h>
 #include <streams.h>
 #include <univalue.h>
+#include <util/check.h>
 #include <util/exception.h>
 #include <util/strencodings.h>
 #include <util/translation.h>
@@ -41,8 +42,13 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
 
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
+    // evalscript options
     argsman.AddArg("-sigversion", "Specify a script sigversion (base, witness_v0, tapscript).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-script_flags", "Specify SCRIPT_VERIFY flags.", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-tx", "The tx (hex encoded)", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-input", "The input being spent", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-spent_output", "The spent inputs (hex encode TxOut, may be specified multiple times).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-stack", "Hex encoded initial stack element (may be specified multiple times).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
 
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
     argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion", "-script_flags"});
@@ -201,18 +207,11 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
     std::vector<std::vector<unsigned char> > stack{};
     CScript script{};
     uint32_t flags{0};
-    BaseSignatureChecker checker;
+    PrecomputedTransactionData txdata;
+    ScriptExecutionData execdata;
 
-//  CTransaction txTo;
-//
-//  PrecomputedTransactionData txdata;
-//  std::vector<CTxOut> spent_outputs;
-//  txdata.Init(txTo, std::move(spent_outputs), /*force=*/true);
-//
-//  unsigned int idx;  // which input is being spent
-//  CAmount amountIn = spent_outputs.at(idx).nAmount; // ?  (assuming it's initialized, ofc)
-//
-//  GenericTransactionSignatureChecker checker(txTo, idx, amount, txdata, MissingDataBehavior::ASSERT_FAIL);
+    std::unique_ptr<const CTransaction> txTo;
+    std::unique_ptr<BaseSignatureChecker> checker;
 
     SigVersion sigversion = SigVersion::WITNESS_V0;
 
@@ -230,6 +229,84 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
     }
     if (const auto verifystr = argsman.GetArg("-script_flags"); verifystr.has_value()) {
         flags = parse_verify_flags(*verifystr);
+    }
+    if (const auto txhex = argsman.GetArg("-tx"); txhex.has_value()) {
+        const int input = argsman.GetIntArg("-input", 0);
+        const auto spent_outputs_hex = argsman.GetArgs("-spent_output");
+
+        CMutableTransaction mut_tx;
+        if (!DecodeHexTx(mut_tx, *txhex)) {
+            strPrint = "Could not decode transaction from -tx argument";
+            return EXIT_FAILURE;
+        }
+        txTo = std::make_unique<CTransaction>(mut_tx);
+
+        std::vector<CTxOut> spent_outputs;
+        for (const auto& outhex : spent_outputs_hex) {
+            bool ok = false;
+            if (IsHex(outhex)) {
+                CTxOut txout;
+                std::vector<unsigned char> out(ParseHex(outhex));
+                DataStream ss(out);
+                try {
+                    ss >> txout;
+                    if (ss.empty()) {
+                        spent_outputs.push_back(txout);
+                        ok = true;
+                    }
+                } catch (const std::exception&) {
+                    // fall through
+                }
+            }
+            if (!ok) {
+                strPrint = strprintf("Could not parse -spent_output=%s", outhex);
+                return EXIT_FAILURE;
+            }
+        }
+
+        const bool input_in_range = input >= 0 && static_cast<size_t>(input) < spent_outputs.size();
+        CAmount amount = (input_in_range ? spent_outputs.at(input).nValue : 0);
+        txdata.Init(*txTo, std::move(spent_outputs), /*force=*/true);
+        checker = std::make_unique<GenericTransactionSignatureChecker<CTransaction>>(txTo.get(), input, amount, txdata, MissingDataBehavior::ASSERT_FAIL);
+
+        if (sigversion == SigVersion::TAPSCRIPT && input >= 0 && input_in_range) {
+            const CTxIn& txin = txTo->vin.at(input);
+            execdata.m_annex_present = false;
+            if (txin.scriptWitness.stack.size() <= 1) {
+                // no witness or key path spend, so nothing to do here
+            } else {
+                const auto& top = txin.scriptWitness.stack.back();
+                if (top.size() >= 1 && top.at(0) == 0x50) {
+                    execdata.m_annex_hash = (HashWriter{} << top).GetSHA256();
+                    execdata.m_annex_present = true;
+                }
+            }
+            execdata.m_annex_init = true;
+            execdata.m_tapleaf_hash = uint256::ZERO; // ComputeTapleafHash(control[0] & TAPROOT_LEAF_MASK, script);
+            execdata.m_tapleaf_hash_init = true;
+            execdata.m_validation_weight_left = ::GetSerializeSize(stack, PROTOCOL_VERSION) + ::GetSerializeSize(script, PROTOCOL_VERSION) + VALIDATION_WEIGHT_OFFSET;
+            execdata.m_validation_weight_left_init = true;
+        }
+
+    } else {
+        checker = std::make_unique<BaseSignatureChecker>();
+    }
+
+    for (const auto& stackel : argsman.GetArgs("-stack")) {
+        if (!IsHex(stackel)) {
+            strPrint = strprintf("Could not parse -stack=%s", stackel);
+            return EXIT_FAILURE;
+        }
+        stack.emplace_back(ParseHex(stackel));
+    }
+
+    if (sigversion == SigVersion::TAPSCRIPT && !execdata.m_annex_init) {
+        execdata.m_annex_present = false;
+        execdata.m_annex_init = true;
+        execdata.m_tapleaf_hash = uint256::ZERO;
+        execdata.m_tapleaf_hash_init = true;
+        execdata.m_validation_weight_left = ::GetSerializeSize(stack, PROTOCOL_VERSION) + ::GetSerializeSize(script, PROTOCOL_VERSION) + VALIDATION_WEIGHT_OFFSET;
+        execdata.m_validation_weight_left_init = true;
     }
 
     ScriptError serror{};
@@ -254,7 +331,7 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
         opsuccess_check = CheckTapscriptOpSuccess(script, flags, &serror);
     }
 
-    bool success = (opsuccess_check.has_value() ? *opsuccess_check : EvalScript(stack, script, flags, checker, sigversion, &serror));
+    bool success = (opsuccess_check.has_value() ? *opsuccess_check : EvalScript(stack, script, flags, *Assert(checker), sigversion, execdata, &serror));
     if (opsuccess_check.has_value()) {
          result.pushKV("opsuccess_found", true);
     }
