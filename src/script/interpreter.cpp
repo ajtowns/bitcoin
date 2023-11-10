@@ -1981,9 +1981,16 @@ static bool ExecuteWitnessScript(const Span<const valtype>& stack_span, const CS
                 return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
             }
 
-            const bool op_cat_is_op_success = !(flags & SCRIPT_VERIFY_TAPSCRIPT_OP_CAT);
             // New opcodes will be listed here. May use a different sigversion to modify existing opcodes.
-            if (IsOpSuccess(opcode) || (op_cat_is_op_success && opcode == OP_CAT)) {
+            if (IsOpSuccess(opcode)) {
+                if (opcode == OP_CAT) {
+                    if (flags & SCRIPT_VERIFY_DISCOURAGE_TAPSCRIPT_OP_CAT) {
+                        return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_CAT);
+                    } else if (!(flags & SCRIPT_VERIFY_TAPSCRIPT_OP_CAT)) {
+                        // op_success behaviour
+                        return set_success(serror);
+                    }
+                }
                 if (flags & SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS) {
                     return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_SUCCESS);
                 }
