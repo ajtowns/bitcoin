@@ -1938,6 +1938,8 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
                 execdata.m_validation_weight_left_init = true;
                 return ExecuteWitnessScript(stack, exec_script, flags, SigVersion::TAPSCRIPT, checker, execdata, serror);
             }
+            execdata.m_control_block = std::move(control);
+            execdata.m_control_block_init = true;
             if (flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_TAPROOT_VERSION) {
                 return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_TAPROOT_VERSION);
             }

@@ -195,6 +195,11 @@ enum class SigVersion
 
 struct ScriptExecutionData
 {
+    //! Whether m_control_block is initialized.
+    bool m_control_block_init = false;
+    //! The tapscript control block.
+    std::vector<unsigned char> m_control_block;
+
     //! Whether m_tapleaf_hash is initialized.
     bool m_tapleaf_hash_init = false;
     //! The tapleaf hash.
