@@ -197,7 +197,8 @@ enum opcodetype
     OP_NOP2 = OP_CHECKLOCKTIMEVERIFY,
     OP_CHECKSEQUENCEVERIFY = 0xb2,
     OP_NOP3 = OP_CHECKSEQUENCEVERIFY,
-    OP_NOP4 = 0xb3,
+    OP_CHECKTXHASHVERIFY = 0xb3,
+    OP_NOP4 = OP_CHECKTXHASHVERIFY,
     OP_NOP5 = 0xb4,
     OP_NOP6 = 0xb5,
     OP_NOP7 = 0xb6,
@@ -207,6 +208,8 @@ enum opcodetype
 
     // Opcode added by BIP 342 (Tapscript)
     OP_CHECKSIGADD = 0xba,
+
+    OP_TXHASH = 0xbd,
 
     OP_INVALIDOPCODE = 0xff,
 };

@@ -98,6 +98,12 @@ static const std::vector<unsigned char> TXFS_TEMPLATE_DEFAULT = {
 
 static const unsigned int LEADING_CACHE_INTERVAL = 10;
 
+bool validate_field_selector(
+    std::vector<unsigned char>& field_selector,
+    unsigned int nb_inputs,
+    unsigned int nb_outputs
+);
+
 struct TxHashCache
 {
     //! Individual hashes for all input fields that can be of variable size.
