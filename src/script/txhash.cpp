@@ -215,11 +215,11 @@ uint256 sha256_script(const CScript& script) {
     return out;
 }
 
+//TODO(stevenroose) check that resize is noop if already good size
 uint256 script_sig_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs, unsigned int idx) {
     if (cache.hashed_script_sigs.empty() || cache.hashed_script_sigs[idx].IsNull()) {
+        LOCK(cache.mtx);
         cache.hashed_script_sigs.resize(inputs.size());
-    }
-    if (cache.hashed_script_sigs[idx].IsNull()) {
         cache.hashed_script_sigs[idx] = sha256_script(inputs[idx].scriptSig);
     }
     return cache.hashed_script_sigs[idx];
@@ -227,9 +227,8 @@ uint256 script_sig_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs, un
 
 uint256 spent_script_hash(TxHashCache& cache, const std::vector<CTxOut> spent_outputs, unsigned int idx) {
     if (cache.hashed_spent_scripts.empty() || cache.hashed_spent_scripts[idx].IsNull()) {
+        LOCK(cache.mtx);
         cache.hashed_spent_scripts.resize(spent_outputs.size());
-    }
-    if (cache.hashed_spent_scripts[idx].IsNull()) {
         cache.hashed_spent_scripts[idx] = sha256_script(spent_outputs[idx].scriptPubKey);
     }
     return cache.hashed_spent_scripts[idx];
@@ -237,9 +236,8 @@ uint256 spent_script_hash(TxHashCache& cache, const std::vector<CTxOut> spent_ou
 
 uint256 annex_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs, unsigned int idx) {
     if (cache.hashed_annexes.empty() || cache.hashed_annexes[idx].IsNull()) {
+        LOCK(cache.mtx);
         cache.hashed_annexes.resize(inputs.size());
-    }
-    if (cache.hashed_annexes[idx].IsNull()) {
         //TODO(stevenroose) annex
         cache.hashed_annexes[idx] = sha256_script(inputs[idx].scriptSig);
     }
@@ -248,9 +246,8 @@ uint256 annex_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs, unsigne
 
 uint256 script_pubkey_hash(TxHashCache& cache, const std::vector<CTxOut>& outputs, unsigned int idx) {
     if (cache.hashed_script_pubkeys.empty() || cache.hashed_script_pubkeys[idx].IsNull()) {
+        LOCK(cache.mtx);
         cache.hashed_script_pubkeys.resize(outputs.size());
-    }
-    if (cache.hashed_script_pubkeys[idx].IsNull()) {
         cache.hashed_script_pubkeys[idx] = sha256_script(outputs[idx].scriptPubKey);
     }
     return cache.hashed_script_pubkeys[idx];
@@ -466,6 +463,7 @@ uint256 leading_amounts_hash(TxHashCache& cache, const std::vector<CTxOut>& outp
 
 uint256 all_prevouts_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) {
     if (cache.all_prevouts.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_prevouts = leading_prevouts_hash(cache, inputs, inputs.size());
     }
     return cache.all_prevouts;
@@ -473,6 +471,7 @@ uint256 all_prevouts_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) 
 
 uint256 all_sequences_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) {
     if (cache.all_sequences.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_sequences = leading_sequences_hash(cache, inputs, inputs.size());
     }
     return cache.all_sequences;
@@ -480,6 +479,7 @@ uint256 all_sequences_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs)
 
 uint256 all_script_sigs_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) {
     if (cache.all_script_sigs.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_script_sigs = leading_script_sigs_hash(cache, inputs, inputs.size());
     }
     return cache.all_script_sigs;
@@ -487,6 +487,7 @@ uint256 all_script_sigs_hash(TxHashCache& cache, const std::vector<CTxIn>& input
 
 uint256 all_spent_scripts_hash(TxHashCache& cache, const std::vector<CTxOut>& spent_outputs) {
     if (cache.all_spent_scripts.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_spent_scripts = leading_spent_scripts_hash(cache, spent_outputs, spent_outputs.size());
     }
     return cache.all_spent_scripts;
@@ -494,6 +495,7 @@ uint256 all_spent_scripts_hash(TxHashCache& cache, const std::vector<CTxOut>& sp
 
 uint256 all_spent_amounts_hash(TxHashCache& cache, const std::vector<CTxOut>& spent_outputs) {
     if (cache.all_spent_amounts.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_spent_amounts = leading_spent_amounts_hash(cache, spent_outputs, spent_outputs.size());
     }
     return cache.all_spent_amounts;
@@ -501,6 +503,7 @@ uint256 all_spent_amounts_hash(TxHashCache& cache, const std::vector<CTxOut>& sp
 
 uint256 all_annexes_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) {
     if (cache.all_annexes.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_annexes = leading_annexes_hash(cache, inputs, inputs.size());
     }
     return cache.all_annexes;
@@ -508,6 +511,7 @@ uint256 all_annexes_hash(TxHashCache& cache, const std::vector<CTxIn>& inputs) {
 
 uint256 all_script_pubkeys_hash(TxHashCache& cache, const std::vector<CTxOut>& outputs) {
     if (cache.all_script_pubkeys.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_script_pubkeys = leading_script_pubkeys_hash(cache, outputs, outputs.size());
     }
     return cache.all_script_pubkeys;
@@ -515,6 +519,7 @@ uint256 all_script_pubkeys_hash(TxHashCache& cache, const std::vector<CTxOut>& o
 
 uint256 all_amounts_hash(TxHashCache& cache, const std::vector<CTxOut>& outputs) {
     if (cache.all_amounts.IsNull()) {
+        LOCK(cache.mtx);
         cache.all_amounts = leading_amounts_hash(cache, outputs, outputs.size());
     }
     return cache.all_amounts;

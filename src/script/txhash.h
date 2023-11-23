@@ -14,6 +14,7 @@
 #include <script/script_error.h>
 #include <serialize.h>
 #include <span.h>
+#include <sync.h>
 #include <uint256.h>
 #include <util/hash_type.h>
 
@@ -106,6 +107,9 @@ bool validate_field_selector(
 
 struct TxHashCache
 {
+    //! Mutex to guard access to the TxHashCache.
+    Mutex mtx;
+
     //! Individual hashes for all input fields that can be of variable size.
     std::vector<uint256> hashed_script_sigs;
     std::vector<uint256> hashed_spent_scripts;
