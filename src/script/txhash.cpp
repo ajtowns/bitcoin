@@ -806,3 +806,21 @@ bool calculate_txhash(
     hash_out = ss.GetSHA256();
     return true;
 }
+
+template
+bool calculate_txhash(uint256&, const std::vector<unsigned char>&, TxHashCache&,
+    const CTransaction& tx,
+    const std::vector<CTxOut>&,
+    const std::vector<unsigned char>&,
+    uint32_t,
+    uint32_t
+);
+
+template
+bool calculate_txhash(uint256&, const std::vector<unsigned char>&, TxHashCache&,
+    const CMutableTransaction& tx,
+    const std::vector<CTxOut>&,
+    const std::vector<unsigned char>&,
+    uint32_t,
+    uint32_t
+);
