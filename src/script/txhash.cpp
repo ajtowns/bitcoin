@@ -176,7 +176,7 @@ bool validate_field_selector(
         if ((inout_fields & TXFS_INPUTS_ALL) == 0) {
             return false; // inputs bit set but no input bits set
         }
-        if (!parse_inout_selector(bytes, bytes_end, nb_inputs)) {
+        if (!parse_inout_selector(std::move(bytes), bytes_end, nb_inputs)) {
             return false;
         }
     } else {
@@ -189,7 +189,8 @@ bool validate_field_selector(
         if ((inout_fields & TXFS_OUTPUTS_ALL) == 0) {
             return false; // outputs bit set but no output bits set
         }
-        if (!parse_inout_selector(bytes, bytes_end, nb_outputs)) {
+// bytes has already been moved above though? seems buggy
+        if (!parse_inout_selector(std::move(bytes), bytes_end, nb_outputs)) {
             return false;
         }
     } else {
@@ -656,7 +657,7 @@ bool calculate_txhash(
         bool current = false;
         unsigned int leading = 0;
         std::vector<unsigned int> individual = {};
-        assert(parse_inout_selector(bytes, bytes_end, tx.vin.size(), &count, &all, &current, &leading, &individual));
+        assert(parse_inout_selector(std::move(bytes), bytes_end, tx.vin.size(), &count, &all, &current, &leading, &individual));
 
         if (count) {
             uint32_t len32 = tx.vin.size();
@@ -763,7 +764,7 @@ bool calculate_txhash(
         bool current = false;
         unsigned int leading = 0;
         std::vector<unsigned int> individual = {};
-        assert(parse_inout_selector(bytes, bytes_end, tx.vout.size(), &count, &all, &current, &leading, &individual));
+        assert(parse_inout_selector(std::move(bytes), bytes_end, tx.vout.size(), &count, &all, &current, &leading, &individual));
 
         if (count) {
             uint32_t len32 = tx.vout.size();
