@@ -600,7 +600,7 @@ uint256 selected_amounts_hash(TxHashCache& cache, const std::vector<CTxOut>& out
 template<class T>
 bool calculate_txhash(
     uint256& hash_out,
-    const std::vector<unsigned char>& field_selector,
+    const std::vector<unsigned char>& field_selector_in,
     TxHashCache& cache,
     const T& tx,
     const std::vector<CTxOut>& spent_outputs,
@@ -611,11 +611,9 @@ bool calculate_txhash(
     assert(tx.vin.size() == spent_outputs.size());
     assert(in_pos < tx.vin.size());
 
-    if (field_selector.empty()) {
-        field_selector = TXFS_TEMPLATE_DEFAULT;
-    } else if (field_selector.size() == 1 && field_selector[0] == 0) {
-        field_selector = TXFS_TEMPLATE_ALL;
-    }
+    const std::vector<unsigned char>& field_selector = (
+       field_selector_in.empty() ? TXFS_TEMPLATE_DEFAULT :
+        ((field_selector_in.size() == 1 && field_selector_in[0] == 0) ? TXFS_TEMPLATE_ALL : field_selector_in));
 
     HashWriter ss{};
 
