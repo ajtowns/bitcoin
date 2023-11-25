@@ -23,6 +23,10 @@ const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_B
         /*.name =*/ "anyprevout",
         /*.gbt_force =*/ true,
     },
+    {
+        /*.name =*/ "opcat",
+        /*.gbt_force =*/ true,
+    },
 };
 
 std::string DeploymentName(Consensus::BuriedDeployment dep)
