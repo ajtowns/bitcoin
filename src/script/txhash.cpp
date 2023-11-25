@@ -621,38 +621,38 @@ bool calculate_txhash(
 
     unsigned char global = field_selector[0];
 
-    if (global & TXFS_CONTROL != 0) {
+    if ((global & TXFS_CONTROL) != 0) {
         ss << field_selector;
     }
 
-    if (global & TXFS_VERSION != 0) {
+    if ((global & TXFS_VERSION) != 0) {
         ss << tx.nVersion;
     }
 
-    if (global & TXFS_LOCKTIME != 0) {
+    if ((global & TXFS_LOCKTIME) != 0) {
         ss << tx.nLockTime;
     }
 
-    if (global & TXFS_CURRENT_INPUT_IDX != 0) {
+    if ((global & TXFS_CURRENT_INPUT_IDX) != 0) {
         ss << in_pos;
     }
 
-    if (global & TXFS_CURRENT_INPUT_CONTROL_BLOCK != 0) {
+    if ((global & TXFS_CURRENT_INPUT_CONTROL_BLOCK) != 0) {
         ss << control_block;
     }
 
-    if (global & TXFS_CURRENT_INPUT_LAST_CODESEPARATOR_POS != 0) {
+    if ((global & TXFS_CURRENT_INPUT_LAST_CODESEPARATOR_POS) != 0) {
         ss << codeseparator_pos;
     }
 
     // INPUTS
     std::vector<unsigned char>::const_iterator bytes_end = field_selector.end();
     std::vector<unsigned char>::const_iterator bytes = field_selector.begin() + 1;
-    if (global & TXFS_INPUTS != 0 || global & TXFS_OUTPUTS != 0) {
+    if ((global & TXFS_INPUTS) != 0 || (global & TXFS_OUTPUTS) != 0) {
         bytes++;
     }
 
-    if (global & TXFS_INPUTS != 0) {
+    if ((global & TXFS_INPUTS) != 0) {
         bool count = false;
         bool all = false;
         bool current = false;
@@ -667,7 +667,7 @@ bool calculate_txhash(
 
         unsigned char inout_fields = field_selector[1];
 
-        if (inout_fields & TXFS_INPUTS_PREVOUTS != 0) {
+        if ((inout_fields & TXFS_INPUTS_PREVOUTS) != 0) {
             if (all) {
                 ss << all_prevouts_hash(cache, tx.vin);
             }
@@ -682,7 +682,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_INPUTS_SEQUENCES != 0) {
+        if ((inout_fields & TXFS_INPUTS_SEQUENCES) != 0) {
             if (all) {
                 ss << all_sequences_hash(cache, tx.vin);
             }
@@ -697,7 +697,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_INPUTS_SCRIPTSIGS != 0) {
+        if ((inout_fields & TXFS_INPUTS_SCRIPTSIGS) != 0) {
             if (all) {
                 ss << all_script_sigs_hash(cache, tx.vin);
             }
@@ -712,7 +712,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_INPUTS_PREV_SCRIPTPUBKEYS != 0) {
+        if ((inout_fields & TXFS_INPUTS_PREV_SCRIPTPUBKEYS) != 0) {
             if (all) {
                 ss << all_spent_scripts_hash(cache, spent_outputs);
             }
@@ -727,7 +727,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_INPUTS_PREV_VALUES != 0) {
+        if ((inout_fields & TXFS_INPUTS_PREV_VALUES) != 0) {
             if (all) {
                 ss << all_spent_amounts_hash(cache, spent_outputs);
             }
@@ -742,7 +742,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_INPUTS_TAPROOT_ANNEXES != 0) {
+        if ((inout_fields & TXFS_INPUTS_TAPROOT_ANNEXES) != 0) {
             if (all) {
                 ss << all_annexes_hash(cache, tx.vin);
             }
@@ -758,7 +758,7 @@ bool calculate_txhash(
         }
     }
 
-    if (global & TXFS_OUTPUTS != 0) {
+    if ((global & TXFS_OUTPUTS) != 0) {
         bool count = false;
         bool all = false;
         //TODO(stevenroose) handle current output oob
@@ -774,7 +774,7 @@ bool calculate_txhash(
 
         unsigned char inout_fields = field_selector[1];
 
-        if (inout_fields & TXFS_OUTPUTS_SCRIPT_PUBKEYS != 0) {
+        if ((inout_fields & TXFS_OUTPUTS_SCRIPT_PUBKEYS) != 0) {
             if (all) {
                 ss << all_script_pubkeys_hash(cache, tx.vout);
             }
@@ -789,7 +789,7 @@ bool calculate_txhash(
             }
         }
 
-        if (inout_fields & TXFS_OUTPUTS_VALUES != 0) {
+        if ((inout_fields & TXFS_OUTPUTS_VALUES) != 0) {
             if (all) {
                 ss << all_amounts_hash(cache, tx.vout);
             }
