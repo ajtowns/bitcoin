@@ -353,6 +353,8 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
 
     result.pushKV("stack-after", stack2uv(stack));
 
+    result.pushKV("sigop-count", script.GetSigOpCount(true));
+
     result.pushKV("success", success);
     if (!success) {
         result.pushKV("error", ScriptErrorString(serror));
