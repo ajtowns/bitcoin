@@ -71,12 +71,47 @@ auto& FuzzTargets()
 
 void FuzzFrameworkRegisterTarget(std::string_view name, TypeTestOneInput target, FuzzTargetOptions opts)
 {
+#ifndef FUZZ_HARNESS
     const auto it_ins{FuzzTargets().try_emplace(name, FuzzTarget /* temporary can be dropped in C++20 */ {std::move(target), std::move(opts)})};
     Assert(it_ins.second);
+#endif
+}
+
+#ifndef FUZZ_HARNESS
+#error you meant to define FUZZ_HARNESS fool
+#endif
+
+const auto* GetHarnessName()
+{
+#ifndef FUZZ_HARNESS
+   return std::getenv("FUZZ");
+#else
+   return STRINGIZE(FUZZ_HARNESS);
+#endif
 }
 
 static std::string_view g_fuzz_target;
 static const TypeTestOneInput* g_test_one_input{nullptr};
+
+#ifdef FUZZ_HARNESS
+void PASTE2(FUZZ_HARNESS,_fuzz_target)(FuzzBufferType);
+extern const FuzzTargetOptions PASTE2(FUZZ_HARNESS,_fuzz_opts);
+static FuzzTarget HarnessFuzzTarget{ .test_one_input=PASTE2(FUZZ_HARNESS,_fuzz_target), .opts=PASTE2(FUZZ_HARNESS,_fuzz_opts) };
+#endif
+
+FuzzTarget& GetHarnessFuzzTarget()
+{
+#ifndef FUZZ_HARNESS
+    const auto it = FuzzTargets().find(g_fuzz_target);
+    if (it == FuzzTargets().end()) {
+        std::cerr << "No fuzz target compiled for " << g_fuzz_target << "." << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    return it->second;
+#else
+    return HarnessFuzzTarget;
+#endif
+}
 
 void initialize()
 {
@@ -111,7 +146,7 @@ void initialize()
     if (should_exit) {
         std::exit(EXIT_SUCCESS);
     }
-    if (const auto* env_fuzz{std::getenv("FUZZ")}) {
+    if (const auto* env_fuzz{GetHarnessName()}) {
         // To allow for easier fuzz executable binary modification,
         static std::string g_copy{env_fuzz}; // create copy to avoid compiler optimizations, and
         g_fuzz_target = g_copy.c_str();      // strip string after the first null-char.
@@ -120,14 +155,11 @@ void initialize()
         std::cerr << "Hint: Set the PRINT_ALL_FUZZ_TARGETS_AND_ABORT=1 env var to see all compiled targets." << std::endl;
         std::exit(EXIT_FAILURE);
     }
-    const auto it = FuzzTargets().find(g_fuzz_target);
-    if (it == FuzzTargets().end()) {
-        std::cerr << "No fuzz target compiled for " << g_fuzz_target << "." << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
+
+    FuzzTarget& target{GetHarnessFuzzTarget()};
     Assert(!g_test_one_input);
-    g_test_one_input = &it->second.test_one_input;
-    it->second.opts.init();
+    g_test_one_input = &target.test_one_input;
+    target.opts.init();
 }
 
 #if defined(PROVIDE_FUZZ_MAIN_FUNCTION)
