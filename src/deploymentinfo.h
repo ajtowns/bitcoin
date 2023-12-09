@@ -28,6 +28,7 @@ inline std::string DeploymentName(Consensus::DeploymentPos pos)
     return VersionBitsDeploymentInfo[pos].name;
 }
 
+std::optional<Consensus::DeploymentPos> GetBIP9Deployment(const std::string_view deployment_name);
 std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view deployment_name);
 
 #endif // BITCOIN_DEPLOYMENTINFO_H

@@ -37,6 +37,16 @@ std::string DeploymentName(Consensus::BuriedDeployment dep)
     return "";
 }
 
+std::optional<Consensus::DeploymentPos> GetBIP9Deployment(const std::string_view name)
+{
+    for (size_t i = 0; i < std::tuple_size_v<decltype(VersionBitsDeploymentInfo)>; ++i) {
+        if (name == VersionBitsDeploymentInfo[i].name) {
+            return static_cast<Consensus::DeploymentPos>(i);
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view name)
 {
     if (name == "segwit") {
