@@ -337,6 +337,7 @@ BITCOIN_CORE_H = \
   validation.h \
   validationinterface.h \
   versionbits.h \
+  versionbits_impl.h \
   wallet/bdb.h \
   wallet/coincontrol.h \
   wallet/coinselection.h \
