@@ -15,6 +15,9 @@
 
 class CChainParams;
 
+template<typename T> struct DeploymentParamsCache;
+template<Consensus::DeploymentPos D> using DeploymentCache = DeploymentParamsCache<typename Consensus::DeploymentParams<D>::type>;
+
 /** What block version to use for new blocks (pre versionbits) */
 static const int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
 /** What bits to set in version for versionbits blocks */
@@ -30,7 +33,8 @@ enum class ThresholdState : uint8_t;
 // A map that gives the state for blocks whose height is a multiple of Period().
 // The map is indexed by the block's parent, however, so all keys in the map
 // will either be nullptr or a block with (height + 1) % Period() == 0.
-typedef std::map<const CBlockIndex*, ThresholdState> ThresholdConditionCache;
+using ThresholdConditionCache = std::map<const CBlockIndex*, ThresholdState>;
+template<> struct DeploymentParamsCache<Consensus::BIP9Deployment> { using type = ThresholdConditionCache; };
 
 /** Display status of an in-progress BIP9 softfork */
 struct BIP9Stats {
@@ -56,7 +60,7 @@ struct BIP9Info {
     std::optional<int> active_since;
 };
 
-struct BIP9GBTStatus {
+struct GBTStatus {
     struct Info {
         int bit;
         uint32_t mask;
@@ -65,15 +69,31 @@ struct BIP9GBTStatus {
     std::map<std::string, const Info> signalling, locked_in, active;
 };
 
-/*
-template<typename T> struct DeploymentParamsCache;
-template<DeploymentPos D>
-using DeploymentCache = DeploymentParamsCache<typename DeploymentParams<D>::P>;
-class CBlockIndex;
-template<> struct DeploymentParamsCache<BuriedDeploymentParams> { struct P {}; };
-template<> struct DeploymentParamsCache<BIP9Deployment> { using P = std::map<const CBlockIndex*, uint8_t>; };
-extern DepTuple<DeploymentCache, MAX_VERSION_BITS_DEPLOYMENTS> fake_vbitcache;
-*/
+template<typename P>
+struct DepParamsCache {
+    using Cache = typename DeploymentParamsCache<P>::type;
+    const P& dep;
+    Cache& cache;
+    explicit DepParamsCache(const P& dep, Cache& cache) : dep{dep}, cache{cache} { };
+};
+
+template<typename P>
+concept DeploymentConcept = requires(DepParamsCache<P> depcache, const CBlockIndex& blockindex, GBTStatus& gbtstatus, int32_t& nVersion)
+{
+    GetDepInfo(blockindex, depcache);
+    IsActiveAfter(&blockindex, depcache);
+    StateSinceHeight(&blockindex, depcache);
+
+    BumpGBTStatus(blockindex, gbtstatus, depcache);
+    ComputeBlockVersion(&blockindex, nVersion, depcache);
+};
+
+BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BIP9Deployment> depcache);
+bool IsActiveAfter(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
+int StateSinceHeight(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
+
+void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepParamsCache<Consensus::BIP9Deployment> depcache);
+void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepParamsCache<Consensus::BIP9Deployment> depcache);
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */
@@ -81,22 +101,30 @@ class VersionBitsCache
 {
 private:
     Mutex m_mutex;
+    static_assert(DeploymentConcept<Consensus::BIP9Deployment>);
     std::array<ThresholdConditionCache,VERSIONBITS_NUM_BITS> m_warning_caches GUARDED_BY(m_mutex);
     std::array<ThresholdConditionCache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> m_caches GUARDED_BY(m_mutex);
 
 public:
-    BIP9Info Info(const CBlockIndex& block_index, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
-
-    BIP9GBTStatus GBTStatus(const CBlockIndex& block_index, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    auto GetDepInfo(const CBlockIndex& block_index, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    {
+        LOCK(m_mutex);
+        return ::GetDepInfo(block_index, DepParamsCache(params.vDeployments[id], m_caches[id]));
+    }
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
-    bool IsActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos pos) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    bool IsActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    {
+        LOCK(m_mutex);
+        return ::IsActiveAfter(pindexPrev, DepParamsCache(params.vDeployments[id], m_caches[id]));
+    }
 
     /** Determine what nVersion a new block should use */
     int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
-    std::vector<std::pair<int,bool>> CheckUnknownActivations(const CBlockIndex* pindex, const CChainParams& chainparams) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    GBTStatus GetGBTStatus(const CBlockIndex& block_index, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
+    std::vector<std::pair<int,bool>> CheckUnknownActivations(const CBlockIndex* pindex, const CChainParams& chainparams) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     void Clear() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 };
 

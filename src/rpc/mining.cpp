@@ -879,7 +879,7 @@ static RPCHelpMan getblocktemplate()
     }
 
     UniValue vbavailable(UniValue::VOBJ);
-    const auto gbtstatus = chainman.m_versionbitscache.GBTStatus(*pindexPrev, consensusParams);
+    const auto gbtstatus = chainman.m_versionbitscache.GetGBTStatus(*pindexPrev, consensusParams);
 
     for (const auto& [name, info] : gbtstatus.signalling) {
         vbavailable.pushKV(gbt_force_name(name, info.gbt_force), info.bit);

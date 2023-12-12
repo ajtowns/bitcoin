@@ -1150,7 +1150,7 @@ static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softfo
 {
     // For BIP9 deployments.
     UniValue bip9(UniValue::VOBJ);
-    BIP9Info info{chainman.m_versionbitscache.Info(blockindex, chainman.GetConsensus(), id)};
+    BIP9Info info{chainman.m_versionbitscache.GetDepInfo(blockindex, chainman.GetConsensus(), id)};
     const auto& depparams{chainman.GetConsensus().vDeployments[id]};
 
     // BIP9 parameters
