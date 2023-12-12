@@ -1275,22 +1275,22 @@ public:
 };
 
 /** Deployment* info via ChainstateManager */
-template<typename DEP>
-bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman, DEP dep)
+template<auto dep>
+bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const ChainstateManager& chainman)
 {
-    return DeploymentActiveAfter(pindexPrev, chainman.GetConsensus(), dep, chainman.m_versionbitscache);
+    return DeploymentActiveAfter<dep>(pindexPrev, chainman.GetConsensus(), chainman.m_versionbitscache);
 }
 
-template<typename DEP>
-bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chainman, DEP dep)
+template<auto dep>
+bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chainman)
 {
-    return DeploymentActiveAt(index, chainman.GetConsensus(), dep, chainman.m_versionbitscache);
+    return DeploymentActiveAt<dep>(index, chainman.GetConsensus(), chainman.m_versionbitscache);
 }
 
-template<typename DEP>
-bool DeploymentEnabled(const ChainstateManager& chainman, DEP dep)
+template<auto dep>
+bool DeploymentEnabled(const ChainstateManager& chainman)
 {
-    return DeploymentEnabled(chainman.GetConsensus(), dep);
+    return DeploymentEnabled<dep>(chainman.GetConsensus());
 }
 
 /** Identifies blocks that overwrote an existing coinbase output in the UTXO set (see BIP30) */

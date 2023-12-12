@@ -11,41 +11,47 @@
 #include <limits>
 
 /** Determine if a deployment is active for the next block */
-inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::BuriedDeployment dep, [[maybe_unused]] VersionBitsCache& versionbitscache)
+template<Consensus::BuriedDeployment dep>
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, [[maybe_unused]] VersionBitsCache& versionbitscache)
 {
-    assert(Consensus::ValidDeployment(dep));
+    static_assert(Consensus::ValidDeployment(dep));
     return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= params.DeploymentHeight(dep);
 }
 
-inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos dep, VersionBitsCache& versionbitscache)
+template<Consensus::DeploymentPos dep>
+inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
-    assert(Consensus::ValidDeployment(dep));
+    static_assert(Consensus::ValidDeployment(dep));
     return versionbitscache.IsActiveAfter(pindexPrev, params, dep);
 }
 
 /** Determine if a deployment is active for this block */
-inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, Consensus::BuriedDeployment dep, [[maybe_unused]] VersionBitsCache& versionbitscache)
+template<Consensus::BuriedDeployment dep>
+inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, [[maybe_unused]] VersionBitsCache& versionbitscache)
 {
-    assert(Consensus::ValidDeployment(dep));
+    static_assert(Consensus::ValidDeployment(dep));
     return index.nHeight >= params.DeploymentHeight(dep);
 }
 
-inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, Consensus::DeploymentPos dep, VersionBitsCache& versionbitscache)
+template<Consensus::DeploymentPos dep>
+inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
-    assert(Consensus::ValidDeployment(dep));
-    return DeploymentActiveAfter(index.pprev, params, dep, versionbitscache);
+    static_assert(Consensus::ValidDeployment(dep));
+    return DeploymentActiveAfter<dep>(index.pprev, params, versionbitscache);
 }
 
 /** Determine if a deployment is enabled (can ever be active) */
-inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::BuriedDeployment dep)
+template<Consensus::BuriedDeployment dep>
+inline bool DeploymentEnabled(const Consensus::Params& params)
 {
-    assert(Consensus::ValidDeployment(dep));
+    static_assert(Consensus::ValidDeployment(dep));
     return params.DeploymentHeight(dep) != std::numeric_limits<int>::max();
 }
 
-inline bool DeploymentEnabled(const Consensus::Params& params, Consensus::DeploymentPos dep)
+template<Consensus::DeploymentPos dep>
+inline bool DeploymentEnabled(const Consensus::Params& params)
 {
-    assert(Consensus::ValidDeployment(dep));
+    static_assert(Consensus::ValidDeployment(dep));
     return params.vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
 }
 
