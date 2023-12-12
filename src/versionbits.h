@@ -65,6 +65,16 @@ struct BIP9GBTStatus {
     std::map<std::string, const Info> signalling, locked_in, active;
 };
 
+/*
+template<typename T> struct DeploymentParamsCache;
+template<DeploymentPos D>
+using DeploymentCache = DeploymentParamsCache<typename DeploymentParams<D>::P>;
+class CBlockIndex;
+template<> struct DeploymentParamsCache<BuriedDeploymentParams> { struct P {}; };
+template<> struct DeploymentParamsCache<BIP9Deployment> { using P = std::map<const CBlockIndex*, uint8_t>; };
+extern DepTuple<DeploymentCache, MAX_VERSION_BITS_DEPLOYMENTS> fake_vbitcache;
+*/
+
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */
 class VersionBitsCache

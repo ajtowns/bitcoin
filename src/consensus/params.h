@@ -16,6 +16,20 @@
 
 namespace Consensus {
 
+/**** HELPERS ****/
+enum DeploymentPos : uint16_t;
+template<DeploymentPos D> struct DeploymentParams;
+
+template<template<DeploymentPos> typename TT, typename T> struct MkDepTuple;
+
+template<template<DeploymentPos> typename TT, size_t... N>
+struct MkDepTuple<TT, std::integer_sequence<size_t, N...>> {
+    using type = std::tuple<typename TT<DeploymentPos{N}>::type...>;
+};
+
+template<template<DeploymentPos> typename TT, size_t MAX>
+using DepTuple = typename MkDepTuple<TT, std::make_integer_sequence<size_t, size_t{MAX}>>::type;
+
 /**
  * A buried deployment is one where the height of the activation has been hardcoded into
  * the client implementation long after the consensus change has activated. See BIP 90.
@@ -37,6 +51,13 @@ enum DeploymentPos : uint16_t {
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
+
+struct BuriedDeploymentParams {
+    int height;
+};
+
+// Default
+template<DeploymentPos D> struct DeploymentParams { using type = BuriedDeploymentParams; };
 
 /**
  * Struct for each individual consensus rule change using BIP9.
@@ -75,6 +96,12 @@ struct BIP9Deployment {
      *  prior to deploying it on some or all networks. */
     static constexpr int64_t NEVER_ACTIVE = -2;
 };
+
+template<> struct DeploymentParams<DEPLOYMENT_TESTDUMMY> { using type = BIP9Deployment; };
+template<> struct DeploymentParams<DEPLOYMENT_TAPROOT> { using type = BIP9Deployment; };
+
+extern DepTuple<DeploymentParams, MAX_VERSION_BITS_DEPLOYMENTS> fake_vDeployments;
+static_assert(std::tuple_size_v<decltype(fake_vDeployments)> == 2);
 
 /**
  * Parameters that influence chain consensus.
