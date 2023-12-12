@@ -285,17 +285,23 @@ bool IsActiveAfter(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9
     return ThresholdState::ACTIVE == VersionBitsConditionChecker(depcache.dep).GetStateFor(pindexPrev, depcache.cache);
 }
 
+void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepParamsCache<Consensus::BIP9Deployment> depcache)
+{
+    if ((nVersion & VERSIONBITS_TOP_BITS) != VERSIONBITS_TOP_BITS) return;
+
+    VersionBitsConditionChecker checker(depcache.dep);
+    ThresholdState state = checker.GetStateFor(pindexPrev, depcache.cache);
+    if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
+        nVersion |= checker.Mask();
+    }
+}
+
 static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches)
 {
     int32_t nVersion = VERSIONBITS_TOP_BITS;
 
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        VersionBitsConditionChecker checker(params, pos);
-        ThresholdState state = checker.GetStateFor(pindexPrev, caches[pos]);
-        if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
-            nVersion |= checker.Mask();
-        }
+        ComputeBlockVersion(pindexPrev, nVersion, DepParamsCache(params.vDeployments[i], caches[i]));
     }
 
     return nVersion;
