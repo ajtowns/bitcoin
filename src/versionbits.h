@@ -111,23 +111,27 @@ void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoP
 class VersionBitsCache
 {
 private:
-    Mutex m_mutex;
     static_assert(DeploymentConcept<Consensus::BIP9Deployment>);
+
+    Mutex m_mutex;
     std::array<ThresholdConditionCache,VERSIONBITS_NUM_BITS> m_warning_caches GUARDED_BY(m_mutex);
+
+    auto GetDPC(const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return DepParamsCache(params.vDeployments[id], m_caches[id]); }
+
     std::array<ThresholdConditionCache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> m_caches GUARDED_BY(m_mutex);
 
 public:
     auto GetDepInfo(const CBlockIndex& block_index, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
         LOCK(m_mutex);
-        return ::GetDepInfo(block_index, DepParamsCache(params.vDeployments[id], m_caches[id]));
+        return ::GetDepInfo(block_index, GetDPC(params, id));
     }
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
     bool IsActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
         LOCK(m_mutex);
-        return ::IsActiveAfter(pindexPrev, DepParamsCache(params.vDeployments[id], m_caches[id]));
+        return ::IsActiveAfter(pindexPrev, GetDPC(params, id));
     }
 
     /** Determine what nVersion a new block should use */
