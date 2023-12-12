@@ -14,6 +14,7 @@
 #include <vector>
 
 class CChainParams;
+struct VBDeploymentInfo;
 
 template<typename T> struct DeploymentParamsCache;
 template<Consensus::DeploymentPos D> using DeploymentCache = DeploymentParamsCache<typename Consensus::DeploymentParams<D>::type>;
@@ -78,22 +79,32 @@ struct DepParamsCache {
 };
 
 template<typename P>
-concept DeploymentConcept = requires(DepParamsCache<P> depcache, const CBlockIndex& blockindex, GBTStatus& gbtstatus, int32_t& nVersion)
+struct DepInfoParamsCache {
+    using Cache = typename DeploymentParamsCache<P>::type;
+    const VBDeploymentInfo& info;
+    const P& dep;
+    Cache& cache;
+    explicit DepInfoParamsCache(const VBDeploymentInfo& info, const P& dep, Cache& cache) : info{info}, dep{dep}, cache{cache} { };
+};
+
+template<typename P>
+concept DeploymentConcept = requires(DepParamsCache<P> depcache, DepInfoParamsCache<P> depinfocache, const CBlockIndex& blockindex, GBTStatus& gbtstatus, int32_t& nVersion)
 {
     GetDepInfo(blockindex, depcache);
     IsActiveAfter(&blockindex, depcache);
     StateSinceHeight(&blockindex, depcache);
 
-    BumpGBTStatus(blockindex, gbtstatus, depcache);
     ComputeBlockVersion(&blockindex, nVersion, depcache);
+
+    BumpGBTStatus(blockindex, gbtstatus, depinfocache);
 };
 
 BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BIP9Deployment> depcache);
 bool IsActiveAfter(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
 int StateSinceHeight(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
 
-void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepParamsCache<Consensus::BIP9Deployment> depcache);
 void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepParamsCache<Consensus::BIP9Deployment> depcache);
+void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BIP9Deployment> depinfocache);
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */

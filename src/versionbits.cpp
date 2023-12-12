@@ -210,7 +210,6 @@ protected:
 
 public:
     explicit VersionBitsConditionChecker(const Consensus::BIP9Deployment& dep) : dep{dep} {}
-    explicit VersionBitsConditionChecker(const Consensus::Params& params, Consensus::DeploymentPos id) : VersionBitsConditionChecker{params.vDeployments[id]} {}
 
     uint32_t Mask() const { return (uint32_t{1}) << dep.bit; }
 };
@@ -223,8 +222,8 @@ BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BI
 
     VersionBitsConditionChecker checker(depcache.dep);
 
-    ThresholdState current_state = checker.GetStateFor(block_index.pprev, depcache.cache);
-    ThresholdState next_state = checker.GetStateFor(&block_index, depcache.cache);
+    const ThresholdState current_state = checker.GetStateFor(block_index.pprev, depcache.cache);
+    const ThresholdState next_state = checker.GetStateFor(&block_index, depcache.cache);
     result.since = checker.GetStateSinceHeightFor(block_index.pprev, depcache.cache);
 
     result.current_state = StateName(current_state);
@@ -248,6 +247,28 @@ BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BI
     return result;
 }
 
+void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BIP9Deployment> depinfocache)
+{
+    VersionBitsConditionChecker checker(depinfocache.dep);
+    GBTStatus::Info gbtinfo{.bit=depinfocache.dep.bit, .mask=checker.Mask(), .gbt_force=depinfocache.info.gbt_force};
+
+    ThresholdState state = checker.GetStateFor(&blockindex, depinfocache.cache);
+    switch (state) {
+    case ThresholdState::DEFINED:
+    case ThresholdState::FAILED:
+        // Not exposed to GBT
+        break;
+    case ThresholdState::STARTED:
+        gbtstatus.signalling.try_emplace(depinfocache.info.name, gbtinfo);
+        break;
+    case ThresholdState::LOCKED_IN:
+        gbtstatus.locked_in.try_emplace(depinfocache.info.name, gbtinfo);
+        break;
+    case ThresholdState::ACTIVE:
+        gbtstatus.active.try_emplace(depinfocache.info.name, gbtinfo);
+        break;
+    }
+}
 
 GBTStatus VersionBitsCache::GetGBTStatus(const CBlockIndex& block_index, const Consensus::Params& params)
 {
@@ -255,27 +276,7 @@ GBTStatus VersionBitsCache::GetGBTStatus(const CBlockIndex& block_index, const C
 
     LOCK(m_mutex);
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        VersionBitsConditionChecker checker(params, pos);
-        ThresholdState state = checker.GetStateFor(&block_index, m_caches[pos]);
-        const VBDeploymentInfo& vbdepinfo = VersionBitsDeploymentInfo[pos];
-        GBTStatus::Info gbtinfo{.bit=params.vDeployments[pos].bit, .mask=checker.Mask(), .gbt_force=vbdepinfo.gbt_force};
-
-        switch (state) {
-        case ThresholdState::DEFINED:
-        case ThresholdState::FAILED:
-            // Not exposed to GBT
-            break;
-        case ThresholdState::STARTED:
-            result.signalling.try_emplace(vbdepinfo.name, gbtinfo);
-            break;
-        case ThresholdState::LOCKED_IN:
-            result.locked_in.try_emplace(vbdepinfo.name, gbtinfo);
-            break;
-        case ThresholdState::ACTIVE:
-            result.active.try_emplace(vbdepinfo.name, gbtinfo);
-            break;
-        }
+        BumpGBTStatus(block_index, result, DepInfoParamsCache(VersionBitsDeploymentInfo[i], params.vDeployments[i], m_caches[i]));
     }
     return result;
 }
