@@ -270,14 +270,24 @@ void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoP
     }
 }
 
+template <size_t I=0, typename Fn, typename Tup, typename... Tups>
+void ApplyZip(Fn&& fn, Tup& t1, Tups&... ts)
+{
+    if constexpr (I < std::tuple_size_v<Tup>) {
+        fn(std::get<I>(t1), std::get<I>(ts)...);
+        ApplyZip<I+1>(fn, t1, ts...);
+    }
+}
+
 GBTStatus VersionBitsCache::GetGBTStatus(const CBlockIndex& block_index, const Consensus::Params& params)
 {
     GBTStatus result;
 
     LOCK(m_mutex);
-    for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        BumpGBTStatus(block_index, result, DepInfoParamsCache(VersionBitsDeploymentInfo[i], params.vDeployments[i], m_caches[i]));
-    }
+    auto fn = [&](auto& dep, auto& info, auto& cache) {
+        BumpGBTStatus(block_index, result, DepInfoParamsCache(info, dep, cache));
+    };
+    ApplyZip(fn, params.vDeployments, VersionBitsDeploymentInfo, m_caches);
     return result;
 }
 
