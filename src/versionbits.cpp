@@ -297,14 +297,13 @@ void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepPa
     }
 }
 
-static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches)
+template <size_t I=0>
+static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches, int32_t nVersion = VERSIONBITS_TOP_BITS)
 {
-    int32_t nVersion = VERSIONBITS_TOP_BITS;
-
-    for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        ComputeBlockVersion(pindexPrev, nVersion, DepParamsCache(params.vDeployments[i], caches[i]));
+    if constexpr (I < Consensus::MAX_VERSION_BITS_DEPLOYMENTS) {
+        ComputeBlockVersion(pindexPrev, nVersion, DepParamsCache(std::get<I>(params.vDeployments), std::get<I>(caches)));
+        nVersion = ComputeBlockVersion<I+1>(pindexPrev, params, caches, nVersion);
     }
-
     return nVersion;
 }
 
