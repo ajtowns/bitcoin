@@ -1194,14 +1194,19 @@ static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softfo
     softforks.pushKV(vbinfo.name, rv);
 }
 
-template<Consensus::DeploymentPos dep>
-static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
+template <size_t I=0>
+static void SoftForkDescPushBackAll(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
 {
-    if (!DeploymentEnabled<dep>(chainman)) return;
     auto fn = [&](const auto& depparams, const auto& info, const auto& depinfo) {
         SoftForkDescPushBack(blockindex, softforks, depparams, info, depinfo);
     };
-    chainman.m_versionbitscache.ApplyInfo<dep>(blockindex, chainman.GetConsensus(), fn);
+    if constexpr (I < Consensus::MAX_VERSION_BITS_DEPLOYMENTS) {
+        constexpr Consensus::DeploymentPos dep{I};
+        if (DeploymentEnabled<dep>(chainman)) {
+            chainman.m_versionbitscache.ApplyInfo<dep>(blockindex, chainman.GetConsensus(), fn);
+        }
+        SoftForkDescPushBackAll<I+1>(blockindex, softforks, chainman);
+    }
 }
 
 template<Consensus::BuriedDeployment dep>
@@ -1312,8 +1317,9 @@ UniValue DeploymentInfo(const CBlockIndex& blockindex, const ChainstateManager& 
     SoftForkDescPushBack<Consensus::DEPLOYMENT_CLTV>(blockindex, softforks, chainman);
     SoftForkDescPushBack<Consensus::DEPLOYMENT_CSV>(blockindex, softforks, chainman);
     SoftForkDescPushBack<Consensus::DEPLOYMENT_SEGWIT>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_TESTDUMMY>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_TAPROOT>(blockindex, softforks, chainman);
+    SoftForkDescPushBackAll(blockindex, softforks, chainman);
+    //SoftForkDescPushBack<Consensus::DEPLOYMENT_TESTDUMMY>(blockindex, softforks, chainman);
+    //SoftForkDescPushBack<Consensus::DEPLOYMENT_TAPROOT>(blockindex, softforks, chainman);
     return softforks;
 }
 } // anon namespace
