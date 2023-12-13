@@ -14,18 +14,28 @@
 #include <boost/test/unit_test.hpp>
 
 /* Define a virtual block time, one block per 10 minutes after Nov 14 2014, 0:55:36am */
-static int32_t TestTime(int nHeight) { return 1415926536 + 600 * nHeight; }
+static constexpr int32_t TestTime(int nHeight) { return 1415926536 + 600 * nHeight; }
 
-class TestConditionChecker : public AbstractThresholdConditionChecker
+class TestConditionChecker : public VersionBitsConditionChecker
 {
 private:
     mutable ThresholdConditionCache cache;
 
+    static constexpr Consensus::BIP9Deployment tcc_dep{
+        .nStartTime = TestTime(10000),
+        .nTimeout = TestTime(20000),
+        .min_activation_height = 0,
+        .threshold = 900,
+        .window = 1000,
+    };
+
+protected:
+    TestConditionChecker(const Consensus::BIP9Deployment& dep) : VersionBitsConditionChecker(dep) { }
+
 public:
-    int64_t BeginTime() const override { return TestTime(10000); }
-    int64_t EndTime() const override { return TestTime(20000); }
-    int Period() const override { return 1000; }
-    int Threshold() const override { return 900; }
+    TestConditionChecker() : VersionBitsConditionChecker(tcc_dep) { }
+    void clear() { cache.clear(); }
+
     bool Condition(const CBlockIndex* pindex) const override { return (pindex->nVersion & 0x100); }
 
     ThresholdState GetStateFor(const CBlockIndex* pindexPrev) const { return AbstractThresholdConditionChecker::GetStateFor(pindexPrev, cache); }
@@ -34,20 +44,41 @@ public:
 
 class TestDelayedActivationConditionChecker : public TestConditionChecker
 {
+    static constexpr Consensus::BIP9Deployment tdacc_dep{
+        .nStartTime = TestTime(10000),
+        .nTimeout = TestTime(20000),
+        .min_activation_height = 15000,
+        .threshold = 900,
+        .window = 1000,
+    };
 public:
-    int MinActivationHeight() const override { return 15000; }
+    TestDelayedActivationConditionChecker() : TestConditionChecker(tdacc_dep) { }
 };
 
 class TestAlwaysActiveConditionChecker : public TestConditionChecker
 {
+    static constexpr Consensus::BIP9Deployment taacc_dep{
+        .nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE,
+        .nTimeout = TestTime(20000),
+        .min_activation_height = 15000,
+        .threshold = 900,
+        .window = 1000,
+    };
 public:
-    int64_t BeginTime() const override { return Consensus::BIP9Deployment::ALWAYS_ACTIVE; }
+    TestAlwaysActiveConditionChecker() : TestConditionChecker(taacc_dep) { }
 };
 
 class TestNeverActiveConditionChecker : public TestConditionChecker
 {
+    static constexpr Consensus::BIP9Deployment tnacc_dep{
+        .nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE,
+        .nTimeout = TestTime(20000),
+        .min_activation_height = 15000,
+        .threshold = 900,
+        .window = 1000,
+    };
 public:
-    int64_t BeginTime() const override { return Consensus::BIP9Deployment::NEVER_ACTIVE; }
+    TestNeverActiveConditionChecker() : TestConditionChecker(tnacc_dep) { }
 };
 
 #define CHECKERS 6
@@ -79,11 +110,11 @@ public:
         for (unsigned int i = 0; i < vpblock.size(); i++) {
             delete vpblock[i];
         }
-        for (unsigned int  i = 0; i < CHECKERS; i++) {
-            checker[i] = TestConditionChecker();
-            checker_delayed[i] = TestDelayedActivationConditionChecker();
-            checker_always[i] = TestAlwaysActiveConditionChecker();
-            checker_never[i] = TestNeverActiveConditionChecker();
+        for (unsigned int i = 0; i < CHECKERS; i++) {
+            checker[i].clear();
+            checker_delayed[i].clear();
+            checker_always[i].clear();
+            checker_never[i].clear();
         }
         vpblock.clear();
         return *this;
