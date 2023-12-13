@@ -501,11 +501,15 @@ public:
             }
         }
 
-        for (const auto& [deployment_pos, version_bits_params] : opts.version_bits_parameters) {
-            consensus.vDeployments[deployment_pos].nStartTime = version_bits_params.start_time;
-            consensus.vDeployments[deployment_pos].nTimeout = version_bits_params.timeout;
-            consensus.vDeployments[deployment_pos].min_activation_height = version_bits_params.min_activation_height;
-        }
+        consensus.ForEachDeployment([&](auto idx, auto& dep) {
+            auto it = opts.version_bits_parameters.find(idx);
+            if (it != opts.version_bits_parameters.end()) {
+                const auto& version_bits_params = it->second;
+                dep.nStartTime = version_bits_params.start_time;
+                dep.nTimeout = version_bits_params.timeout;
+                dep.min_activation_height = version_bits_params.min_activation_height;
+            }
+        });
 
         genesis = CreateGenesisBlock(1296688602, 2, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();

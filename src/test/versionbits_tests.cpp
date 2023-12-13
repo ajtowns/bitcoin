@@ -275,17 +275,17 @@ BOOST_AUTO_TEST_CASE(versionbits_test)
 }
 
 /** Check that ComputeBlockVersion will set the appropriate bit correctly */
-static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, Consensus::DeploymentPos dep)
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params, const Consensus::BIP9Deployment& dep)
 {
     // Clear the cache every time
     versionbitscache.Clear();
 
-    int64_t bit = params.vDeployments[dep].bit;
-    int64_t nStartTime = params.vDeployments[dep].nStartTime;
-    int64_t nTimeout = params.vDeployments[dep].nTimeout;
-    int min_activation_height = params.vDeployments[dep].min_activation_height;
-    uint32_t window = params.vDeployments[dep].window;
-    uint32_t threshold = params.vDeployments[dep].threshold;
+    int64_t bit = dep.bit;
+    int64_t nStartTime = dep.nStartTime;
+    int64_t nTimeout = dep.nTimeout;
+    int min_activation_height = dep.min_activation_height;
+    uint32_t window = dep.window;
+    uint32_t threshold = dep.threshold;
 
     BOOST_REQUIRE(window > 0); // no division by zero, thankyou
     BOOST_REQUIRE(0 < threshold); // must be able to have a window that doesn't activate
@@ -434,6 +434,12 @@ static void check_computeblockversion(VersionBitsCache& versionbitscache, const 
     BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(lastBlock, params) & (1 << bit), 0);
 }
 
+template <Consensus::DeploymentPos Id>
+static void check_computeblockversion(VersionBitsCache& versionbitscache, const Consensus::Params& params)
+{
+    check_computeblockversion(versionbitscache, params, std::get<Id>(params.vDeployments));
+}
+
 BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
 {
     VersionBitsCache vbcache;
@@ -443,18 +449,18 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
     for (const auto& chain_type: {ChainType::MAIN, ChainType::TESTNET, ChainType::SIGNET, ChainType::REGTEST}) {
         const auto chainParams = CreateChainParams(*m_node.args, chain_type);
         uint32_t chain_all_vbits{0};
-        for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
-            const auto dep = static_cast<Consensus::DeploymentPos>(i);
+        const auto& params = chainParams->GetConsensus();
+        params.ForEachDeployment([&](auto idx, auto& dep) {
             // Check that no bits are reused (within the same chain). This is
             // disallowed because the transition to FAILED (on timeout) does
             // not take precedence over STARTED/LOCKED_IN. So all softforks on
             // the same bit might overlap, even when non-overlapping start-end
             // times are picked.
-            const uint32_t dep_mask{uint32_t{1} << chainParams->GetConsensus().vDeployments[dep].bit};
+            const uint32_t dep_mask{uint32_t{1} << dep.bit};
             BOOST_CHECK(!(chain_all_vbits & dep_mask));
             chain_all_vbits |= dep_mask;
-            check_computeblockversion(vbcache, chainParams->GetConsensus(), dep);
-        }
+            check_computeblockversion(vbcache, params, dep);
+        });
     }
 
     {
@@ -463,7 +469,7 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
         ArgsManager args;
         args.ForceSetArg("-vbparams", "testdummy:1199145601:1230767999"); // January 1, 2008 - December 31, 2008
         const auto chainParams = CreateChainParams(args, ChainType::REGTEST);
-        check_computeblockversion(vbcache, chainParams->GetConsensus(), Consensus::DEPLOYMENT_TESTDUMMY);
+        check_computeblockversion<Consensus::DEPLOYMENT_TESTDUMMY>(vbcache, chainParams->GetConsensus());
     }
 
     {
@@ -473,7 +479,7 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
         ArgsManager args;
         args.ForceSetArg("-vbparams", "testdummy:1199145601:1230767999:403200"); // January 1, 2008 - December 31, 2008, min act height 403200
         const auto chainParams = CreateChainParams(args, ChainType::REGTEST);
-        check_computeblockversion(vbcache, chainParams->GetConsensus(), Consensus::DEPLOYMENT_TESTDUMMY);
+        check_computeblockversion<Consensus::DEPLOYMENT_TESTDUMMY>(vbcache, chainParams->GetConsensus());
     }
 }
 

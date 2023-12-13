@@ -100,9 +100,6 @@ struct BIP9Deployment {
 template<> struct DeploymentParams<DEPLOYMENT_TESTDUMMY> { using type = BIP9Deployment; };
 template<> struct DeploymentParams<DEPLOYMENT_TAPROOT> { using type = BIP9Deployment; };
 
-extern DepTuple<DeploymentParams, MAX_VERSION_BITS_DEPLOYMENTS> fake_vDeployments;
-static_assert(std::tuple_size_v<decltype(fake_vDeployments)> == 2);
-
 /**
  * Parameters that influence chain consensus.
  */
@@ -132,7 +129,7 @@ struct Params {
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
-    std::array<BIP9Deployment,MAX_VERSION_BITS_DEPLOYMENTS> vDeployments;
+    DepTuple<DeploymentParams, MAX_VERSION_BITS_DEPLOYMENTS> vDeployments;
     /** Proof of work parameters */
     uint256 powLimit;
     bool fPowAllowMinDifficultyBlocks;
@@ -171,6 +168,22 @@ struct Params {
             return SegwitHeight;
         } // no default case, so the compiler can warn about missing cases
         return std::numeric_limits<int>::max();
+    }
+
+    template <typename Fn>
+    void ForEachDeployment(Fn&& fn) const { _ForEachDeployment(*this, fn); }
+
+    template <typename Fn>
+    void ForEachDeployment(Fn&& fn) { _ForEachDeployment(*this, fn); }
+
+private:
+    template <size_t I=0, typename P, typename Fn>
+    static void _ForEachDeployment(P& params, Fn&& fn)
+    {
+        if constexpr (I < std::tuple_size_v<decltype(params.vDeployments)>) {
+            fn(static_cast<DeploymentPos>(I), std::get<I>(params.vDeployments));
+            _ForEachDeployment<I+1>(params, fn);
+        }
     }
 };
 
