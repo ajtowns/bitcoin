@@ -125,13 +125,15 @@ public:
     }
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
-    bool Enabled(const Consensus::Params& params, Consensus::DeploymentPos id)
+    template <Consensus::DeploymentPos id>
+    bool Enabled(const Consensus::Params& params) const
     {
         return ::DepEnabled(params.vDeployments[id]);
     }
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
-    bool IsActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, Consensus::DeploymentPos id) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    template <Consensus::DeploymentPos id>
+    bool IsActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
         LOCK(m_mutex);
         return ::IsActiveAfter(pindexPrev, GetDPC(params, id));

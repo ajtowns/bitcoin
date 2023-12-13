@@ -22,7 +22,7 @@ template<Consensus::DeploymentPos dep>
 inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return versionbitscache.IsActiveAfter(pindexPrev, params, dep);
+    return versionbitscache.IsActiveAfter<dep>(pindexPrev, params);
 }
 
 /** Determine if a deployment is active for this block */
@@ -42,17 +42,17 @@ inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params
 
 /** Determine if a deployment is enabled (can ever be active) */
 template <Consensus::BuriedDeployment dep>
-inline bool DeploymentEnabled(const Consensus::Params& params, VersionBitsCache& versionbitscache)
+inline bool DeploymentEnabled(const Consensus::Params& params, const VersionBitsCache& versionbitscache)
 {
     static_assert(Consensus::ValidDeployment(dep));
     return params.DeploymentHeight(dep) != std::numeric_limits<int>::max();
 }
 
 template <Consensus::DeploymentPos dep>
-inline bool DeploymentEnabled(const Consensus::Params& params, VersionBitsCache& versionbitscache)
+inline bool DeploymentEnabled(const Consensus::Params& params, const VersionBitsCache& versionbitscache)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return versionbitscache.Enabled(params, dep);
+    return versionbitscache.Enabled<dep>(params);
 }
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H
