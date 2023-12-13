@@ -41,18 +41,18 @@ inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params
 }
 
 /** Determine if a deployment is enabled (can ever be active) */
-template<Consensus::BuriedDeployment dep>
-inline bool DeploymentEnabled(const Consensus::Params& params)
+template <Consensus::BuriedDeployment dep>
+inline bool DeploymentEnabled(const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
     static_assert(Consensus::ValidDeployment(dep));
     return params.DeploymentHeight(dep) != std::numeric_limits<int>::max();
 }
 
-template<Consensus::DeploymentPos dep>
-inline bool DeploymentEnabled(const Consensus::Params& params)
+template <Consensus::DeploymentPos dep>
+inline bool DeploymentEnabled(const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
     static_assert(Consensus::ValidDeployment(dep));
-    return params.vDeployments[dep].nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE;
+    return versionbitscache.Enabled(params, dep);
 }
 
 #endif // BITCOIN_DEPLOYMENTSTATUS_H

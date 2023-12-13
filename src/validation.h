@@ -1287,10 +1287,10 @@ bool DeploymentActiveAt(const CBlockIndex& index, const ChainstateManager& chain
     return DeploymentActiveAt<dep>(index, chainman.GetConsensus(), chainman.m_versionbitscache);
 }
 
-template<auto dep>
+template <auto dep>
 bool DeploymentEnabled(const ChainstateManager& chainman)
 {
-    return DeploymentEnabled<dep>(chainman.GetConsensus());
+    return DeploymentEnabled<dep>(chainman.GetConsensus(), chainman.m_versionbitscache);
 }
 
 /** Identifies blocks that overwrote an existing coinbase output in the UTXO set (see BIP30) */
