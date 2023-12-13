@@ -34,18 +34,16 @@ using DepTuple = typename MkDepTuple<TT, std::make_integer_sequence<size_t, size
  * A buried deployment is one where the height of the activation has been hardcoded into
  * the client implementation long after the consensus change has activated. See BIP 90.
  */
-enum BuriedDeployment : int16_t {
-    // buried deployments get negative values to avoid overlap with DeploymentPos
-    DEPLOYMENT_HEIGHTINCB = std::numeric_limits<int16_t>::min(),
+enum BuriedDeployment : int16_t { };
+constexpr bool ValidDeployment(BuriedDeployment dep) { return false; }
+
+enum DeploymentPos : uint16_t {
+    DEPLOYMENT_TESTDUMMY,
+    DEPLOYMENT_HEIGHTINCB,
     DEPLOYMENT_CLTV,
     DEPLOYMENT_DERSIG,
     DEPLOYMENT_CSV,
     DEPLOYMENT_SEGWIT,
-};
-constexpr bool ValidDeployment(BuriedDeployment dep) { return dep <= DEPLOYMENT_SEGWIT; }
-
-enum DeploymentPos : uint16_t {
-    DEPLOYMENT_TESTDUMMY,
     DEPLOYMENT_TAPROOT, // Deployment of Schnorr/Taproot (BIPs 340-342)
     // NOTE: Also add new deployments to VersionBitsDeploymentInfo in deploymentinfo.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
@@ -113,19 +111,8 @@ struct Params {
      * - fail if the default script verify flags are applied.
      */
     std::map<uint256, uint32_t> script_flag_exceptions;
-    /** Block height and hash at which BIP34 becomes active */
-    int BIP34Height;
+    /** Block hash at which BIP34 becoming active allows ignoring BIP30... */
     uint256 BIP34Hash;
-    /** Block height at which BIP65 becomes active */
-    int BIP65Height;
-    /** Block height at which BIP66 becomes active */
-    int BIP66Height;
-    /** Block height at which CSV (BIP68, BIP112 and BIP113) becomes active */
-    int CSVHeight;
-    /** Block height at which Segwit (BIP141, BIP143 and BIP147) becomes active.
-     * Note that segwit v0 script rules are enforced on all blocks except the
-     * BIP 16 exception blocks. */
-    int SegwitHeight;
     /** Don't warn about unknown BIP 9 activations below this height.
      * This prevents us from warning about the CSV and segwit activations. */
     int MinBIP9WarningHeight;
@@ -155,19 +142,12 @@ struct Params {
 
     int DeploymentHeight(BuriedDeployment dep) const
     {
-        switch (dep) {
-        case DEPLOYMENT_HEIGHTINCB:
-            return BIP34Height;
-        case DEPLOYMENT_CLTV:
-            return BIP65Height;
-        case DEPLOYMENT_DERSIG:
-            return BIP66Height;
-        case DEPLOYMENT_CSV:
-            return CSVHeight;
-        case DEPLOYMENT_SEGWIT:
-            return SegwitHeight;
-        } // no default case, so the compiler can warn about missing cases
         return std::numeric_limits<int>::max();
+    }
+
+    int BIP34Height() const
+    {
+        return std::get<DEPLOYMENT_HEIGHTINCB>(vDeployments).height;
     }
 
     template <typename Fn>

@@ -56,8 +56,8 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         }
 
         const auto deployment_name{arg.substr(0, found)};
-        if (const auto buried_deployment = GetBuriedDeployment(deployment_name)) {
-            options.activation_heights[*buried_deployment] = height;
+        if (const auto deployment = GetBIP9Deployment(deployment_name)) {
+            options.activation_heights[*deployment] = height;
         } else {
             throw std::runtime_error(strprintf("Invalid name (%s) for -testactivationheight=name@height.", arg));
         }

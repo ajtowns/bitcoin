@@ -1315,14 +1315,7 @@ const std::vector<RPCResult> RPCHelpForDeployment{
 UniValue DeploymentInfo(const CBlockIndex& blockindex, const ChainstateManager& chainman)
 {
     UniValue softforks(UniValue::VOBJ);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_HEIGHTINCB>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_DERSIG>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_CLTV>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_CSV>(blockindex, softforks, chainman);
-    SoftForkDescPushBack<Consensus::DEPLOYMENT_SEGWIT>(blockindex, softforks, chainman);
     SoftForkDescPushBackAll(blockindex, softforks, chainman);
-    //SoftForkDescPushBack<Consensus::DEPLOYMENT_TESTDUMMY>(blockindex, softforks, chainman);
-    //SoftForkDescPushBack<Consensus::DEPLOYMENT_TAPROOT>(blockindex, softforks, chainman);
     return softforks;
 }
 } // anon namespace

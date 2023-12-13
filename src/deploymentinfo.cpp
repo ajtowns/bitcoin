@@ -8,34 +8,22 @@
 
 #include <string_view>
 
-const std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> VersionBitsDeploymentInfo{
-    VBDeploymentInfo{
-        .name = "testdummy",
-        .gbt_force = true,
-    },
-    VBDeploymentInfo{
-        .name = "taproot",
-        .gbt_force = true,
-    },
-};
-
-std::string DeploymentName(Consensus::BuriedDeployment dep)
+static std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> MakeDefaults()
 {
-    assert(ValidDeployment(dep));
-    switch (dep) {
-    case Consensus::DEPLOYMENT_HEIGHTINCB:
-        return "bip34";
-    case Consensus::DEPLOYMENT_CLTV:
-        return "bip65";
-    case Consensus::DEPLOYMENT_DERSIG:
-        return "bip66";
-    case Consensus::DEPLOYMENT_CSV:
-        return "csv";
-    case Consensus::DEPLOYMENT_SEGWIT:
-        return "segwit";
-    } // no default case, so the compiler can warn about missing cases
-    return "";
+    std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> result;
+
+    std::get<Consensus::DEPLOYMENT_TESTDUMMY>(result) = { .name = "testdummy", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_HEIGHTINCB>(result) = { .name = "bip34", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_CLTV>(result) = { .name = "cltv", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_DERSIG>(result) = { .name = "dersig", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_CSV>(result) = { .name = "csv", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_SEGWIT>(result) = { .name = "segwit", .gbt_force = true };
+    std::get<Consensus::DEPLOYMENT_TAPROOT>(result) = { .name = "taproot", .gbt_force = true };
+
+    return result;
 }
+
+const std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> VersionBitsDeploymentInfo = MakeDefaults();
 
 std::optional<Consensus::DeploymentPos> GetBIP9Deployment(const std::string_view name)
 {
@@ -49,16 +37,5 @@ std::optional<Consensus::DeploymentPos> GetBIP9Deployment(const std::string_view
 
 std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view name)
 {
-    if (name == "segwit") {
-        return Consensus::BuriedDeployment::DEPLOYMENT_SEGWIT;
-    } else if (name == "bip34") {
-        return Consensus::BuriedDeployment::DEPLOYMENT_HEIGHTINCB;
-    } else if (name == "dersig") {
-        return Consensus::BuriedDeployment::DEPLOYMENT_DERSIG;
-    } else if (name == "cltv") {
-        return Consensus::BuriedDeployment::DEPLOYMENT_CLTV;
-    } else if (name == "csv") {
-        return Consensus::BuriedDeployment::DEPLOYMENT_CSV;
-    }
     return std::nullopt;
 }

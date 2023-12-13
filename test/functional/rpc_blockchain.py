@@ -199,8 +199,8 @@ class BlockchainTest(BitcoinTestFramework):
           "height": height,
           "deployments": {
             'bip34': {'type': 'buried', 'active': True, 'height': 2},
-            'bip66': {'type': 'buried', 'active': True, 'height': 3},
-            'bip65': {'type': 'buried', 'active': True, 'height': 4},
+            'dersig': {'type': 'buried', 'active': True, 'height': 3},
+            'cltv': {'type': 'buried', 'active': True, 'height': 4},
             'csv': {'type': 'buried', 'active': True, 'height': 5},
             'segwit': {'type': 'buried', 'active': True, 'height': 6},
             'testdummy': {
