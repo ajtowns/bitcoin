@@ -7,6 +7,7 @@
 
 #include <chain.h>
 #include <sync.h>
+#include <deploymentinfo.h>
 
 #include <array>
 #include <map>
@@ -14,7 +15,6 @@
 #include <vector>
 
 class CChainParams;
-struct VBDeploymentInfo;
 
 template<typename T> struct DeploymentParamsCache;
 template<Consensus::DeploymentPos D> using DeploymentCache = DeploymentParamsCache<typename Consensus::DeploymentParams<D>::type>;
@@ -116,14 +116,18 @@ private:
     template <Consensus::DeploymentPos id>
     auto GetDPC(const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return DepParamsCache(std::get<id>(params.vDeployments), std::get<id>(m_caches)); }
 
+    template <Consensus::DeploymentPos id>
+    auto GetDIPC(const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return DepInfoParamsCache(std::get<id>(VersionBitsDeploymentInfo), std::get<id>(params.vDeployments), std::get<id>(m_caches)); }
+
     std::array<ThresholdConditionCache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> m_caches GUARDED_BY(m_mutex);
 
 public:
-    template <Consensus::DeploymentPos id>
-    auto GetDepInfo(const CBlockIndex& block_index, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    template <Consensus::DeploymentPos id, typename Fn>
+    auto ApplyInfo(const CBlockIndex& block_index, const Consensus::Params& params, Fn&& fn) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
         LOCK(m_mutex);
-        return ::GetDepInfo(block_index, GetDPC<id>(params));
+        auto dipc = GetDIPC<id>(params);
+        return fn(dipc.dep, dipc.info, ::GetDepInfo(block_index, dipc));
     }
 
     /** Get the BIP9 state for a given deployment for the block after pindexPrev. */
