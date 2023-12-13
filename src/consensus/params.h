@@ -53,7 +53,7 @@ enum DeploymentPos : uint16_t {
 constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
 
 struct BuriedDeploymentParams {
-    int height;
+    int height = std::numeric_limits<int>::max();
 };
 
 // Default

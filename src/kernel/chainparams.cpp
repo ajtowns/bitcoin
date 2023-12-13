@@ -18,6 +18,7 @@
 #include <script/script.h>
 #include <uint256.h>
 #include <util/chaintype.h>
+#include <util/overloaded.h>
 #include <util/strencodings.h>
 
 #include <algorithm>
@@ -501,13 +502,24 @@ public:
             }
         }
 
-        consensus.ForEachDeployment([&](auto idx, auto& dep) {
-            auto it = opts.version_bits_parameters.find(idx);
-            if (it != opts.version_bits_parameters.end()) {
-                const auto& version_bits_params = it->second;
-                dep.nStartTime = version_bits_params.start_time;
-                dep.nTimeout = version_bits_params.timeout;
-                dep.min_activation_height = version_bits_params.min_activation_height;
+        consensus.ForEachDeployment(util::Overloaded{
+            [&](auto idx, Consensus::BIP9Deployment& dep) {
+                auto it = opts.version_bits_parameters.find(idx);
+                if (it != opts.version_bits_parameters.end()) {
+                    const auto& version_bits_params = it->second;
+                    dep.nStartTime = version_bits_params.start_time;
+                    dep.nTimeout = version_bits_params.timeout;
+                    dep.min_activation_height = version_bits_params.min_activation_height;
+                }
+            },
+            [&](auto idx, Consensus::BuriedDeploymentParams& dep) {
+#if 0
+ // idx = deploymentpos vs burieddeployment
+                auto it = opts.activation_heights.find(idx);
+                if (it != opts.activation_heights.end()) {
+                    dep.height = it->second;
+                }
+#endif
             }
         });
 

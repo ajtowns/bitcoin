@@ -28,6 +28,9 @@ static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits */
 static const int32_t VERSIONBITS_NUM_BITS = 29;
 
+/** Buried deployments do not need a cache */
+template<> struct DeploymentParamsCache<Consensus::BuriedDeploymentParams> { struct type {}; };
+
 /** Opaque type for BIP9 state. See versionbits_impl.h for details. */
 enum class ThresholdState : uint8_t;
 
@@ -50,6 +53,9 @@ struct BIP9Stats {
     /** False if there are not enough blocks left in this period to pass activation threshold */
     bool possible{false};
 };
+
+/** No detailed status for buried deployments */
+struct BuriedInfo { };
 
 /** Detailed status of an enabled BIP9 deployment */
 struct BIP9Info {
@@ -85,23 +91,28 @@ struct DepInfoParamsCache : DepParamsCache<P> {
 
 inline bool DepEnabled(const Consensus::BIP9Deployment& dep) { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
 bool IsActiveAfter(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
-int StateSinceHeight(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BIP9Deployment> depcache);
 BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BIP9Deployment> depcache);
-
 void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepParamsCache<Consensus::BIP9Deployment> depcache);
 void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BIP9Deployment> depinfocache);
+
+inline bool DepEnabled(const Consensus::BuriedDeploymentParams& dep) { return dep.height != std::numeric_limits<decltype(dep.height)>::max(); }
+inline bool IsActiveAfter(const CBlockIndex* pindexPrev, DepParamsCache<Consensus::BuriedDeploymentParams> depcache) { return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= depcache.dep.height; }
+inline BuriedInfo GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BuriedDeploymentParams> depcache) { return {}; }
+inline void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepParamsCache<Consensus::BuriedDeploymentParams> depcache) { return; }
+void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BuriedDeploymentParams> depinfocache);
 
 template <typename P>
 concept DeploymentConcept = requires(const P& dep) {
     DepEnabled(dep);
 } && requires(DepParamsCache<P> depcache, const CBlockIndex& blockindex, int32_t& nVersion) {
     IsActiveAfter(&blockindex, depcache);
-    StateSinceHeight(&blockindex, depcache);
     GetDepInfo(blockindex, depcache);
     ComputeBlockVersion(&blockindex, nVersion, depcache);
 } && requires(DepInfoParamsCache<P> depinfocache, const CBlockIndex& blockindex, GBTStatus& gbtstatus) {
     BumpGBTStatus(blockindex, gbtstatus, depinfocache);
 };
+
+using DeploymentCaches = Consensus::DepTuple<DeploymentCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>;
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */
@@ -109,6 +120,7 @@ class VersionBitsCache
 {
 private:
     static_assert(DeploymentConcept<Consensus::BIP9Deployment>);
+    static_assert(DeploymentConcept<Consensus::BuriedDeploymentParams>);
 
     Mutex m_mutex;
     std::array<ThresholdConditionCache,VERSIONBITS_NUM_BITS> m_warning_caches GUARDED_BY(m_mutex);
@@ -119,7 +131,7 @@ private:
     template <Consensus::DeploymentPos id>
     auto GetDIPC(const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return DepInfoParamsCache(std::get<id>(VersionBitsDeploymentInfo), std::get<id>(params.vDeployments), std::get<id>(m_caches)); }
 
-    std::array<ThresholdConditionCache,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> m_caches GUARDED_BY(m_mutex);
+    DeploymentCaches m_caches GUARDED_BY(m_mutex);
 
 public:
     template <Consensus::DeploymentPos id, typename Fn>

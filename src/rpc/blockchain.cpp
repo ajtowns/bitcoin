@@ -1133,17 +1133,16 @@ static bool active_from_optheight(const CBlockIndex& blockindex, const std::opti
     return height.has_value() && blockindex.nHeight + 1 >= *height;
 }
 
-static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman, Consensus::BuriedDeployment dep)
+static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const Consensus::BuriedDeploymentParams& depparams, const VBDeploymentInfo& vbinfo, const BuriedInfo& info)
 {
     // For buried deployments.
     UniValue rv(UniValue::VOBJ);
     rv.pushKV("type", "buried");
     // getdeploymentinfo reports the softfork as active from when the chain height is
     // one below the activation height
-    int height = chainman.GetConsensus().DeploymentHeight(dep);
-    rv.pushKV("active", active_from_optheight(blockindex, height));
-    rv.pushKV("height", height);
-    softforks.pushKV(DeploymentName(dep), rv);
+    rv.pushKV("active", active_from_optheight(blockindex, depparams.height));
+    rv.pushKV("height", depparams.height);
+    softforks.pushKV(vbinfo.name, rv);
 }
 
 static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const Consensus::BIP9Deployment& depparams, const VBDeploymentInfo& vbinfo, const BIP9Info& info)
@@ -1212,7 +1211,11 @@ static void SoftForkDescPushBackAll(const CBlockIndex& blockindex, UniValue& sof
 template<Consensus::BuriedDeployment dep>
 static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
 {
-    if (DeploymentEnabled<dep>(chainman)) SoftForkDescPushBack(blockindex, softforks, chainman, dep);
+    if (!DeploymentEnabled<dep>(chainman)) return;
+    const Consensus::BuriedDeploymentParams depparams{.height = chainman.GetConsensus().DeploymentHeight(dep)};
+    const std::string depname = DeploymentName(dep);
+    const VBDeploymentInfo vbinfo{.name=depname.c_str(), .gbt_force=true};
+    SoftForkDescPushBack(blockindex, softforks, depparams, vbinfo, {});
 }
 
 // used by rest.cpp:rest_chaininfo, so cannot be static

@@ -8,6 +8,7 @@
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
 #include <util/chaintype.h>
+#include <util/overloaded.h>
 #include <versionbits.h>
 #include <versionbits_impl.h>
 
@@ -450,16 +451,21 @@ BOOST_AUTO_TEST_CASE(versionbits_computeblockversion)
         const auto chainParams = CreateChainParams(*m_node.args, chain_type);
         uint32_t chain_all_vbits{0};
         const auto& params = chainParams->GetConsensus();
-        params.ForEachDeployment([&](auto idx, auto& dep) {
-            // Check that no bits are reused (within the same chain). This is
-            // disallowed because the transition to FAILED (on timeout) does
-            // not take precedence over STARTED/LOCKED_IN. So all softforks on
-            // the same bit might overlap, even when non-overlapping start-end
-            // times are picked.
-            const uint32_t dep_mask{uint32_t{1} << dep.bit};
-            BOOST_CHECK(!(chain_all_vbits & dep_mask));
-            chain_all_vbits |= dep_mask;
-            check_computeblockversion(vbcache, params, dep);
+        params.ForEachDeployment(util::Overloaded{
+            [&](auto idx, const Consensus::BIP9Deployment& dep) {
+                // Check that no bits are reused (within the same chain). This is
+                // disallowed because the transition to FAILED (on timeout) does
+                // not take precedence over STARTED/LOCKED_IN. So all softforks on
+                // the same bit might overlap, even when non-overlapping start-end
+                // times are picked.
+                const uint32_t dep_mask{uint32_t{1} << dep.bit};
+                BOOST_CHECK(!(chain_all_vbits & dep_mask));
+                chain_all_vbits |= dep_mask;
+                check_computeblockversion(vbcache, params, dep);
+            },
+            [&](auto idx, const Consensus::BuriedDeploymentParams& dep) {
+                // no signalling for buried deps, so nothing to check
+            },
         });
     }
 

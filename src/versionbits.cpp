@@ -6,8 +6,18 @@
 #include <deploymentinfo.h>
 #include <kernel/chainparams.h>
 #include <util/check.h>
+#include <util/overloaded.h>
 #include <versionbits.h>
 #include <versionbits_impl.h>
+
+template <size_t I=0, typename Fn, typename Tup, typename... Tups>
+void MapZip(Fn&& fn, Tup& t1, Tups&... ts)
+{
+    if constexpr (I < std::tuple_size_v<Tup>) {
+        fn(std::get<I>(t1), std::get<I>(ts)...);
+        MapZip<I+1>(fn, t1, ts...);
+    }
+}
 
 std::string StateName(ThresholdState state)
 {
@@ -218,6 +228,14 @@ BIP9Info GetDepInfo(const CBlockIndex& block_index, DepParamsCache<Consensus::BI
     return result;
 }
 
+void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BuriedDeploymentParams> depinfocache)
+{
+    if (IsActiveAfter(&blockindex, depinfocache)) {
+        GBTStatus::Info gbtinfo{.bit=-1, .mask=0, .gbt_force=true};
+        gbtstatus.active.try_emplace(depinfocache.info.name, gbtinfo);
+    }
+}
+
 void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoParamsCache<Consensus::BIP9Deployment> depinfocache)
 {
     VersionBitsConditionChecker checker(depinfocache.dep);
@@ -241,15 +259,6 @@ void BumpGBTStatus(const CBlockIndex& blockindex, GBTStatus& gbtstatus, DepInfoP
     }
 }
 
-template <size_t I=0, typename Fn, typename Tup, typename... Tups>
-void ApplyZip(Fn&& fn, Tup& t1, Tups&... ts)
-{
-    if constexpr (I < std::tuple_size_v<Tup>) {
-        fn(std::get<I>(t1), std::get<I>(ts)...);
-        ApplyZip<I+1>(fn, t1, ts...);
-    }
-}
-
 GBTStatus VersionBitsCache::GetGBTStatus(const CBlockIndex& block_index, const Consensus::Params& params)
 {
     GBTStatus result;
@@ -258,7 +267,7 @@ GBTStatus VersionBitsCache::GetGBTStatus(const CBlockIndex& block_index, const C
     auto fn = [&](auto& dep, auto& info, auto& cache) {
         BumpGBTStatus(block_index, result, DepInfoParamsCache(info, dep, cache));
     };
-    ApplyZip(fn, params.vDeployments, VersionBitsDeploymentInfo, m_caches);
+    MapZip(fn, params.vDeployments, VersionBitsDeploymentInfo, m_caches);
     return result;
 }
 
@@ -278,13 +287,13 @@ void ComputeBlockVersion(const CBlockIndex* pindexPrev, int32_t& nVersion, DepPa
     }
 }
 
-template <size_t I=0>
-static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches, int32_t nVersion = VERSIONBITS_TOP_BITS)
+static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, DeploymentCaches& caches)
 {
-    if constexpr (I < Consensus::MAX_VERSION_BITS_DEPLOYMENTS) {
-        ComputeBlockVersion(pindexPrev, nVersion, DepParamsCache(std::get<I>(params.vDeployments), std::get<I>(caches)));
-        nVersion = ComputeBlockVersion<I+1>(pindexPrev, params, caches, nVersion);
-    }
+    int32_t nVersion = VERSIONBITS_TOP_BITS;
+    auto fn = [&](auto& dep, auto& cache) {
+        ComputeBlockVersion(pindexPrev, nVersion, DepParamsCache(dep, cache));
+    };
+    MapZip(fn, params.vDeployments, caches);
     return nVersion;
 }
 
@@ -297,9 +306,10 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
 void VersionBitsCache::Clear()
 {
     LOCK(m_mutex);
-    for (unsigned int d = 0; d < Consensus::MAX_VERSION_BITS_DEPLOYMENTS; d++) {
-        m_caches[d].clear();
-    }
+    MapZip(util::Overloaded{
+        [](ThresholdConditionCache& cache) { cache.clear(); },
+        [](auto& cache) { }
+    }, m_caches);
 }
 
 namespace {
@@ -310,14 +320,13 @@ class WarningBitsConditionChecker : public AbstractThresholdConditionChecker
 {
 private:
     const Consensus::Params& m_params;
-    std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& m_caches;
+    DeploymentCaches& m_caches;
     int m_bit;
     int period{2016};
     int threshold{0};
 
 public:
-    explicit WarningBitsConditionChecker(const CChainParams& chainparams, std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches, int bit)
-    : m_params{chainparams.GetConsensus()}, m_caches{caches}, m_bit(bit)
+    explicit WarningBitsConditionChecker(const CChainParams& chainparams, DeploymentCaches& caches, int bit) : m_params{chainparams.GetConsensus()}, m_caches{caches}, m_bit(bit)
     {
         if (chainparams.IsTestChain()) {
             period = 144;
