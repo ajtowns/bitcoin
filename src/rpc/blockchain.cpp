@@ -1146,11 +1146,10 @@ static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softfo
     softforks.pushKV(DeploymentName(dep), rv);
 }
 
-static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman, Consensus::DeploymentPos id)
+static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman, Consensus::DeploymentPos id, const BIP9Info& info)
 {
     // For BIP9 deployments.
     UniValue bip9(UniValue::VOBJ);
-    BIP9Info info{chainman.m_versionbitscache.GetDepInfo(blockindex, chainman.GetConsensus(), id)};
     const auto& depparams{chainman.GetConsensus().vDeployments[id]};
 
     // BIP9 parameters
@@ -1196,7 +1195,15 @@ static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softfo
     softforks.pushKV(DeploymentName(id), rv);
 }
 
-template<auto dep>
+template<Consensus::DeploymentPos dep>
+static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
+{
+    if (!DeploymentEnabled<dep>(chainman)) return;
+    auto info{chainman.m_versionbitscache.GetDepInfo<dep>(blockindex, chainman.GetConsensus())};
+    SoftForkDescPushBack(blockindex, softforks, chainman, dep, info);
+}
+
+template<Consensus::BuriedDeployment dep>
 static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
 {
     if (DeploymentEnabled<dep>(chainman)) SoftForkDescPushBack(blockindex, softforks, chainman, dep);
