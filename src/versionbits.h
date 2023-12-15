@@ -72,19 +72,15 @@ struct GBTStatus {
 
 template<typename P>
 struct DepParamsCache {
-    using Cache = typename DeploymentParamsCache<P>::type;
     const P& dep;
-    Cache& cache;
-    explicit DepParamsCache(const P& dep, Cache& cache) : dep{dep}, cache{cache} { };
+    DeploymentParamsCache<P>::type& cache;
+    explicit DepParamsCache(const P& dep, DeploymentParamsCache<P>::type& cache) : dep{dep}, cache{cache} { };
 };
 
 template<typename P>
-struct DepInfoParamsCache {
-    using Cache = typename DeploymentParamsCache<P>::type;
+struct DepInfoParamsCache : DepParamsCache<P> {
     const VBDeploymentInfo& info;
-    const P& dep;
-    Cache& cache;
-    explicit DepInfoParamsCache(const VBDeploymentInfo& info, const P& dep, Cache& cache) : info{info}, dep{dep}, cache{cache} {};
+    explicit DepInfoParamsCache(const VBDeploymentInfo& info, const P& dep_, DeploymentParamsCache<P>::type& cache_) : DepParamsCache<P>{dep_, cache_}, info{info} {};
 };
 
 inline bool DepEnabled(const Consensus::BIP9Deployment& dep) { return dep.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE; }
