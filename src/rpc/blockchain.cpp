@@ -1208,16 +1208,6 @@ static void SoftForkDescPushBackAll(const CBlockIndex& blockindex, UniValue& sof
     }
 }
 
-template<Consensus::BuriedDeployment dep>
-static void SoftForkDescPushBack(const CBlockIndex& blockindex, UniValue& softforks, const ChainstateManager& chainman)
-{
-    if (!DeploymentEnabled<dep>(chainman)) return;
-    const Consensus::BuriedDeploymentParams depparams{.height = chainman.GetConsensus().DeploymentHeight(dep)};
-    const std::string depname = DeploymentName(dep);
-    const VBDeploymentInfo vbinfo{.name=depname.c_str(), .gbt_force=true};
-    SoftForkDescPushBack(blockindex, softforks, depparams, vbinfo, {});
-}
-
 // used by rest.cpp:rest_chaininfo, so cannot be static
 RPCHelpMan getblockchaininfo()
 {

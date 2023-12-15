@@ -34,8 +34,3 @@ std::optional<Consensus::DeploymentPos> GetBIP9Deployment(const std::string_view
     }
     return std::nullopt;
 }
-
-std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view name)
-{
-    return std::nullopt;
-}

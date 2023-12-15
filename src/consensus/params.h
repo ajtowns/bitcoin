@@ -30,13 +30,6 @@ struct MkDepTuple<TT, std::integer_sequence<size_t, N...>> {
 template<template<DeploymentPos> typename TT, size_t MAX>
 using DepTuple = typename MkDepTuple<TT, std::make_integer_sequence<size_t, size_t{MAX}>>::type;
 
-/**
- * A buried deployment is one where the height of the activation has been hardcoded into
- * the client implementation long after the consensus change has activated. See BIP 90.
- */
-enum BuriedDeployment : int16_t { };
-constexpr bool ValidDeployment(BuriedDeployment dep) { return false; }
-
 enum DeploymentPos : uint16_t {
     DEPLOYMENT_TESTDUMMY,
     DEPLOYMENT_HEIGHTINCB,
@@ -48,8 +41,11 @@ enum DeploymentPos : uint16_t {
     // NOTE: Also add new deployments to VersionBitsDeploymentInfo in deploymentinfo.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
-constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
 
+/**
+ * A buried deployment is one where the height of the activation has been hardcoded into
+ * the client implementation long after the consensus change has activated. See BIP 90.
+ */
 struct BuriedDeploymentParams {
     int height = std::numeric_limits<int>::max();
 };
@@ -139,11 +135,6 @@ struct Params {
      */
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
-
-    int DeploymentHeight(BuriedDeployment dep) const
-    {
-        return std::numeric_limits<int>::max();
-    }
 
     int BIP34Height() const
     {

@@ -11,47 +11,23 @@
 #include <limits>
 
 /** Determine if a deployment is active for the next block */
-template<Consensus::BuriedDeployment dep>
-inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, [[maybe_unused]] VersionBitsCache& versionbitscache)
-{
-    static_assert(Consensus::ValidDeployment(dep));
-    return (pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1) >= params.DeploymentHeight(dep);
-}
-
 template<Consensus::DeploymentPos dep>
 inline bool DeploymentActiveAfter(const CBlockIndex* pindexPrev, const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return versionbitscache.IsActiveAfter<dep>(pindexPrev, params);
 }
 
 /** Determine if a deployment is active for this block */
-template<Consensus::BuriedDeployment dep>
-inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, [[maybe_unused]] VersionBitsCache& versionbitscache)
-{
-    static_assert(Consensus::ValidDeployment(dep));
-    return index.nHeight >= params.DeploymentHeight(dep);
-}
-
 template<Consensus::DeploymentPos dep>
 inline bool DeploymentActiveAt(const CBlockIndex& index, const Consensus::Params& params, VersionBitsCache& versionbitscache)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return DeploymentActiveAfter<dep>(index.pprev, params, versionbitscache);
 }
 
 /** Determine if a deployment is enabled (can ever be active) */
-template <Consensus::BuriedDeployment dep>
-inline bool DeploymentEnabled(const Consensus::Params& params, const VersionBitsCache& versionbitscache)
-{
-    static_assert(Consensus::ValidDeployment(dep));
-    return params.DeploymentHeight(dep) != std::numeric_limits<int>::max();
-}
-
 template <Consensus::DeploymentPos dep>
 inline bool DeploymentEnabled(const Consensus::Params& params, const VersionBitsCache& versionbitscache)
 {
-    static_assert(Consensus::ValidDeployment(dep));
     return versionbitscache.Enabled<dep>(params);
 }
 
