@@ -9,7 +9,7 @@
 #include <deploymentinfo.h>
 #include <util/check.h>
 
-bool AbstractThresholdConditionChecker::BIP(int& bip, int& bip_version) const
+bool AbstractThresholdConditionChecker::BINANA(int& year, int& number, int& revision) const
 {
     const int32_t activate = ActivateVersion();
     const int32_t abandon = AbandonVersion();
@@ -17,12 +17,13 @@ bool AbstractThresholdConditionChecker::BIP(int& bip, int& bip_version) const
     if ((activate & ~VERSIONBITS_TOP_MASK) != (abandon & ~VERSIONBITS_TOP_MASK)) {
         return false;
     }
-    if ((activate & 0x1F000000) != 0) return false;
+    if ((activate & 0x18000000) != 0) return false;
     if ((activate & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_ACTIVE) return false;
     if ((abandon & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_ABANDON) return false;
 
-    bip = (activate & ~VERSIONBITS_TOP_MASK) >> 8;
-    bip_version = (activate & ~VERSIONBITS_TOP_MASK) & 0xFF;
+    year = ((activate & 0x07c00000) >> 22) + 2016;
+    number = (activate & 0x003fff00) >> 8;
+    revision = (activate & 0x000000ff);
 
     return true;
 }
@@ -180,8 +181,8 @@ std::vector<SignalInfo> AbstractThresholdConditionChecker::GetSignalInfo(const C
 {
     std::vector<SignalInfo> result;
 
-    int bip = 0, bip_version = 0;
-    const bool check_other_versions = BIP(bip, bip_version);
+    int year = 0, number = 0, revision = 0;
+    const bool check_other_versions = BINANA(year, number, revision);
 
     const int32_t activate = ActivateVersion();
     const int32_t abandon = AbandonVersion();
@@ -189,18 +190,18 @@ std::vector<SignalInfo> AbstractThresholdConditionChecker::GetSignalInfo(const C
 
     while (pindex != nullptr) {
         if (pindex->nVersion == activate) {
-            result.push_back({ .height = pindex->nHeight, .bip_version = -1, .activate = true });
+            result.push_back({ .height = pindex->nHeight, .revision = -1, .activate = true });
         } else if (pindex->nVersion == abandon) {
-            result.push_back({ .height = pindex->nHeight, .bip_version = -1, .activate = false });
+            result.push_back({ .height = pindex->nHeight, .revision = -1, .activate = false });
         } else if (check_other_versions) {
-            if ((pindex->nVersion & 0x00FFFF00l) == (bip << 8)) {
+            if ((pindex->nVersion & 0x07FFFF00l) == (activate & 0x07FFFF00l)) {
                 SignalInfo s;
                 s.height = pindex->nHeight;
-                s.bip_version = static_cast<uint8_t>(pindex->nVersion & 0xFF);
-                if ((pindex->nVersion & 0xFF000000l) == VERSIONBITS_TOP_ACTIVE) {
+                s.revision = static_cast<uint8_t>(pindex->nVersion & 0xFF);
+                if ((pindex->nVersion & 0xF8000000l) == VERSIONBITS_TOP_ACTIVE) {
                     s.activate = true;
                     result.push_back(s);
-                } else if ((pindex->nVersion & 0xFF000000l) == VERSIONBITS_TOP_ABANDON) {
+                } else if ((pindex->nVersion & 0xF8000000l) == VERSIONBITS_TOP_ABANDON) {
                     s.activate = false;
                     result.push_back(s);
                 }
@@ -258,9 +259,9 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
     return nVersion;
 }
 
-bool VersionBitsCache::BIP(int& bip, int& bip_version, const Consensus::Params& params, Consensus::DeploymentPos pos) const
+bool VersionBitsCache::BINANA(int& year, int& number, int& revision, const Consensus::Params& params, Consensus::DeploymentPos pos) const
 {
-    return VersionBitsConditionChecker(params, pos).BIP(bip, bip_version);
+    return VersionBitsConditionChecker(params, pos).BINANA(year, number, revision);
 }
 
 void VersionBitsCache::Clear()

@@ -1170,11 +1170,10 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
     const ThresholdState next_state = chainman.m_versionbitscache.State(blockindex, chainman.GetConsensus(), id);
     const ThresholdState current_state = chainman.m_versionbitscache.State(blockindex->pprev, chainman.GetConsensus(), id);
 
-    // BIP9 parameters
-    int bip = -1, bip_version = -1;
-    if (chainman.m_versionbitscache.BIP(bip, bip_version, chainman.GetConsensus(), id)) {
-        bip9.pushKV("bip", bip);
-        bip9.pushKV("bip_version", bip_version);
+    // deployment parameters
+    int year = -1, number = -1, revision = -1;
+    if (chainman.m_versionbitscache.BINANA(year, number, revision, chainman.GetConsensus(), id)) {
+        bip9.pushKV("binana-id", strprintf("BIN-%04d-%04d-%03d", year, number, revision));
     }
     bip9.pushKV("start_time", chainman.GetConsensus().vDeployments[id].nStartTime);
     bip9.pushKV("timeout", chainman.GetConsensus().vDeployments[id].nTimeout);
@@ -1204,11 +1203,11 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
                 UniValue signals(UniValue::VARR);
                 for (const auto& signal_info : chainman.m_versionbitscache.GetSignalInfo(blockindex, chainman.GetConsensus(), id)) {
                     UniValue s(UniValue::VOBJ);
-                    if (signal_info.bip_version == -1) {
+                    if (signal_info.revision == -1) {
                         // don't report self-activation signals if already active
                         if (signal_info.activate && current_state == ThresholdState::ACTIVE) continue;
                     } else {
-                        s.pushKV("bip_version", signal_info.bip_version);
+                        s.pushKV("revision", signal_info.revision);
                     }
                     s.pushKV("height", signal_info.height);
                     s.pushKV("action", (signal_info.activate ? "activate" : "abandon"));
@@ -1308,8 +1307,7 @@ const std::vector<RPCResult> RPCHelpForDeployment{
     {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block"},
     {RPCResult::Type::OBJ, "heretical", /*optional=*/true, "status of heretical softforks (only for \"heretical\" type)",
     {
-        {RPCResult::Type::NUM, "bip", /*optional=*/true, "the bip id for this soft fork"},
-        {RPCResult::Type::NUM, "bip_version", /*optional=*/true, "the version of the bip (0-255)"},
+        {RPCResult::Type::STR, "binana-id", /*optional=*/true, "the BINANA id for this soft fork"},
         {RPCResult::Type::NUM_TIME, "start_time", "the minimum median time past of a block at which the bit gains its meaning"},
         {RPCResult::Type::NUM_TIME, "timeout", "the median time past of a block at which the deployment is considered failed if not yet locked in"},
         {RPCResult::Type::NUM, "period", "the length in blocks of each signalling period"},
@@ -1321,6 +1319,7 @@ const std::vector<RPCResult> RPCHelpForDeployment{
         {RPCResult::Type::ARR, "signals", /*optional=*/true, "indicates blocks that signalled in the last period",
             {{RPCResult::Type::OBJ, "", "",
             {
+                {RPCResult::Type::NUM, "revision", /*optional=*/true, "revision being signalled"},
                 {RPCResult::Type::NUM, "height", "height of the signalling block"},
                 {RPCResult::Type::STR, "action", "action signalled (activate or abandon)"},
             }}}},

@@ -39,7 +39,7 @@ typedef std::map<const CBlockIndex*, ThresholdState> ThresholdConditionCache;
 struct SignalInfo
 {
     int height;
-    int bip_version; // -1 = this version
+    int revision; // -1 = this revision
     bool activate; // true = activate, false = abandon
 };
 
@@ -61,8 +61,8 @@ public:
     /** Returns the height since when the ThresholdState has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
 
-    /** Report bip number and version, based on nVersion signalling standard */
-    bool BIP(int& bip, int& version) const;
+    /** Report BINANA id, based on nVersion signalling standard */
+    bool BINANA(int& year, int& number, int& revision) const;
 
     /** Returns signalling information */
     std::vector<SignalInfo> GetSignalInfo(const CBlockIndex* pindex) const;
@@ -87,8 +87,8 @@ public:
      */
     int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
-    /** Report bip number and version, based on nVersion signalling standard */
-    bool BIP(int& bip, int& bip_version, const Consensus::Params& params, Consensus::DeploymentPos pos) const;
+    /** Report BINANA details, based on nVersion signalling standard */
+    bool BINANA(int& year, int& number, int& revision, const Consensus::Params& params, Consensus::DeploymentPos pos) const;
 
     /** Returns signalling information */
     std::vector<SignalInfo> GetSignalInfo(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos) const;

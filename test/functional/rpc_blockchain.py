@@ -223,8 +223,7 @@ class BlockchainTest(BitcoinTestFramework):
             'checktemplateverify': {
                 'type': 'heretical',
                 'heretical': {
-                    'bip': 119,
-                    'bip_version': 0,
+                    'binana-id': "BIN-2016-0119-000",
                     'start_time': -1,
                     'timeout': 9223372036854775807,
                     'period': 144,
@@ -238,8 +237,7 @@ class BlockchainTest(BitcoinTestFramework):
             'anyprevout': {
                 'type': 'heretical',
                 'heretical': {
-                    'bip': 118,
-                    'bip_version': 0,
+                    'binana-id': "BIN-2016-0118-000",
                     'start_time': -1,
                     'timeout': 0x7fffffffffffffff,  # testdummy does not have a timeout so is set to the max int64 value
                     'period': 144,

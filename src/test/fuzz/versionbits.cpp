@@ -21,7 +21,7 @@
 
 bool operator==(const SignalInfo& a, const SignalInfo& b)
 {
-    return a.height == b.height && a.bip_version == b.bip_version && a.activate == b.activate;
+    return a.height == b.height && a.revision == b.revision && a.activate == b.activate;
 }
 
 namespace {
@@ -172,12 +172,12 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     Blocks blocks(block_start_time, interval);
 
     const auto siginfo_nosignal = [&]() -> std::optional<SignalInfo> {
-        int bip, bip_ver;
-        if (checker.BIP(bip, bip_ver)) {
+        int year, number, revision;
+        if (checker.BINANA(year, number, revision)) {
             if ((ver_nosignal & 0xFFFFFF00l) == (ver_activate & 0xFFFFFF00l)) {
-                return SignalInfo{.height = 0, .bip_version = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = true};
+                return SignalInfo{.height = 0, .revision = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = true};
             } else if ((ver_nosignal & 0xFFFFFF00l) == (ver_abandon & 0xFFFFFF00l)) {
-                return SignalInfo{.height = 0, .bip_version = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = false};
+                return SignalInfo{.height = 0, .revision = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = false};
             }
         }
         return std::nullopt;
@@ -244,11 +244,11 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         while (b > next_abandon) next_abandon += 1 + fuzzed_data_provider.ConsumeIntegral<uint8_t>();
         while (b > next_active) next_active += 1 + fuzzed_data_provider.ConsumeIntegral<uint8_t>();
         if (b == next_abandon) {
-            exp_siginfo.push_back({.height = next_height, .bip_version=-1, .activate=false});
+            exp_siginfo.push_back({.height = next_height, .revision = -1, .activate = false});
             blocks.mine_block(ver_abandon);
             sig_abandon = true;
         } else if (b == next_active) {
-            exp_siginfo.push_back({.height = next_height, .bip_version=-1, .activate=true});
+            exp_siginfo.push_back({.height = next_height, .revision = -1, .activate = true});
             blocks.mine_block(ver_activate);
             sig_active = true;
         } else {
