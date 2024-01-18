@@ -251,9 +251,7 @@ class BlockchainTest(BitcoinTestFramework):
             'opcat': {
                 'type': 'heretical',
                 'heretical': {
-                    # TODO (armins) update op_cat bip number
-                    'bip': 0,
-                    'bip_version': 0,
+                    'binana-id': "BIN-2024-0001-000",
                     'start_time': -1,
                     'timeout': 9223372036854775807,
                     'period': 144,
