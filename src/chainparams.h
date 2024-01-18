@@ -13,6 +13,11 @@
 class ArgsManager;
 
 /**
+ * Setup configuration options
+ */
+void SetupChainParamsOptions(ArgsManager& argsman);
+
+/**
  * Creates and returns a std::unique_ptr<CChainParams> of the chosen chain.
  */
 std::unique_ptr<const CChainParams> CreateChainParams(const ArgsManager& args, const ChainType chain);
