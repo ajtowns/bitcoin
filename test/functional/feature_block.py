@@ -160,7 +160,7 @@ class FullBlockTest(BitcoinTestFramework):
             blockname = f"for_invalid.{TxTemplate.__name__}"
             self.next_block(blockname)
             badtx = template.get_tx()
-            if TxTemplate != invalid_txs.InputMissing:
+            if template.wants_signature:
                 self.sign_tx(badtx, attempt_spend_tx)
             badtx.rehash()
             badblock = self.update_block(blockname, [badtx])
