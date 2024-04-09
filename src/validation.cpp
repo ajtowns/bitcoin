@@ -2401,7 +2401,6 @@ unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Chainstat
     return flags;
 }
 
-
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
  *  can fail if those validity checks fail (among other reasons). */
@@ -2431,7 +2430,7 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // is enforced in ContextualCheckBlockHeader(); we wouldn't want to
     // re-enforce that rule here (at least until we make it impossible for
     // the clock to go backward).
-    if (!CheckBlock(block, state, params.GetConsensus(), !fJustCheck, !fJustCheck)) {
+    if (!CheckBlock(block, state, params.GetConsensus(), !fJustCheck, !fJustCheck, &m_chainman, pindex->pprev)) {
         if (state.GetResult() == BlockValidationResult::BLOCK_MUTATED) {
             // We don't write down blocks to disk if they may have been
             // corrupted, so this should be impossible unless we're having hardware
@@ -3981,7 +3980,7 @@ static bool CheckWitnessMalleation(const CBlock& block, bool expect_witness_comm
     return true;
 }
 
-bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot)
+bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot, const ChainstateManager* chainman, const CBlockIndex* pindexPrev)
 {
     // These are checks that are independent of context.
 
@@ -3993,14 +3992,42 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
     if (!CheckBlockHeader(block, state, consensusParams, fCheckPOW))
         return false;
 
+    /**
+     * We want to enforce certain rules (specifically the 64-byte transaction check)
+     * before we check the merkle root. This allows us to enforce
+     * malleability checks which may interact with other CheckBlock checks.
+     */
+    bool all_64b = true;
+    bool any_64b = false;
+    for (const auto& tx : block.vtx) {
+        if (::GetSerializeSize(TX_NO_WITNESS(tx)) == 64) {
+            any_64b = true;
+        } else {
+            all_64b = false;
+        }
+        if (any_64b && !all_64b) break;
+    }
+
+    // if there are txs, and they are all 64 bytes, then we may have been given a mutated block
+    auto MaybeMutated = [&](bool r) -> bool {
+        if (any_64b && all_64b && !r && state.IsInvalid()) {
+            state.Invalid(BlockValidationResult::BLOCK_MUTATED, state.GetRejectReason(), state.GetDebugMessage());
+        }
+        return r;
+    };
+
+    if (chainman != nullptr && DeploymentActiveAfter(pindexPrev, *chainman, Consensus::DEPLOYMENT_64BYTETX) && any_64b) {
+        return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "64-byte-transaction", strprintf("64-byte tx (exclusing witness) present in block")));
+    }
+
     // Signet only: check block solution
     if (consensusParams.signet_blocks && fCheckPOW && !CheckSignetBlockSolution(block, consensusParams)) {
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block signature validation failure");
+        return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-signet-blksig", "signet block signature validation failure"));
     }
 
     // Check the merkle root.
     if (fCheckMerkleRoot && !CheckMerkleRoot(block, state)) {
-        return false;
+        return MaybeMutated(false);
     }
 
     // All potential-corruption validation must be done before we do any
@@ -4011,14 +4038,14 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
 
     // Size limits
     if (block.vtx.empty() || block.vtx.size() * WITNESS_SCALE_FACTOR > MAX_BLOCK_WEIGHT || ::GetSerializeSize(TX_NO_WITNESS(block)) * WITNESS_SCALE_FACTOR > MAX_BLOCK_WEIGHT)
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-length", "size limits failed");
+        return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-length", "size limits failed"));
 
     // First transaction must be coinbase, the rest must not be
     if (block.vtx.empty() || !block.vtx[0]->IsCoinBase())
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-missing", "first tx is not coinbase");
+        return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-missing", "first tx is not coinbase"));
     for (unsigned int i = 1; i < block.vtx.size(); i++)
         if (block.vtx[i]->IsCoinBase())
-            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-multiple", "more than one coinbase");
+            return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-multiple", "more than one coinbase"));
 
     // Check transactions
     // Must check for duplicate inputs (see CVE-2018-17144)
@@ -4028,8 +4055,8 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
             // CheckBlock() does context-free validation checks. The only
             // possible failures are consensus failures.
             assert(tx_state.GetResult() == TxValidationResult::TX_CONSENSUS);
-            return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
-                                 strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), tx_state.GetDebugMessage()));
+            return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, tx_state.GetRejectReason(),
+                                 strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), tx_state.GetDebugMessage())));
         }
     }
     unsigned int nSigOps = 0;
@@ -4038,9 +4065,9 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
         nSigOps += GetLegacySigOpCount(*tx);
     }
     if (nSigOps * WITNESS_SCALE_FACTOR > MAX_BLOCK_SIGOPS_COST)
-        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-sigops", "out-of-bounds SigOpCount");
+        return MaybeMutated(state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-sigops", "out-of-bounds SigOpCount"));
 
-    if (fCheckPOW && fCheckMerkleRoot)
+    if (fCheckPOW && fCheckMerkleRoot && (!any_64b || chainman != nullptr))
         block.fChecked = true;
 
     return true;
@@ -4478,7 +4505,7 @@ bool ChainstateManager::AcceptBlock(const std::shared_ptr<const CBlock>& pblock,
 
     const CChainParams& params{GetParams()};
 
-    if (!CheckBlock(block, state, params.GetConsensus()) ||
+    if (!CheckBlock(block, state, params.GetConsensus(), true, true, this, pindex->pprev) ||
         !ContextualCheckBlock(block, state, *this, pindex->pprev)) {
         if (state.IsInvalid() && state.GetResult() != BlockValidationResult::BLOCK_MUTATED) {
             pindex->nStatus |= BLOCK_FAILED_VALID;
@@ -4613,7 +4640,7 @@ bool TestBlockValidity(BlockValidationState& state,
         LogError("%s: Consensus::ContextualCheckBlockHeader: %s\n", __func__, state.ToString());
         return false;
     }
-    if (!CheckBlock(block, state, chainparams.GetConsensus(), fCheckPOW, fCheckMerkleRoot)) {
+    if (!CheckBlock(block, state, chainparams.GetConsensus(), fCheckPOW, fCheckMerkleRoot, &chainstate.m_chainman, pindexPrev)) {
         LogError("%s: Consensus::CheckBlock: %s\n", __func__, state.ToString());
         return false;
     }
@@ -4733,7 +4760,7 @@ VerifyDBResult CVerifyDB::VerifyDB(
             return VerifyDBResult::CORRUPTED_BLOCK_DB;
         }
         // check level 1: verify block validity
-        if (nCheckLevel >= 1 && !CheckBlock(block, state, consensus_params)) {
+        if (nCheckLevel >= 1 && !CheckBlock(block, state, consensus_params, true, true, &chainstate.m_chainman, pindex->pprev)) {
             LogPrintf("Verification error: found bad block at %d, hash=%s (%s)\n",
                       pindex->nHeight, pindex->GetBlockHash().ToString(), state.ToString());
             return VerifyDBResult::CORRUPTED_BLOCK_DB;

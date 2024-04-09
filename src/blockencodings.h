@@ -14,6 +14,8 @@ class BlockValidationState;
 namespace Consensus {
 struct Params;
 };
+class ChainstateManager;
+class CBlockIndex;
 
 // Transaction compression schemes for compact block relay can be introduced by writing
 // an actual formatter here.
@@ -141,7 +143,7 @@ public:
     CBlockHeader header;
 
     // Can be overridden for testing
-    using CheckBlockFn = std::function<bool(const CBlock&, BlockValidationState&, const Consensus::Params&, bool, bool)>;
+    using CheckBlockFn = std::function<bool(const CBlock&, BlockValidationState&, const Consensus::Params&, bool, bool, const ChainstateManager*, const CBlockIndex*)>;
     CheckBlockFn m_check_block_mock{nullptr};
 
     explicit PartiallyDownloadedBlock(CTxMemPool* poolIn) : pool(poolIn) {}
