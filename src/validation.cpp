@@ -2401,7 +2401,6 @@ unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Chainstat
     return flags;
 }
 
-
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
  *  can fail if those validity checks fail (among other reasons). */
@@ -4196,6 +4195,7 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
     return true;
 }
 
+
 /** NOTE: This function is not currently invoked by ConnectBlock(), so we
  *  should consider upgrade issues if we change which consensus rules are
  *  enforced in this function (eg by adding a new consensus rule). See comment
@@ -4204,6 +4204,21 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
  */
 static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& state, const ChainstateManager& chainman, const CBlockIndex* pindexPrev)
 {
+
+    /**
+     * Failure of the 64-byte transaction check could indicate a mutated block,
+     * so all failed checks prior to this (see CheckBlock()) must also
+     * be treated as if they had returned BLOCK_MUTATED.
+     */
+    if (DeploymentActiveAfter(pindexPrev, chainman,
+    Consensus::DEPLOYMENT_64BYTETX)) {
+        for (const auto& tx : block.vtx) {
+            if (::GetSerializeSize(TX_NO_WITNESS(tx)) == 64) {
+                return state.Invalid(BlockValidationResult::BLOCK_MUTATED, "64-byte-transaction", strprintf("size of tx %s without witness is 64 bytes", tx->GetHash().ToString()));
+            }
+        }
+    }
+
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
     // Enforce BIP113 (Median Time Past).
