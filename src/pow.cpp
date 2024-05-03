@@ -61,7 +61,19 @@ unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nF
     // Retarget
     const arith_uint256 bnPowLimit = UintToArith256(params.powLimit);
     arith_uint256 bnNew;
-    bnNew.SetCompact(pindexLast->nBits);
+
+    // Special difficulty rule for Testnet4
+    if (params.fPowAllowMinDifficultyBlocks && params.hashGenesisBlock == uint256S("0x000000008d6faa98083fa55742aa82d4ed249bd1bfc3239c706e0a61ef9e3931")) {
+        // Use the last non-special-min-difficulty-rules-block
+        const CBlockIndex* pindex = pindexLast;
+        const unsigned int pow_min{bnPowLimit.GetCompact()};
+        while (pindex->pprev && pindex->nHeight % params.DifficultyAdjustmentInterval() != 0 && pindex->nBits == pow_min)
+            pindex = pindex->pprev;
+        bnNew.SetCompact(pindex->nBits);
+    } else {
+        bnNew.SetCompact(pindexLast->nBits);
+    }
+
     bnNew *= nActualTimespan;
     bnNew /= params.nPowTargetTimespan;
 
