@@ -10,6 +10,54 @@
 #include <primitives/block.h>
 #include <uint256.h>
 
+template<typename A, typename B>
+bool IsMinWorkBlock(const A* block, const B* prev, const Consensus::Params& params)
+{
+    if (block == nullptr || prev == nullptr) return false;
+    return block->GetBlockTime() > prev->GetBlockTime() + params.nPowTargetSpacing * 2;
+}
+
+static unsigned int RealWork(const CBlockIndex* pindexLast, const Consensus::Params& params)
+{
+    if (pindexLast == nullptr) {
+        return UintToArith256(params.powLimit).GetCompact();
+    }
+
+    if (IsMinWorkBlock(pindexLast, pindexLast->pprev, params)) {
+        return pindexLast->nVersion;
+    } else {
+        return pindexLast->nBits;
+    }
+}
+
+void SetNextWorkRequired(CBlockHeader* pblock, const CBlockIndex* pindexLast, const Consensus::Params& params)
+{
+    if (!params.min_diff_has_true_diff_nVersion) {
+        pblock->nBits = GetNextWorkRequired(pindexLast, pblock, params);
+    } else {
+        if (IsMinWorkBlock(pblock, pindexLast, params)) {
+            pblock->nBits = UintToArith256(params.powLimit).GetCompact();
+            pblock->nVersion = static_cast<int32_t>(RealWork(pindexLast, params));
+        } else {
+            pblock->nBits = RealWork(pindexLast, params);
+        }
+    }
+}
+
+bool CheckNextWorkRequired(const CBlockHeader& block, const CBlockIndex* pindexLast, const Consensus::Params& params)
+{
+    if (!params.min_diff_has_true_diff_nVersion) {
+        return block.nBits == GetNextWorkRequired(pindexLast, &block, params);
+    } else {
+        if (IsMinWorkBlock(&block, pindexLast, params)) {
+            return block.nBits == UintToArith256(params.powLimit).GetCompact()
+                  && static_cast<unsigned int>(block.nVersion) == RealWork(pindexLast, params);
+        } else {
+            return block.nBits == RealWork(pindexLast, params);
+        }
+    }
+}
+
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params& params)
 {
     assert(pindexLast != nullptr);
@@ -18,15 +66,22 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHead
     // Only change once per difficulty adjustment interval
     if ((pindexLast->nHeight+1) % params.DifficultyAdjustmentInterval() != 0)
     {
-        if (params.fPowAllowMinDifficultyBlocks)
-        {
+        if (params.fPowAllowMinDifficultyBlocks && params.min_diff_has_true_diff_nVersion) {
+            // testnet4 behaviour
+            if (IsMinWorkBlock(pblock, pindexLast, params)) {
+                return nProofOfWorkLimit;
+            } else if (IsMinWorkBlock(pindexLast, pindexLast->pprev, params)) {
+                return pindexLast->nVersion;
+            } else {
+                return pindexLast->nBits;
+            }
+        } else if (params.fPowAllowMinDifficultyBlocks) {
             // Special difficulty rule for testnet:
             // If the new block's timestamp is more than 2* 10 minutes
             // then allow mining of a min-difficulty block.
-            if (pblock->GetBlockTime() > pindexLast->GetBlockTime() + params.nPowTargetSpacing*2)
+            if (IsMinWorkBlock(pblock, pindexLast, params)) {
                 return nProofOfWorkLimit;
-            else
-            {
+            } else {
                 // Return the last non-special-min-difficulty-rules-block
                 const CBlockIndex* pindex = pindexLast;
                 while (pindex->pprev && pindex->nHeight % params.DifficultyAdjustmentInterval() != 0 && pindex->nBits == nProofOfWorkLimit)
@@ -63,13 +118,8 @@ unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nF
     arith_uint256 bnNew;
 
     // Special difficulty rule for Testnet4
-    if (params.fPowAllowMinDifficultyBlocks && params.hashGenesisBlock == uint256S("0x000000008d6faa98083fa55742aa82d4ed249bd1bfc3239c706e0a61ef9e3931")) {
-        // Use the last non-special-min-difficulty-rules-block
-        const CBlockIndex* pindex = pindexLast;
-        const unsigned int pow_min{bnPowLimit.GetCompact()};
-        while (pindex->pprev && pindex->nHeight % params.DifficultyAdjustmentInterval() != 0 && pindex->nBits == pow_min)
-            pindex = pindex->pprev;
-        bnNew.SetCompact(pindex->nBits);
+    if (params.fPowAllowMinDifficultyBlocks && params.min_diff_has_true_diff_nVersion) {
+        bnNew.SetCompact(RealWork(pindexLast, params));
     } else {
         bnNew.SetCompact(pindexLast->nBits);
     }
