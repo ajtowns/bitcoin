@@ -365,6 +365,12 @@ protected:
     }
 
     /**
+     * Check CLI command args
+     * (throws std::runtime_error when multiple CLI_COMMAND arguments are specified)
+     */
+    void CheckMultipleCLIArgs() const;
+
+    /**
      * Get the help string
      */
     std::string GetHelpMessage() const;

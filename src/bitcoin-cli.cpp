@@ -1175,12 +1175,7 @@ static int CommandLineRPC(int argc, char *argv[])
                 fputc('\n', stdout);
             }
         }
-        if (gArgs.IsArgSet("-getinfo") +
-            gArgs.GetBoolArg("-netinfo", false) +
-            gArgs.GetBoolArg("-generate", false) +
-            gArgs.GetBoolArg("-addrinfo", false) > 1) {
-            throw std::runtime_error("Only one of \"-getinfo\", \"-netinfo\", \"-generate\", and \"-addrinfo\" may be specified.");
-        }
+        gArgs.CheckMultipleCLIArgs();
         std::unique_ptr<BaseRequestHandler> rh;
         std::string method;
         if (gArgs.IsArgSet("-getinfo")) {

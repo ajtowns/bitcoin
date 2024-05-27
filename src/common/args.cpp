@@ -587,6 +587,23 @@ void ArgsManager::AddHiddenArgs(const std::vector<std::string>& names)
     }
 }
 
+void ArgsManager::CheckMultipleCLIArgs() const
+{
+    LOCK(cs_args);
+    std::vector<std::string> found{};
+    auto cmds = m_available_args.find(OptionsCategory::CLI_COMMANDS);
+    if (cmds != m_available_args.end()) {
+        for (const auto& [cmd, argspec] : cmds->second) {
+            if (IsArgSet(cmd)) {
+                found.push_back(cmd);
+            }
+        }
+        if (found.size() > 1) {
+            throw std::runtime_error(strprintf("Only one of %s may be specified.", Join(found, ", ")));
+        }
+    }
+}
+
 std::string ArgsManager::GetHelpMessage() const
 {
     const bool show_debug = GetBoolArg("-help-debug", false);
