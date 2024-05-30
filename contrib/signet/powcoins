@@ -12,6 +12,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 
 PATH_BASE_CONTRIB_SIGNET = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
 PATH_BASE_TEST_FUNCTIONAL = os.path.abspath(os.path.join(PATH_BASE_CONTRIB_SIGNET, "..", "..", "test", "functional"))
@@ -114,9 +115,7 @@ script = {
 }
 ipk = bytes.fromhex("4a981eda2acd9bf5d789fa1a9b7f95677776d99fd13ec0f658f0e4dbc5b5c878")
 
-def do_claim(args):
-    payto = address_to_scriptpubkey(args.address)
-
+def get_tapinfo(args):
     tapinfo = {}
     for n in script:
         ti = taproot_construct(ipk, [("only-path", script[n])])
@@ -125,12 +124,29 @@ def do_claim(args):
         if faucet_addr is None:
             logging.error(f"Faucet address for delay {n} is unknown?? (spk={spk})")
             return 1
-        logging.info(f"Faucet address {faucet_addr} (delay={n})")
+        logging.debug(f"Faucet address {faucet_addr} (delay={n})")
 
         if spk in tapinfo:
             logging.error(f"Duplicate faucet address for delays {tapinfo[spk][0]} and {n}")
             return 1
-        tapinfo[spk] = (n, ti)
+        tapinfo[spk] = (n, ti, faucet_addr)
+    return tapinfo
+
+def do_setupwallet(args):
+    tapinfo = get_tapinfo(args)
+    args.bcli("-named", "createwallet", f"wallet_name={args.wallet}", "disable_private_keys=true", "descriptors=true", "load_on_startup=true")
+
+    descinfo = []
+    for spk, (n, ti, addr) in tapinfo.items():
+        desc = json.loads(args.bcli("getdescriptorinfo", f"addr({addr})")).get("descriptor")
+        descinfo.append(dict(desc=desc, timestamp=int(time.time() - 600*128*n)))
+    args.bcli(f"-rpcwallet={args.wallet}", "importdescriptors", json.dumps(descinfo))
+    return 0
+
+def do_claim(args):
+    payto = address_to_scriptpubkey(args.address)
+
+    tapinfo = get_tapinfo(args)
 
     coins = json.loads(args.bcli(f"-rpcwallet={args.wallet}", "listunspent"))
 
@@ -139,7 +155,7 @@ def do_claim(args):
     min_diff = 65
     for c in coins:
         if c["scriptPubKey"] not in tapinfo: continue # don't know how to spend
-        d, ti = tapinfo[c["scriptPubKey"]]
+        d, ti, _ = tapinfo[c["scriptPubKey"]]
         found = True
         conf = c["confirmations"]//d
         diff = 64 - conf
@@ -244,6 +260,11 @@ def main(argv):
     claim.add_argument("--grind", default="bitcoin-util grind", help="Command line for grinding a header")
     claim.add_argument("--max-difficulty", default=26, type=int, help="Maximum difficulty to attempt")
     claim.add_argument("address", help="Address to receive funds")
+
+    setupwallet = cmds.add_parser("setup-wallet", help="Setup wallet to track PoW faucet")
+    setupwallet.set_defaults(fn=do_setupwallet)
+    setupwallet.add_argument("--wallet", default="varpow", help="Name of wallet used for tracking faucet coins")
+    setupwallet.add_argument("--cli", default="bitcoin-cli -signet", help="Command line for bitcoin-cli")
 
     args = parser.parse_args(argv)
 
