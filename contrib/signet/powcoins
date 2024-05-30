@@ -179,7 +179,6 @@ def do_claim(args):
     csv = invdiff * delay
     assert conf >= csv >= 0
 
-    print(f'{score:.2f} {conf} {c["amount"]} {txid} {vout}')
     if c["scriptPubKey"] != tapinfo.scriptPubKey.hex():
         logging.error("Best coin in wallet has wrong scriptPubKey (%s != %s)" % (c["scriptPubKey"], tapinfo.scriptPubKey.hex()))
         return 1
@@ -196,17 +195,15 @@ def do_claim(args):
     signature_hash = TaprootSignatureHash(claim_tx, [CTxOut(amount, tapinfo.scriptPubKey)], SIGHASH_DEFAULT, 0, True, script[delay])
     signature = sign_schnorr(privkey.get_bytes(), signature_hash)
 
-    print("SIG", signature.hex())
-
     prefix = b'\x03\x00\x00\x00'
     nbits = bytes(reversed([27 + invdiff//8, 0, 0, (1 << (invdiff % 8))]))
     logging.debug(f"nbits = {nbits.hex()} difficulty = {difficulty} csv = {csv} invdiff = {invdiff} delay = {delay}")
     time = b'\x0b\x00\x00\x00'
 
     fake_header = prefix + signature + time + nbits + b'\x00\x00\x00\x00'
-    print("GRIND ", fake_header.hex())
+    logging.debug(f"GRIND {fake_header.hex()}")
     grind = subprocess.run(args.grind.split(" ") + [fake_header.hex()], stdout=subprocess.PIPE, input=b"", check=True).stdout.strip().decode('utf8')
-    print("GROUND", grind)
+    logging.debug(f"GROUND {grind}")
 
     grind = bytes.fromhex(grind)
     if grind[0] != 3 or grind[68] != 11 or grind[4:68] != signature or len(grind) != 80:
@@ -218,11 +215,8 @@ def do_claim(args):
 
     hashed = hash256(grind)
     n = 32 - difficulty//8 - 1
-    logging.info(f"Got n = {n} for difficulty = {difficulty}")
-    logging.info(f"So suffix is {hashed[n:].hex()}, {32-n} 0 bytes?")
     h_a, h_b = bytes([hashed[n]]), hashed[:n]
 
-    print("SPLIT", prefix.hex(), suffix.hex(), h_b.hex(), h_a.hex(), hashed[n+1:].hex())
     weight_before = claim_tx.get_weight()
     claim_tx.wit.vtxinwit[0].scriptWitness.stack = [
         signature, pubkey,
@@ -231,10 +225,12 @@ def do_claim(args):
         bytes([0xc0 + tapinfo.negflag]) + ipk
     ]
     weight_after = claim_tx.get_weight()
-    print(f"extra weight {weight_after - weight_before} = {weight_after} - {weight_before}")
-    print(claim_tx.serialize().hex())
-    args.bcli("sendrawtransaction", claim_tx.serialize().hex())
-
+    # could store `weight_after - weight_before` for each script then
+    # calculate the fee rate accurately, rather than a constant 10k sat fee
+    #print(f"extra weight {weight_after - weight_before} = {weight_after} - {weight_before}")
+    logging.debug(f"tx {claim_tx.serialize().hex()}")
+    r = args.bcli("sendrawtransaction", claim_tx.serialize().hex())
+    logging.info(f"sendrawtransaction result {r}")
     return 0
 
 def bitcoin_cli(basecmd, args, **kwargs):
