@@ -136,20 +136,22 @@ def do_claim(args):
 
     scored = []
     found = False
+    min_diff = 65
     for c in coins:
         if c["scriptPubKey"] not in tapinfo: continue # don't know how to spend
         d, ti = tapinfo[c["scriptPubKey"]]
         found = True
         conf = c["confirmations"]//d
-        if 64 - conf >= 26: continue # too difficult
         diff = 64 - conf
+        min_diff = min(diff, min_diff)
+        if diff > args.max_difficulty: continue # too difficult
         score = math.log(c["amount"], 2) + c["confirmations"]//d
         scored.append((score, c["confirmations"], c["txid"], c["vout"], c, d, ti))
     if not found:
         logging.error("Faucet is empty")
         return 1
     elif not scored:
-        logging.error("Faucet is too difficult")
+        logging.error(f"Faucet is too difficult (min difficulty {min_diff})")
         return 1
     scored = sorted(scored)
 
@@ -240,6 +242,7 @@ def main(argv):
     claim.add_argument("--wallet", default="varpow", help="Name of wallet used for tracking faucet coins")
     claim.add_argument("--cli", default="bitcoin-cli -signet", help="Command line for bitcoin-cli")
     claim.add_argument("--grind", default="bitcoin-util grind", help="Command line for grinding a header")
+    claim.add_argument("--max-difficulty", default=26, type=int, help="Maximum difficulty to attempt")
     claim.add_argument("address", help="Address to receive funds")
 
     args = parser.parse_args(argv)
