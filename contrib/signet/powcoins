@@ -108,28 +108,36 @@ if False:
 # 5. generate a pow job based on the signature
 # 6. generate (and submit) a valid tx given the utxo, signature and pow
 
-script = {
-  10: bytes.fromhex("7651a2697601409f697676937676937693930280027c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac"),
-  4: bytes.fromhex("7651a2697601409f6976769376930200017c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac"),
-  1: bytes.fromhex("7651a2697601409f697601407c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac"),
-}
+# fields are:
+#  * number of blocks before difficulty drops
+#  * min difficulty
+#  * max difficulty
+#  * script
+SCRIPTS = [
+  (10, 1, 64, bytes.fromhex("7651a2697601409f697676937676937693930280027c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (4, 1, 64, bytes.fromhex("7651a2697601409f6976769376930200017c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (1, 1, 64, bytes.fromhex("7651a2697601409f697601407c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (10, 16, 80, bytes.fromhex("60947600a2697601409f697676937676937693930280027c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (4, 16, 80, bytes.fromhex("60947600a2697601409f6976769376930200017c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (1, 16, 80, bytes.fromhex("60947600a2697601409f697601407c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+]
 ipk = bytes.fromhex("4a981eda2acd9bf5d789fa1a9b7f95677776d99fd13ec0f658f0e4dbc5b5c878")
 
 def get_tapinfo(args):
     tapinfo = {}
-    for n in script:
-        ti = taproot_construct(ipk, [("only-path", script[n])])
+    for dropdiff, mindiff, maxdiff, script in SCRIPTS:
+        ti = taproot_construct(ipk, [("only-path", script)])
         spk = ti.scriptPubKey.hex()
         faucet_addr = json.loads(args.bcli("decodescript", spk)).get("address", None)
         if faucet_addr is None:
-            logging.error(f"Faucet address for delay {n} is unknown?? (spk={spk})")
+            logging.error(f"Faucet address for delay {dropdiff} is unknown?? (spk={spk})")
             return 1
-        logging.debug(f"Faucet address {faucet_addr} (delay={n})")
+        logging.debug(f"Faucet address {faucet_addr} (delay={dropdiff})")
 
         if spk in tapinfo:
-            logging.error(f"Duplicate faucet address for delays {tapinfo[spk][0]} and {n}")
+            logging.error(f"Duplicate faucet address for delays {tapinfo[spk][0]} and {dropdiff}")
             return 1
-        tapinfo[spk] = (n, ti, faucet_addr)
+        tapinfo[spk] = (dropdiff, mindiff, maxdiff, script, ti, faucet_addr)
     return tapinfo
 
 def do_setupwallet(args):
@@ -137,7 +145,7 @@ def do_setupwallet(args):
     args.bcli("-named", "createwallet", f"wallet_name={args.wallet}", "disable_private_keys=true", "descriptors=true", "load_on_startup=true")
 
     descinfo = []
-    for spk, (n, ti, addr) in tapinfo.items():
+    for spk, (n, mindiff, maxdiff, script, ti, addr) in tapinfo.items():
         desc = json.loads(args.bcli("getdescriptorinfo", f"addr({addr})")).get("descriptor")
         descinfo.append(dict(desc=desc, timestamp=int(time.time() - 600*128*n)))
     args.bcli(f"-rpcwallet={args.wallet}", "importdescriptors", json.dumps(descinfo))
@@ -152,30 +160,30 @@ def do_claim(args):
 
     scored = []
     found = False
-    min_diff = 65
+    easiest = 99
     for c in coins:
         if c["scriptPubKey"] not in tapinfo: continue # don't know how to spend
-        d, ti, _ = tapinfo[c["scriptPubKey"]]
+        d, mindiff, maxdiff, script, ti, _ = tapinfo[c["scriptPubKey"]]
         found = True
         conf = c["confirmations"]//d
-        diff = 64 - conf
-        min_diff = min(diff, min_diff)
+        diff = max(maxdiff - conf, mindiff)
+        easiest = min(diff, easiest)
         if diff > args.max_difficulty: continue # too difficult
-        score = math.log(c["amount"], 2) + c["confirmations"]//d
-        scored.append((score, c["confirmations"], c["txid"], c["vout"], c, d, ti))
+        score = math.log(c["amount"], 2) - diff
+        scored.append((score, c["confirmations"], c["txid"], c["vout"], c, d, mindiff, maxdiff, script, ti))
     if not found:
         logging.error("Faucet is empty")
         return 1
     elif not scored:
-        logging.error(f"Faucet is too difficult (min difficulty {min_diff})")
+        logging.error(f"Faucet is too difficult (min difficulty {easiest})")
         return 1
     scored = sorted(scored)
 
     # best one!
-    score, conf, txid, vout, c, delay, tapinfo = scored[-1]
+    score, conf, txid, vout, c, delay, mindiff, maxdiff, script, tapinfo = scored[-1]
     amount = int(c["amount"]*1e8)
-    difficulty = max(1, 64 - conf//delay)
-    invdiff = 64 - difficulty
+    difficulty = max(mindiff, maxdiff - conf//delay)
+    invdiff = maxdiff - difficulty
     csv = invdiff * delay
     assert conf >= csv >= 0
 
@@ -192,11 +200,11 @@ def do_claim(args):
     privkey = ECKey()
     privkey.set(int(1).to_bytes(32, 'big'), compressed=True)
     pubkey, _ = compute_xonly_pubkey(privkey.get_bytes())
-    signature_hash = TaprootSignatureHash(claim_tx, [CTxOut(amount, tapinfo.scriptPubKey)], SIGHASH_DEFAULT, 0, True, script[delay])
+    signature_hash = TaprootSignatureHash(claim_tx, [CTxOut(amount, tapinfo.scriptPubKey)], SIGHASH_DEFAULT, 0, True, script)
     signature = sign_schnorr(privkey.get_bytes(), signature_hash)
 
     prefix = b'\x03\x00\x00\x00'
-    nbits = bytes(reversed([27 + invdiff//8, 0, 0, (1 << (invdiff % 8))]))
+    nbits = bytes(reversed([(280 - difficulty)//8, 0, 0, (1 << ((280 - difficulty) % 8))]))
     logging.debug(f"nbits = {nbits.hex()} difficulty = {difficulty} csv = {csv} invdiff = {invdiff} delay = {delay}")
     time = b'\x0b\x00\x00\x00'
 
@@ -221,7 +229,7 @@ def do_claim(args):
     claim_tx.wit.vtxinwit[0].scriptWitness.stack = [
         signature, pubkey,
         prefix, suffix, h_b, h_a, bytes([difficulty]),
-        script[delay],
+        script,
         bytes([0xc0 + tapinfo.negflag]) + ipk
     ]
     weight_after = claim_tx.get_weight()
