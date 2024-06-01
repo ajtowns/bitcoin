@@ -48,8 +48,9 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
     argsman.AddArg("-input", "The index of the input being spent", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-spent_output", "The spent prevouts (hex encode TxOut, may be specified multiple times).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-ipk", "The internal public key for a tapscript spend", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-bip320", "Enable BIP 320 version bit grinding", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
 
-    argsman.AddCommand("grind", "Perform proof of work on hex header string");
+    argsman.AddCommand("grind", "Perform proof of work on hex header string", {"-bip320"});
     argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion", "-script_flags", "-tx", "-input", "-spent_output", "-ipk"});
 
     SetupChainParamsBaseOptions(argsman);
@@ -98,7 +99,7 @@ static int AppInitUtil(ArgsManager& args, int argc, char* argv[])
     return CONTINUE_EXECUTION;
 }
 
-static void grind_task(uint32_t nBits, CBlockHeader header, uint32_t offset, uint32_t step, std::atomic<bool>& found, uint32_t& proposed_nonce)
+static void grind_task(uint32_t nBits, CBlockHeader header, bool bip320, uint32_t offset, uint32_t step, std::atomic<bool>& found, uint32_t& proposed_nonce, int32_t& proposed_version)
 {
     arith_uint256 target;
     bool neg, over;
@@ -109,21 +110,29 @@ static void grind_task(uint32_t nBits, CBlockHeader header, uint32_t offset, uin
     uint32_t finish = std::numeric_limits<uint32_t>::max() - step;
     finish = finish - (finish % step) + offset;
 
-    while (!found && header.nNonce < finish) {
-        const uint32_t next = (finish - header.nNonce < 5000*step) ? finish : header.nNonce + 5000*step;
-        do {
-            if (UintToArith256(header.GetHash()) <= target) {
-                if (!found.exchange(true)) {
-                    proposed_nonce = header.nNonce;
+    int32_t version_xor = (bip320 ? 0xFFFF : 0);
+    const int32_t base_version{header.nVersion};
+    for (;;) {
+        header.nVersion = base_version ^ (version_xor << 13);
+        while (!found && header.nNonce < finish) {
+            const uint32_t next = (finish - header.nNonce < 5000*step) ? finish : header.nNonce + 5000*step;
+            do {
+                if (UintToArith256(header.GetHash()) <= target) {
+                    if (!found.exchange(true)) {
+                        proposed_nonce = header.nNonce;
+                        proposed_version = header.nVersion;
+                    }
+                    return;
                 }
-                return;
-            }
-            header.nNonce += step;
-        } while(header.nNonce != next);
+                header.nNonce += step;
+            } while(header.nNonce != next);
+        }
+        if (version_xor == 0) break;
+        --version_xor;
     }
 }
 
-static int Grind(const std::vector<std::string>& args, std::string& strPrint)
+static int Grind(const ArgsManager& argsman, const std::vector<std::string>& args, std::string& strPrint)
 {
     if (args.size() != 1) {
         strPrint = "Must specify block header to grind";
@@ -136,21 +145,25 @@ static int Grind(const std::vector<std::string>& args, std::string& strPrint)
         return EXIT_FAILURE;
     }
 
+    const bool bip320 = argsman.GetBoolArg("-bip320", false);
+
     uint32_t nBits = header.nBits;
     std::atomic<bool> found{false};
     uint32_t proposed_nonce{};
+    int32_t proposed_version{};
 
     std::vector<std::thread> threads;
     int n_tasks = std::max(1u, std::thread::hardware_concurrency());
     threads.reserve(n_tasks);
     for (int i = 0; i < n_tasks; ++i) {
-        threads.emplace_back(grind_task, nBits, header, i, n_tasks, std::ref(found), std::ref(proposed_nonce));
+        threads.emplace_back(grind_task, nBits, header, bip320, i, n_tasks, std::ref(found), std::ref(proposed_nonce), std::ref(proposed_version));
     }
     for (auto& t : threads) {
         t.join();
     }
     if (found) {
         header.nNonce = proposed_nonce;
+        header.nVersion = proposed_version;
     } else {
         strPrint = "Could not satisfy difficulty target";
         return EXIT_FAILURE;
@@ -431,7 +444,7 @@ MAIN_FUNCTION
     std::string strPrint;
     try {
         if (cmd->command == "grind") {
-            ret = Grind(cmd->args, strPrint);
+            ret = Grind(args, cmd->args, strPrint);
         } else if (cmd->command == "evalscript") {
             ret = EvalScript(args, cmd->args, strPrint);
         } else {
