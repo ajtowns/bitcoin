@@ -10,6 +10,7 @@
 #include <tinyformat.h>
 #include <util/fs.h>
 #include <util/string.h>
+#include <util/time.h>
 
 #include <atomic>
 #include <cstdint>
@@ -85,8 +86,17 @@ namespace BCLog {
     private:
         mutable StdMutex m_cs; // Can not use Mutex from sync.h because in debug mode it would cause a deadlock when a potential deadlock was detected
 
+        struct BufferedLog {
+            SystemClock::time_point now;
+            std::chrono::seconds mocktime;
+            std::string str, logging_function, source_file, threadname;
+            int source_line;
+            LogFlags category;
+            Level level;
+        };
+
         FILE* m_fileout GUARDED_BY(m_cs) = nullptr;
-        std::list<std::string> m_msgs_before_open GUARDED_BY(m_cs);
+        std::list<BufferedLog> m_msgs_before_open GUARDED_BY(m_cs);
         bool m_buffering GUARDED_BY(m_cs) = true; //!< Buffer messages before logging can be started.
 
         /**
@@ -106,7 +116,9 @@ namespace BCLog {
         /** Log categories bitfield. */
         std::atomic<uint32_t> m_categories{0};
 
-        std::string LogTimestampStr(const std::string& str);
+        void FormatLogStrInPlace(std::string& str, LogFlags category, Level level, std::string source_file, int source_line, std::string logging_function, std::string threadname, SystemClock::time_point now, std::chrono::seconds mocktime) const;
+
+        std::string LogTimestampStr(SystemClock::time_point now, std::chrono::seconds mocktime) const;
 
         /** Slots that connect to the print signal */
         std::list<std::function<void(const std::string&)>> m_print_callbacks GUARDED_BY(m_cs) {};
