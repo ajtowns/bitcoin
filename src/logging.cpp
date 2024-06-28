@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <logging.h>
+#include <memusage.h>
 #include <util/fs.h>
 #include <util/string.h>
 #include <util/threadnames.h>
@@ -83,6 +84,7 @@ bool BCLog::Logger::StartLogging()
             cb(s);
         }
     }
+    m_cur_buffer_memusage = 0;
     if (m_print_to_console) fflush(stdout);
 
     return true;
@@ -361,6 +363,10 @@ void BCLog::Logger::FormatLogStrInPlace(std::string& str, BCLog::LogFlags catego
     str.insert(0, LogTimestampStr(now, mocktime));
 }
 
+static size_t MemUsage(const BCLog::Logger::BufferedLog& buflog) {
+    return buflog.str.size() + buflog.logging_function.size() + buflog.source_file.size() + buflog.threadname.size() + memusage::MallocUsage(sizeof(memusage::list_node<BCLog::Logger::BufferedLog>));
+}
+
 void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& logging_function, const std::string& source_file, int source_line, BCLog::LogFlags category, BCLog::Level level)
 {
     StdLockGuard scoped_lock(m_cs);
@@ -372,6 +378,7 @@ void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& loggi
     if (m_buffering) {
         if (!starts_new_line && !m_msgs_before_open.empty()) {
             m_msgs_before_open.back().str += str;
+            m_cur_buffer_memusage += str.size();
         } else {
             BufferedLog buf{
                 .now=SystemClock::now(),
@@ -385,6 +392,12 @@ void BCLog::Logger::LogPrintStr(const std::string& str, const std::string& loggi
                 .level=level,
             };
             m_msgs_before_open.push_back(buf);
+            m_cur_buffer_memusage += MemUsage(buf);
+            while (m_cur_buffer_memusage > m_max_buffer_memusage) {
+                if (m_msgs_before_open.empty()) { m_cur_buffer_memusage = 0; break; }
+                m_cur_buffer_memusage -= MemUsage(m_msgs_before_open.front());
+                m_msgs_before_open.pop_front();
+            }
         }
         return;
     }

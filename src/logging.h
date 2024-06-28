@@ -83,9 +83,7 @@ namespace BCLog {
 
     class Logger
     {
-    private:
-        mutable StdMutex m_cs; // Can not use Mutex from sync.h because in debug mode it would cause a deadlock when a potential deadlock was detected
-
+    public:
         struct BufferedLog {
             SystemClock::time_point now;
             std::chrono::seconds mocktime;
@@ -95,9 +93,14 @@ namespace BCLog {
             Level level;
         };
 
+    private:
+        mutable StdMutex m_cs; // Can not use Mutex from sync.h because in debug mode it would cause a deadlock when a potential deadlock was detected
+
         FILE* m_fileout GUARDED_BY(m_cs) = nullptr;
         std::list<BufferedLog> m_msgs_before_open GUARDED_BY(m_cs);
         bool m_buffering GUARDED_BY(m_cs) = true; //!< Buffer messages before logging can be started.
+        size_t m_max_buffer_memusage GUARDED_BY(m_cs){1000000}; // buffer up to 1MB of log data prior to StartLogging
+        size_t m_cur_buffer_memusage GUARDED_BY(m_cs){0};
 
         /**
          * m_started_new_line is a state variable that will suppress printing of
