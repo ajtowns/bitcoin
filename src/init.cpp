@@ -820,16 +820,6 @@ void InitParameterInteraction(ArgsManager& args)
  */
 void InitLogging(const ArgsManager& args)
 {
-    for (int i = 0; i < 5000; ++i) {
-        LogInfo("Log spam, #%d\n", i);
-    }
-    LogInfo("Here's an info message...");
-    LogInfo("...continued\n");
-    LogWarning("Warning\n");
-    LogError("Error\n");
-    LogDebug(BCLog::NET, "net debug\n");
-    std::this_thread::sleep_for(3s);
-
     init::SetLoggingOptions(args);
     init::LogPackageVersion();
 }
@@ -1148,13 +1138,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         // Detailed error printed inside CreatePidFile().
         return false;
     }
-
     if (!init::StartLogging(args)) {
         // Detailed error printed inside StartLogging().
         return false;
     }
-
-    LogInfo("STARTED LOGGING\n");
 
     LogPrintf("Using at most %i automatic connections (%i file descriptors available)\n", nMaxConnections, nFD);
 
