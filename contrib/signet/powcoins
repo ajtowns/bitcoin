@@ -39,14 +39,8 @@ from test_framework.script import (
     TaprootSignatureHash,
     taproot_construct,
 )
-from test_framework.key import ECKey, H_POINT, compute_xonly_pubkey, sign_schnorr
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, assert_raises_rpc_error
-from test_framework.wallet import MiniWallet, MiniWalletMode
-from decimal import Decimal
-import random
-from io import BytesIO
-from test_framework.address import output_key_to_p2tr, script_to_p2sh, address_to_scriptpubkey
+from test_framework.key import ECKey, compute_xonly_pubkey, sign_schnorr
+from test_framework.address import address_to_scriptpubkey
 
 if False:
     """PoW-limited faucet using OP_CAT (idea by ajtowns, see
