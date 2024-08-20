@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -18,57 +19,26 @@ PATH_BASE_CONTRIB_SIGNET = os.path.abspath(os.path.dirname(os.path.realpath(__fi
 PATH_BASE_TEST_FUNCTIONAL = os.path.abspath(os.path.join(PATH_BASE_CONTRIB_SIGNET, "..", "..", "test", "functional"))
 sys.path.insert(0, PATH_BASE_TEST_FUNCTIONAL)
 
-from test_framework.blocktools import (
-    create_coinbase,
-    create_block,
-    add_witness_commitment,
-)
 from test_framework.messages import (
+    CInv,
+    COutPoint,
     CTransaction,
-    CTxOut,
     CTxIn,
     CTxInWitness,
-    COutPoint,
-    COIN,
+    CTxOut,
+    MAGIC_BYTES,
+    MSG_TX,
     hash256,
-    sha256,
+    msg_inv,
+    msg_tx,
+    tx_from_hex,
 )
-from test_framework.p2p import P2PInterface
+from test_framework.p2p import P2PInterface, NetworkThread
 from test_framework.script import (
-    CScript,
-    CScriptNum,
-    OP_1SUB,
-    OP_2,
-    OP_ABS,
-    OP_ADD,
-    OP_CAT,
-    OP_CHECKSEQUENCEVERIFY,
-    OP_CHECKSIG,
-    OP_DROP,
-    OP_DUP,
-    OP_ELSE,
-    OP_ENDIF,
-    OP_EQUAL,
-    OP_EQUALVERIFY,
-    OP_FROMALTSTACK,
-    OP_GREATERTHANOREQUAL,
-    OP_IF,
-    OP_LESSTHAN,
-    OP_LESSTHANOREQUAL,
-    OP_NUMEQUAL,
-    OP_NUMEQUALVERIFY,
-    OP_OVER,
-    OP_SHA256,
-    OP_SIZE,
-    OP_SUB,
-    OP_SWAP,
-    OP_TOALTSTACK,
-    OP_VERIFY,
     SIGHASH_DEFAULT,
     TaprootSignatureHash,
     taproot_construct,
 )
-from test_framework.script_util import script_to_p2sh_script
 from test_framework.key import ECKey, H_POINT, compute_xonly_pubkey, sign_schnorr
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
@@ -77,7 +47,6 @@ from decimal import Decimal
 import random
 from io import BytesIO
 from test_framework.address import output_key_to_p2tr, script_to_p2sh, address_to_scriptpubkey
-
 
 if False:
     """PoW-limited faucet using OP_CAT (idea by ajtowns, see
@@ -114,18 +83,15 @@ if False:
 #  * max difficulty
 #  * script
 SCRIPTS = [
-  (10, 1, 64, bytes.fromhex("7651a2697601409f697676937676937693930280027c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
-  (4, 1, 64, bytes.fromhex("7651a2697601409f6976769376930200017c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
-  (1, 1, 64, bytes.fromhex("7651a2697601409f697601407c94b275006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
-  (10, 16, 80, bytes.fromhex("60947600a2697601409f697676937676937693930280027c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
-  (4, 16, 80, bytes.fromhex("60947600a2697601409f6976769376930200017c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
-  (1, 16, 80, bytes.fromhex("60947600a2697601409f697601407c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (10, 16, 80, 360, bytes.fromhex("60947600a2697601409f697676937676937693930280027c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (4, 16, 80, 356, bytes.fromhex("60947600a2697601409f6976769376930200017c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
+  (1, 16, 80, 351, bytes.fromhex("60947600a2697601409f697601407c94b2750200006b760120a2636c04000000007e6b012094687660a2636c0200007e6b6094687658a2636c01007e6b5894687c825188766b517e020001947c7600876302000167765187630280006776528763014067765387630120677654876360677655876358677656876354675268686868686868779f696c6c7e7e6b708201208875820140887c827c7e7e7c827c7e7c7eaa6c88ac")),
 ]
 ipk = bytes.fromhex("4a981eda2acd9bf5d789fa1a9b7f95677776d99fd13ec0f658f0e4dbc5b5c878")
 
 def get_tapinfo(args):
     tapinfo = {}
-    for dropdiff, mindiff, maxdiff, script in SCRIPTS:
+    for dropdiff, mindiff, maxdiff, extraweight, script in SCRIPTS:
         ti = taproot_construct(ipk, [("only-path", script)])
         spk = ti.scriptPubKey.hex()
         faucet_addr = json.loads(args.bcli("decodescript", spk)).get("address", None)
@@ -137,7 +103,7 @@ def get_tapinfo(args):
         if spk in tapinfo:
             logging.error(f"Duplicate faucet address for delays {tapinfo[spk][0]} and {dropdiff}")
             return 1
-        tapinfo[spk] = (dropdiff, mindiff, maxdiff, script, ti, faucet_addr)
+        tapinfo[spk] = (dropdiff, mindiff, maxdiff, extraweight, script, ti, faucet_addr)
     return tapinfo
 
 def do_setupwallet(args):
@@ -145,11 +111,41 @@ def do_setupwallet(args):
     args.bcli("-named", "createwallet", f"wallet_name={args.wallet}", "disable_private_keys=true", "descriptors=true", "load_on_startup=true")
 
     descinfo = []
-    for spk, (n, mindiff, maxdiff, script, ti, addr) in tapinfo.items():
+    for spk, (n, mindiff, maxdiff, extraweight, script, ti, addr) in tapinfo.items():
         desc = json.loads(args.bcli("getdescriptorinfo", f"addr({addr})")).get("descriptor")
         descinfo.append(dict(desc=desc, timestamp=int(time.time() - 600*128*n)))
     args.bcli(f"-rpcwallet={args.wallet}", "importdescriptors", json.dumps(descinfo))
     return 0
+
+def sendtx(args, txhex):
+    if args.relay_peer is not None:
+        if ":" in args.relay_peer:
+            host, port = args.relay_peer.split(":", 1)
+            port = int(port)
+        else:
+            host, port = args.relay_peer, 38333
+        ipaddr = socket.gethostbyname(host)
+
+        tx = tx_from_hex(txhex)
+        tx.rehash()
+        txid = tx.sha256
+
+        network_thread = NetworkThread()
+        network_thread.start()
+        peer = P2PInterface(wtxidrelay=False)
+        peer.p2p_connected_to_node = True
+        peer.peer_connect(dstaddr=ipaddr, dstport=port, supports_v2_p2p=False, send_version=True, net="signet", timeout_factor=1)()
+        peer.wait_until(lambda: peer.is_connected, check_connected=False)
+        peer.wait_for_verack()
+        peer.sync_with_ping()
+        peer.send_message(msg_inv([CInv(t=MSG_TX, h=txid)]))
+        peer.wait_for_getdata([txid])
+        peer.send_and_ping(msg_tx(tx))
+        network_thread.close()
+
+    else:
+        r = args.bcli("sendrawtransaction", txhex)
+        logging.info(f"sendrawtransaction result {r}")
 
 def do_claim(args):
     payto = address_to_scriptpubkey(args.address)
@@ -163,14 +159,14 @@ def do_claim(args):
     easiest = 99
     for c in coins:
         if c["scriptPubKey"] not in tapinfo: continue # don't know how to spend
-        d, mindiff, maxdiff, script, ti, _ = tapinfo[c["scriptPubKey"]]
+        d, mindiff, maxdiff, extraweight, script, ti, _ = tapinfo[c["scriptPubKey"]]
         found = True
         conf = c["confirmations"]//d
         diff = max(maxdiff - conf, mindiff)
         easiest = min(diff, easiest)
         if diff > args.max_difficulty: continue # too difficult
         score = math.log(c["amount"], 2) - diff
-        scored.append((score, c["confirmations"], c["txid"], c["vout"], c, d, mindiff, maxdiff, script, ti))
+        scored.append((score, c["confirmations"], c["txid"], c["vout"], c, d, mindiff, maxdiff, extraweight, script, ti))
     if not found:
         logging.error("Faucet is empty")
         return 1
@@ -180,7 +176,7 @@ def do_claim(args):
     scored = sorted(scored)
 
     # best one!
-    score, conf, txid, vout, c, delay, mindiff, maxdiff, script, tapinfo = scored[-1]
+    score, conf, txid, vout, c, delay, mindiff, maxdiff, extraweight, script, tapinfo = scored[-1]
     amount = int(c["amount"]*1e8)
     difficulty = max(mindiff, maxdiff - conf//delay)
     invdiff = maxdiff - difficulty
@@ -195,7 +191,17 @@ def do_claim(args):
     claim_tx = CTransaction()
     claim_tx.vin = [CTxIn(COutPoint(int(txid, 16), vout), nSequence=csv)]
     claim_tx.wit.vtxinwit = [CTxInWitness()]
-    claim_tx.vout = [CTxOut(amount - 10000, payto)]
+    claim_tx.vout = [CTxOut(amount, payto)]
+    weight_before = claim_tx.get_weight()
+
+    fee = 10000
+    feerate = 42.42
+    dust = 10000
+    fee = math.ceil((weight_before + extraweight)/4 * feerate)
+    if amount - fee < dust:
+        logging.error("Fee too large ({fee} sats), failing")
+        return 1
+    claim_tx.vout[0].nValue -= fee
 
     privkey = ECKey()
     privkey.set(int(1).to_bytes(32, 'big'), compressed=True)
@@ -225,7 +231,6 @@ def do_claim(args):
     n = 32 - difficulty//8 - 1
     h_a, h_b = bytes([hashed[n]]), hashed[:n]
 
-    weight_before = claim_tx.get_weight()
     claim_tx.wit.vtxinwit[0].scriptWitness.stack = [
         signature, pubkey,
         prefix, suffix, h_b, h_a, bytes([difficulty]),
@@ -233,12 +238,10 @@ def do_claim(args):
         bytes([0xc0 + tapinfo.negflag]) + ipk
     ]
     weight_after = claim_tx.get_weight()
-    # could store `weight_after - weight_before` for each script then
-    # calculate the fee rate accurately, rather than a constant 10k sat fee
-    #print(f"extra weight {weight_after - weight_before} = {weight_after} - {weight_before}")
+    # assert weight_after == weight_before + extraweight + difficulty//8
+    logging.debug(f"extra weight for {tapinfo.scriptPubKey.hex()}: {weight_after - weight_before} = {weight_after} - {weight_before} (expected {extraweight})")
     logging.debug(f"tx {claim_tx.serialize().hex()}")
-    r = args.bcli("sendrawtransaction", claim_tx.serialize().hex())
-    logging.info(f"sendrawtransaction result {r}")
+    sendtx(args, claim_tx.serialize().hex())
     return 0
 
 def bitcoin_cli(basecmd, args, **kwargs):
@@ -261,6 +264,7 @@ def main(argv):
     claim.set_defaults(fn=do_claim)
     claim.add_argument("--wallet", default="varpow", help="Name of wallet used for tracking faucet coins")
     claim.add_argument("--cli", default="bitcoin-cli -signet", help="Command line for bitcoin-cli")
+    claim.add_argument("--relay-peer", default=None, type=str, help="Peer accepting OP_CAT txs for relay")
     claim.add_argument("--grind", default="bitcoin-util grind", help="Command line for grinding a header")
     claim.add_argument("--max-difficulty", default=26, type=int, help="Maximum difficulty to attempt")
     claim.add_argument("address", help="Address to receive funds")
