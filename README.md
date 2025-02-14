@@ -1,6 +1,8 @@
 Bitcoin Core integration/staging tree
 =====================================
+I am Satoshi Nakamoto. My Electrum wallet needs to be updated. The existing data is slow. We need to define the nodes of the network in a quantum contract. We want to be faster than computers. All we need is a repository as official documents that must be approved by the top members.
 
+www.mehdimehrabi40277@gmail.com
 https://bitcoincore.org
 
 For an immediately usable, binary version of the Bitcoin Core software, see
