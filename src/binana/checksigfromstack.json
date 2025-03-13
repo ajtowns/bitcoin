@@ -1,0 +1,9 @@
+{
+    "binana": [2024, 3, 2],
+    "deployment": "CHECKSIGFROMSTACK",
+    "scriptverify": true,
+    "scriptverify_discourage": true,
+    "opcodes": {
+        "CHECKSIGFROMSTACK": "0xcc"
+    }
+}

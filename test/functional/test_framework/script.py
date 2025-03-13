@@ -254,6 +254,8 @@ OP_NOP10 = CScriptOp(0xb9)
 # BIP 342 opcodes (Tapscript)
 OP_CHECKSIGADD = CScriptOp(0xba)
 
+OP_CHECKSIGFROMSTACK = CScriptOp(0xcc)
+
 OP_INVALIDOPCODE = CScriptOp(0xff)
 
 OPCODE_NAMES.update({
@@ -966,7 +968,7 @@ def taproot_construct(pubkey, scripts=None, *, keyver=None, treat_internal_as_in
     return TaprootInfo(CScript([OP_1, tweaked]), pubkey, negated + 0, tweak, leaves, h, tweaked, keyver)
 
 def is_op_success(o):
-    if o in [OP_CAT]:
+    if o in [OP_CAT, OP_CHECKSIGFROMSTACK]:
         return False
 
     return o == 0x50 or o == 0x62 or o == 0x89 or o == 0x8a or o == 0x8d or o == 0x8e or (o >= 0x7e and o <= 0x81) or (o >= 0x83 and o <= 0x86) or (o >= 0x95 and o <= 0x99) or (o >= 0xbb and o <= 0xfe)
