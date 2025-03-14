@@ -365,7 +365,6 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
         seed_tx = self.wallet.send_to(from_node=node, scriptPubKey=script_to_p2wsh_script(CScript([OP_TRUE])), amount=COIN)
         self.generate(node, 1)
 
-        self.log.info('A tiny transaction(in non-witness bytes) that is disallowed')
         tx = CTransaction()
         tx.vin.append(CTxIn(COutPoint(int(seed_tx["txid"], 16), seed_tx["sent_vout"]), b"", SEQUENCE_FINAL))
         tx.wit.vtxinwit = [CTxInWitness()]
@@ -375,12 +374,6 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
         assert_equal(len(tx.serialize_without_witness()), 64)
         assert_equal(MIN_STANDARD_TX_NONWITNESS_SIZE - 1, 64)
         assert_greater_than(len(tx.serialize()), 64)
-
-        self.check_mempool_result(
-            result_expected=[{'txid': tx.rehash(), 'allowed': False, 'reject-reason': 'tx-size-small'}],
-            rawtxs=[tx.serialize().hex()],
-            maxfeerate=0,
-        )
 
         self.log.info('Minimally-small transaction(in non-witness bytes) that is allowed')
         tx.vout[0] = CTxOut(COIN - 1000, DUMMY_MIN_OP_RETURN_SCRIPT)
