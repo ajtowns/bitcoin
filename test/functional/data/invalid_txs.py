@@ -122,8 +122,8 @@ class InputMissing(BadTxTemplate):
 # The following check prevents exploit of lack of merkle
 # tree depth commitment (CVE-2017-12842)
 class SizeExactly64(BadTxTemplate):
-    reject_reason = "tx-size-small"
-    expect_disconnect = False
+    reject_reason = "64-byte-transaction"
+    expect_disconnect = True
     valid_in_block = False
     wants_signature = False
     block_reject_reason = "64-byte-transaction"
@@ -137,8 +137,8 @@ class SizeExactly64(BadTxTemplate):
         tx.calc_sha256()
         return tx
 class SizeExactly64WithWitness(BadTxTemplate):
-    reject_reason = "tx-size-small"
-    expect_disconnect = False
+    reject_reason = "64-byte-transaction"
+    expect_disconnect = True
     valid_in_block = False
     wants_signature = False
     block_reject_reason = "64-byte-transaction"

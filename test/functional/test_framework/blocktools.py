@@ -163,7 +163,7 @@ def create_tx_with_script(prevtx, n, script_sig=b"", *, amount, output_script=No
        Can optionally pass scriptPubKey and scriptSig, default is anyone-can-spend output.
     """
     if output_script is None:
-        output_script = CScript([OP_TRUE, OP_DROP, OP_TRUE, OP_DROP])
+        output_script = CScript([OP_TRUE, OP_DROP, OP_TRUE, OP_DROP, OP_TRUE, OP_DROP])
     tx = CTransaction()
     assert n < len(prevtx.vout)
     tx.vin.append(CTxIn(COutPoint(prevtx.sha256, n), script_sig, SEQUENCE_FINAL))
