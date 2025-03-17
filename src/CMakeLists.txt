@@ -412,6 +412,48 @@ if(BUILD_KERNEL_LIB)
   add_subdirectory(kernel)
 endif()
 
+if(BUILD_PYTHON_TXGRAPH)
+  find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
+  execute_process (COMMAND "${Python3_EXECUTABLE}" -c "from distutils import sysconfig;print(sysconfig.get_config_var('EXT_SUFFIX'))"
+  RESULT_VARIABLE _result
+  OUTPUT_VARIABLE PYTHON_MODULE_EXTENSION
+  ERROR_QUIET
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  set(BOOST_PYTHON_COMPONENT "python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}")
+  set(BOOST_PYTHON_LIBRARY "Boost::${BOOST_PYTHON_COMPONENT}")
+  find_package(Boost REQUIRED COMPONENTS ${BOOST_PYTHON_COMPONENT})
+
+  add_library(txgraph_ext MODULE txgraphpy.cpp
+    clientversion.cpp
+    crypto/chacha20.cpp
+    crypto/hex_base.cpp
+    crypto/sha256.cpp
+    crypto/sha512.cpp
+    logging.cpp
+    random.cpp
+    randomenv.cpp
+    support/cleanse.cpp
+    support/lockedpool.cpp
+    sync.cpp
+    txgraph.cpp
+    uint256.cpp
+    util/check.cpp
+    util/feefrac.cpp
+    util/fs.cpp
+    util/strencodings.cpp
+    util/string.cpp
+    util/syserror.cpp
+    util/threadnames.cpp
+    util/time.cpp)
+
+  set_target_properties(txgraph_ext PROPERTIES SUFFIX ${PYTHON_MODULE_EXTENSION})
+  target_include_directories(txgraph_ext PRIVATE ${Python3_INCLUDE_DIRS})
+  target_link_libraries(txgraph_ext PRIVATE ${BOOST_PYTHON_LIBRARY} ${Python3_LIBRARIES} bitcoin_crypto)
+  message("txgraph info ${Python3_LIBRARIES} ${Python3_INCLUDE_DIRS}")
+endif()
+
 if(BUILD_UTIL_CHAINSTATE)
   add_executable(bitcoin-chainstate
     bitcoin-chainstate.cpp
