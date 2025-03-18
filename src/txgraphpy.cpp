@@ -141,6 +141,9 @@ struct TxGraphPy
         return l;
     }
 
+    list GetCluster(const RefPy& arg, bool main_only = false)
+    { return from_ref_vec(m_txgraph->GetCluster(arg, main_only)); }
+
     list GetAncestors(const RefPy& arg, bool main_only = false)
     { return from_ref_vec(m_txgraph->GetAncestors(arg, main_only)); }
     list GetDescendants(const RefPy& arg, bool main_only = false)
@@ -165,6 +168,7 @@ struct TxGraphPy
 
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(Exists_overloads, Exists, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(IsOversized_overloads, IsOversized, 0, 1)
+BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetCluster_overloads, GetCluster, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetAncestors_overloads, GetAncestors, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetDescendants_overloads, GetDescendants, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetTransactionCount_overloads, GetTransactionCount, 0, 1)
@@ -204,6 +208,7 @@ BOOST_PYTHON_MODULE(libtxgraph_ext)
         .def("IsOversized", &TxGraphPy::IsOversized, IsOversized_overloads())
         .def("GetMainChunkFeerate", &TxGraphPy::GetMainChunkFeerate)
         .def("GetIndividualFeerate", &TxGraphPy::GetIndividualFeerate)
+        .def("GetCluster", &TxGraphPy::GetCluster, GetCluster_overloads())
         .def("GetAncestors", &TxGraphPy::GetAncestors, GetAncestors_overloads())
         .def("GetDescendants", &TxGraphPy::GetDescendants, GetDescendants_overloads())
         .def("GetTransactionCount", &TxGraphPy::GetTransactionCount, GetTransactionCount_overloads())
