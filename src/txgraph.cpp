@@ -321,6 +321,13 @@ public:
         m_clustersets.emplace_back();
     }
 
+    virtual ~TxGraphImpl() {
+        for (auto& e : m_entries) {
+            if (!e.m_ref) continue;
+            GetRefGraph(*e.m_ref) = nullptr;
+        }
+    }
+
     // Cannot move or copy (would invalidate TxGraphImpl* in Ref, MiningOrder, EvictionOrder).
     TxGraphImpl(const TxGraphImpl&) = delete;
     TxGraphImpl& operator=(const TxGraphImpl&) = delete;
