@@ -12,9 +12,9 @@
 
 >>> import libtxgraph_ext
 >>> tx = libtxgraph_ext.TxGraph()
->>> r3 = libtxgraph_ext.Ref(tx, 100, 20)
->>> r4 = libtxgraph_ext.Ref(tx, 100, 30)
->>> r5 = libtxgraph_ext.Ref(tx, 500, 10)
+>>> r3 = tx.AddTransaction(100, 20)
+>>> r4 = tx.AddTransaction(100, 30)
+>>> r5 = tx.AddTransaction(500, 10)
 >>> tx.AddDependency(r4, r5)
 >>> tx.AddDependency(r3, r4)
 >>> tx.GetMainChunkFeerate(r4)
@@ -34,29 +34,69 @@ Fee(100/20)
 
 const TranslateFn G_TRANSLATION_FUN{nullptr};
 
+using namespace boost::python;
+
 namespace {
 
 struct TxGraphPy;
 
-struct RefPy : public TxGraph::Ref
+struct RefExt : public TxGraph::Ref
 {
     static std::atomic<int64_t> counter;
     static int64_t get_next() { return ++counter; }
 
-    const int64_t m_id{0};
+    int64_t m_id{0};
+    int64_t m_refs{0};
 
-    RefPy(TxGraphPy& txgraph, int64_t fee, int32_t size);
+    RefExt(TxGraph::Ref&& other) : TxGraph::Ref{std::move(other)}, m_id{get_next()} { }
 
-    RefPy(TxGraph::Ref&& other) : TxGraph::Ref{std::move(other)}, m_id{get_next()} { }
-
-    RefPy(RefPy&& other) = default;
-
-    std::string repr() const { return strprintf("Ref<%s>", m_id); }
+    RefExt(RefExt&& other) = default;
+    RefExt& operator=(RefExt&& other) = default;
 };
 
-std::atomic<int64_t> RefPy::counter{0};
+struct RefPy
+{
+    RefExt* r{nullptr};
 
-struct TxGraphPy {
+    RefPy() : r{nullptr} { }
+    RefPy(RefExt* s) : r{s} { if (r) ++r->m_refs; }
+    RefPy(RefExt& s) : RefPy{&s} { }
+    RefPy(TxGraph::Ref&& other) {
+        r = new RefExt(std::move(other));
+        ++r->m_refs;
+    }
+
+    RefPy(const RefPy& other) : RefPy{other.r} { }
+    RefPy& operator=(const RefPy& other) {
+        deref();
+        r = other.r;
+        ++r->m_refs;
+        return *this;
+    }
+
+    void deref() {
+        if (r && --r->m_refs <= 0) {
+            delete r;
+        }
+        r = nullptr;
+    }
+
+    operator TxGraph::Ref&() const { return *r; }
+
+    ~RefPy() {
+        deref();
+    }
+
+    int64_t id() const { return r ? r->m_id : -1; }
+    std::string repr() const { return strprintf("Ref<%s>", id()); }
+};
+
+std::atomic<int64_t> RefExt::counter{0};
+
+struct TxGraphPy
+{
+    using Ref = TxGraph::Ref;
+
     std::unique_ptr<TxGraph> m_txgraph;
 
     TxGraphPy(unsigned max_cluster_count = MAX_CLUSTER_COUNT_LIMIT)
@@ -93,25 +133,39 @@ struct TxGraphPy {
     FeePerWeight GetMainChunkFeerate(const RefPy& arg) { return m_txgraph->GetMainChunkFeerate(arg); }
     FeePerWeight GetIndividualFeerate(const RefPy& arg) { return m_txgraph->GetIndividualFeerate(arg); }
 
+    list from_ref_vec(std::vector<Ref*>&& refvec) {
+        list l;
+        for (Ref* r : refvec) {
+            l.append(RefPy{dynamic_cast<RefExt*>(r)});
+        }
+        return l;
+    }
+
+    list GetAncestors(const RefPy& arg, bool main_only = false)
+    { return from_ref_vec(m_txgraph->GetAncestors(arg, main_only)); }
+    list GetDescendants(const RefPy& arg, bool main_only = false)
+    { return from_ref_vec(m_txgraph->GetDescendants(arg, main_only)); }
+
+    int64_t GetTransactionCount(bool main_only = false) { return m_txgraph->GetTransactionCount(main_only); }
+
+    int CompareMainOrder(const RefPy& a, const RefPy& b) {
+        auto c = m_txgraph->CompareMainOrder(a,b);
+        return (c < 0 ? -1 : c > 0 ? +1 : 0);
+    }
+
 #if 0
-    std::vector<Ref*> GetAncestors(const Ref& arg, bool main_only = false) noexcept = 0;
+    // functions that take a span of Ref*'s
+
     std::vector<Ref*> GetAncestorsUnion(std::span<const Ref* const> args, bool main_only = false) noexcept = 0;
-    std::vector<Ref*> GetDescendants(const Ref& arg, bool main_only = false) noexcept = 0;
     std::vector<Ref*> GetDescendantsUnion(std::span<const Ref* const> args, bool main_only = false) noexcept = 0;
-    GraphIndex GetTransactionCount(bool main_only = false) noexcept = 0;
-    std::strong_ordering CompareMainOrder(const Ref& a, const Ref& b) noexcept = 0;
-    GraphIndex CountDistinctClusters(std::span<const Ref* const>, bool main_only = false) noexcept = 0;
+    int64_t CountDistinctClusters(std::span<const Ref* const>, bool main_only = false) noexcept = 0;
 #endif
 
 };
 
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(Exists_overloads, Exists, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(IsOversized_overloads, IsOversized, 0, 1)
-
-RefPy::RefPy(TxGraphPy& txgraph, int64_t fee, int32_t size)
-  : TxGraph::Ref{txgraph.m_txgraph->AddTransaction(FeePerWeight{fee, size})},
-    m_id{get_next()}
-  { }
+BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetAncestors_overloads, GetAncestors, 1, 2)
 
 std::string FeePerWeightRepr(const FeePerWeight& fpw)
 {
@@ -126,8 +180,6 @@ double FeePerWeightRate(const FeePerWeight& fpw)
 }
 
 } // namespace
-
-using namespace boost::python;
 
 BOOST_PYTHON_MODULE(libtxgraph_ext)
 {
@@ -150,10 +202,11 @@ BOOST_PYTHON_MODULE(libtxgraph_ext)
         .def("IsOversized", &TxGraphPy::IsOversized, IsOversized_overloads())
         .def("GetMainChunkFeerate", &TxGraphPy::GetMainChunkFeerate)
         .def("GetIndividualFeerate", &TxGraphPy::GetIndividualFeerate)
+        .def("GetAncestors", &TxGraphPy::GetAncestors, GetAncestors_overloads())
         ;
 
-    class_<RefPy, boost::noncopyable>("Ref", init<TxGraphPy&, int64_t, int32_t>())
-        .def_readonly("id", &RefPy::m_id)
+    class_<RefPy>("Ref")
+        .add_property("id", &RefPy::id)
         .def("__repr__", &RefPy::repr)
         ;
 
