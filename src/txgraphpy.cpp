@@ -166,6 +166,8 @@ struct TxGraphPy
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(Exists_overloads, Exists, 1, 2)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(IsOversized_overloads, IsOversized, 0, 1)
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetAncestors_overloads, GetAncestors, 1, 2)
+BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetDescendants_overloads, GetDescendants, 1, 2)
+BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(GetTransactionCount_overloads, GetTransactionCount, 0, 1)
 
 std::string FeePerWeightRepr(const FeePerWeight& fpw)
 {
@@ -203,6 +205,9 @@ BOOST_PYTHON_MODULE(libtxgraph_ext)
         .def("GetMainChunkFeerate", &TxGraphPy::GetMainChunkFeerate)
         .def("GetIndividualFeerate", &TxGraphPy::GetIndividualFeerate)
         .def("GetAncestors", &TxGraphPy::GetAncestors, GetAncestors_overloads())
+        .def("GetDescendants", &TxGraphPy::GetDescendants, GetDescendants_overloads())
+        .def("GetTransactionCount", &TxGraphPy::GetTransactionCount, GetTransactionCount_overloads())
+        .def("CompareMainOrder", &TxGraphPy::CompareMainOrder)
         ;
 
     class_<RefPy>("Ref")
