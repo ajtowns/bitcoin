@@ -1941,6 +1941,10 @@ PackageMempoolAcceptResult ProcessNewPackage(Chainstate& active_chainstate, CTxM
 
 CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
 {
+    if (nHeight == 1 && consensusParams.premine > 0) {
+        return CAmount{consensusParams.premine};
+    }
+
     int halvings = nHeight / consensusParams.nSubsidyHalvingInterval;
     // Force block reward to zero when right shift is undefined.
     if (halvings >= 64)
@@ -4213,6 +4217,12 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
         (block.nVersion < 4 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_CLTV))) {
             return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, strprintf("bad-version(0x%08x)", block.nVersion),
                                  strprintf("rejected nVersion=0x%08x block", block.nVersion));
+    }
+
+    if (nHeight == 1 && consensusParams.premine > 0 && !consensusParams.premine_block_hash.IsNull()) {
+        if (block.GetHash() != consensusParams.premine_block_hash) {
+            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "missing-premine", strprintf("block 1 must be %s", consensusParams.premine_block_hash.ToString()));
+        }
     }
 
     return true;

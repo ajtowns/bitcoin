@@ -135,6 +135,13 @@ struct Params {
     bool signet_blocks{false};
     std::vector<uint8_t> signet_challenge;
 
+    /**
+     * For test nets, allow a premine in the first block after genesis.
+     * If set, the first block's hash must match the premine block hash.
+     */
+    int64_t premine{0};
+    uint256 premine_block_hash{uint256::ZERO};
+
     int DeploymentHeight(BuriedDeployment dep) const
     {
         switch (dep) {

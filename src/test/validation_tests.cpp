@@ -53,6 +53,14 @@ BOOST_AUTO_TEST_CASE(block_subsidy_test)
     TestBlockSubsidyHalvings(1000); // Just another interval
 }
 
+BOOST_AUTO_TEST_CASE(no_main_premine_test)
+{
+    const auto chainParams = CreateChainParams(*m_node.args, ChainType::MAIN);
+    const auto& consensusParams = chainParams->GetConsensus();
+    BOOST_CHECK_EQUAL(consensusParams.premine, 0);
+    BOOST_CHECK(consensusParams.premine_block_hash.IsNull());
+}
+
 BOOST_AUTO_TEST_CASE(subsidy_limit_test)
 {
     const auto chainParams = CreateChainParams(*m_node.args, ChainType::MAIN);
