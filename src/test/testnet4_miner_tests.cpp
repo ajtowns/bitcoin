@@ -31,6 +31,9 @@ BOOST_FIXTURE_TEST_SUITE(testnet4_miner_tests, Testnet4MinerTestingSetup)
 
 BOOST_AUTO_TEST_CASE(MiningInterface)
 {
+#if 0
+// testnet4 is respecified so these tests no longer make sense
+
     auto mining{MakeMining()};
     BOOST_REQUIRE(mining);
 
@@ -70,6 +73,7 @@ BOOST_AUTO_TEST_CASE(MiningInterface)
     }
     block_template = block_template->waitNext(wait_options);
     BOOST_REQUIRE(block_template);
+#endif
 }
 
 BOOST_AUTO_TEST_SUITE_END()

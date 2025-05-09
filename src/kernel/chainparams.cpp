@@ -299,7 +299,7 @@ public:
         m_chain_type = ChainType::TESTNET4;
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
-        consensus.nSubsidyHalvingInterval = 210000;
+        consensus.nSubsidyHalvingInterval = 105000;
         consensus.BIP34Height = 1;
         consensus.BIP34Hash = uint256{};
         consensus.BIP65Height = 1;
@@ -307,12 +307,16 @@ public:
         consensus.CSVHeight = 1;
         consensus.SegwitHeight = 1;
         consensus.MinBIP9WarningHeight = 0;
-        consensus.powLimit = uint256{"00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff"};
+        consensus.powLimit = uint256{"00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}; // XXX should bump this to difficulty 4096 or something, even a single Bitaxe demolishes diff=1 blocks
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
-        consensus.fPowAllowMinDifficultyBlocks = true;
-        consensus.enforce_BIP94 = true;
+        consensus.fPowAllowMinDifficultyBlocks = false;
+        consensus.enforce_BIP94 = false;
         consensus.fPowNoRetargeting = false;
+
+        consensus.premine = 10'500'000 * COIN;
+        consensus.premine_block_hash = uint256{"00000000368cbd1c55614ecbbed8f4f01dcd6da74e878c86f3be9350be1d6e11"};
+        // corresponding block: 0100002043f08bdab050e35b567c864b91f47f50ae725ae2de53bcfbbaf284da000000001ebbbe4b28c9544caba38fd3f90cd72a4b02d46d42550bf857bf3733ae3075770ef41d68ffff001dd433995401020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff025100ffffffff0200a0032df8ba0300160014a588719067e97a243c0f66010632b3fcef1eb2bf0000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000
 
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
