@@ -15,6 +15,7 @@ from test_framework.key import ECKey
 from test_framework.messages import (
     COutPoint,
     CTxOut,
+    uint256_from_str,
 )
 from test_framework.crypto.muhash import MuHash3072
 from test_framework.script import (
@@ -38,15 +39,18 @@ from test_framework.util import (
 from test_framework.wallet import MiniWallet
 
 
-def calculate_muhash_from_sqlite_utxos(filename):
+def calculate_muhash_from_sqlite_utxos(filename, mode):
     muhash = MuHash3072()
     con = sqlite3.connect(filename)
     cur = con.cursor()
-    for (txid_hex, vout, value, coinbase, height, spk_hex) in cur.execute("SELECT * FROM utxos"):
+    for (txid, vout, value, coinbase, height, spk) in cur.execute("SELECT * FROM utxos"):
+        txid_int = int(txid, 16) if mode == "hex" else uint256_from_str(txid)
+        spk_bytes = bytes.fromhex(spk) if mode == "hex" else spk
+
         # serialize UTXO for MuHash (see function `TxOutSer` in the  coinstats module)
-        utxo_ser = COutPoint(int(txid_hex, 16), vout).serialize()
+        utxo_ser = COutPoint(txid_int, vout).serialize()
         utxo_ser += (height * 2 + coinbase).to_bytes(4, 'little')
-        utxo_ser += CTxOut(value, bytes.fromhex(spk_hex)).serialize()
+        utxo_ser += CTxOut(value, spk_bytes).serialize()
         muhash.insert(utxo_ser)
     con.close()
     return muhash.digest()[::-1].hex()
@@ -100,17 +104,18 @@ class UtxoToSqliteTest(BitcoinTestFramework):
         input_filename = os.path.join(self.options.tmpdir, "utxos.dat")
         node.dumptxoutset(input_filename, "latest")
 
-        self.log.info('Convert UTXO set from compact-serialized format to sqlite format')
-        output_filename = os.path.join(self.options.tmpdir, "utxos.sqlite")
-        base_dir = self.config["environment"]["SRCDIR"]
-        utxo_to_sqlite_path = os.path.join(base_dir, "contrib", "utxo-tools", "utxo_to_sqlite.py")
-        subprocess.run([sys.executable, utxo_to_sqlite_path, input_filename, output_filename],
-                       check=True, stderr=subprocess.STDOUT)
+        for mode in ("hex", "bytes"):
+            self.log.info(f'Convert UTXO set from compact-serialized format to sqlite format ({mode} mode)')
+            output_filename = os.path.join(self.options.tmpdir, f"utxos_{mode}.sqlite")
+            base_dir = self.config["environment"]["SRCDIR"]
+            utxo_to_sqlite_path = os.path.join(base_dir, "contrib", "utxo-tools", "utxo_to_sqlite.py")
+            subprocess.run([sys.executable, utxo_to_sqlite_path, input_filename, output_filename, f'--mode={mode}'],
+                           check=True, stderr=subprocess.STDOUT)
 
-        self.log.info('Verify that both UTXO sets match by comparing their MuHash')
-        muhash_sqlite = calculate_muhash_from_sqlite_utxos(output_filename)
-        muhash_compact_serialized = node.gettxoutsetinfo('muhash')['muhash']
-        assert_equal(muhash_sqlite, muhash_compact_serialized)
+            self.log.info(f'Verify that both UTXO sets match by comparing their MuHash ({mode} mode)')
+            muhash_sqlite = calculate_muhash_from_sqlite_utxos(output_filename, mode)
+            muhash_compact_serialized = node.gettxoutsetinfo('muhash')['muhash']
+            assert_equal(muhash_sqlite, muhash_compact_serialized)
 
 
 if __name__ == "__main__":
