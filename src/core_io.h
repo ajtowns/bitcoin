@@ -33,6 +33,7 @@ enum class TxVerbosity {
 
 // core_read.cpp
 CScript ParseScript(const std::string& s);
+std::optional<CScript> ParseAsmStr(std::string_view asmstr);
 [[nodiscard]] bool DecodeHexTx(CMutableTransaction& tx, const std::string& hex_tx, bool try_no_witness = false, bool try_witness = true);
 [[nodiscard]] bool DecodeHexBlk(CBlock&, const std::string& strHexBlk);
 bool DecodeHexBlockHeader(CBlockHeader&, const std::string& hex_header);

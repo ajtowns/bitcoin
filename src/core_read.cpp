@@ -109,6 +109,186 @@ CScript ParseScript(const std::string& s)
     return result;
 }
 
+namespace {
+class AsmStrReader {
+public:
+    enum class Token {
+        ASMSTR,
+        WORDS,
+        WORD,
+        HEXWORD,
+        NUMBER,
+        OPCODE,
+        PUSHDATA,
+        WS,
+    };
+
+    static size_t count_chars(std::string_view s, const std::string_view::value_type* chars, std::size_t pos=0)
+    {
+        auto c = s.find_first_not_of(chars, pos);
+        if (c == std::string_view::npos) c = s.size();
+        return c - pos;
+    }
+
+    static bool pushdata(std::optional<opcodetype> pushop, CScript& script, std::span<unsigned char> vch)
+    {
+        if (!pushop.has_value()) {
+            script << vch;
+            return true;
+        } else {
+            if (*pushop == OP_PUSHDATA1 && vch.size() <= 0xff) {
+                script.insert(script.end(), OP_PUSHDATA1);
+                script.insert(script.end(), static_cast<unsigned char>(vch.size()));
+            } else if (*pushop == OP_PUSHDATA2 && vch.size() <= 0xffff) {
+                script.insert(script.end(), OP_PUSHDATA2);
+                unsigned char data[2];
+                WriteLE16(data, vch.size());
+                script.insert(script.end(), std::cbegin(data), std::cend(data));
+            } else if (*pushop == OP_PUSHDATA4 && vch.size() <= std::numeric_limits<uint32_t>::max()) {
+                script.insert(script.end(), OP_PUSHDATA4);
+                unsigned char data[4];
+                WriteLE32(data, vch.size());
+                script.insert(script.end(), std::cbegin(data), std::cend(data));
+            } else {
+                return false;
+            }
+            script.insert(script.end(), vch.begin(), vch.end());
+            return true;
+        }
+    }
+
+    static bool ReadAsmStr(Token tok, std::string_view& asmstr, CScript& script)
+    {
+        constexpr auto ws_chars = " \f\n\r\t\v";
+
+        switch (tok) {
+        case Token::ASMSTR: {
+            asmstr = util::TrimStringView(asmstr);
+            if (asmstr.size() == 0) return true; // IsHex would be false
+            if (IsHex(asmstr)) {
+                auto b = ParseHex(asmstr);
+                script.insert(script.end(), b.begin(), b.end());
+                return true;
+            }
+            if (!ReadAsmStr(Token::WORDS, asmstr, script)) return false;
+            if (asmstr.size() > 0) return false;
+            return true;
+        }
+
+        /*** Remaining tokens do not update armstr or script if they return false ***/
+        case Token::WORDS: {
+            if (!ReadAsmStr(Token::WORD, asmstr, script)) return false;
+            while (true) {
+                if (!ReadAsmStr(Token::WS, asmstr, script)) break;
+                if (!ReadAsmStr(Token::WORD, asmstr, script)) break;
+            }
+            return true;
+        }
+        case Token::WORD: {
+            if (ReadAsmStr(Token::HEXWORD, asmstr, script)) return true;
+            if (ReadAsmStr(Token::NUMBER, asmstr, script)) return true;
+            if (ReadAsmStr(Token::OPCODE, asmstr, script)) return true;
+            return ReadAsmStr(Token::PUSHDATA, asmstr, script);
+        }
+        case Token::HEXWORD: {
+            if (!asmstr.starts_with('#')) return false;
+            auto hexlen = count_chars(asmstr, "0123456789abcdefABCDEF", 1);
+            if (hexlen < 2) return false;
+            asmstr.remove_prefix(1);
+            if (hexlen % 2 != 0) --hexlen;
+            auto b = ParseHex(asmstr.substr(0, hexlen));
+            script.insert(script.end(), b.begin(), b.end());
+            asmstr.remove_prefix(hexlen);
+            return true;
+        }
+        case Token::NUMBER: {
+            if (asmstr.size() == 0) return false;
+            bool negate = (asmstr.front() == '-');
+            size_t offset_sign = (asmstr.front() == '-' || asmstr.front() == '+') ? 1 : 0;
+            auto numlen = count_chars(asmstr, "0123456789", offset_sign);
+            if (numlen == 0 || numlen > 12) return false;
+            auto n = ToIntegral<int64_t>(asmstr.substr(offset_sign, numlen));
+            if (!n) return false;
+            asmstr.remove_prefix(offset_sign + numlen);
+            script << (negate ? -*n : *n);
+            return true;
+        }
+        case Token::OPCODE: {
+            if (asmstr.size() == 0) return false;
+            auto oplen = count_chars(asmstr, "ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789");
+            if (oplen == 0) return false;
+            auto opcode = ParseOpCodeNoThrow(asmstr.substr(0, oplen));
+            if (!opcode) return false;
+            asmstr.remove_prefix(oplen);
+            script << *opcode;
+            return true;
+        }
+        case Token::PUSHDATA: {
+            if (asmstr.size() == 0) return false;
+            std::optional<opcodetype> pushop = std::nullopt;
+            std::string_view pushasm;
+            if (asmstr.starts_with("PUSHDATA1<")) {
+                pushop = OP_PUSHDATA1;
+                pushasm = asmstr.substr(10);
+            } else if (asmstr.starts_with("PUSHDATA2<")) {
+                pushop = OP_PUSHDATA2;
+                pushasm = asmstr.substr(10);
+            } else if (asmstr.starts_with("PUSHDATA4<")) {
+                pushop = OP_PUSHDATA4;
+                pushasm = asmstr.substr(10);
+            } else if (asmstr.starts_with("<")) {
+                pushasm = asmstr.substr(1);
+            } else {
+                return false;
+            }
+            CScript pushscript;
+            (void)ReadAsmStr(Token::WS, pushasm, pushscript);
+
+            auto hexlen = count_chars(pushasm, "0123456789abcdefABCDEF");
+            if (hexlen % 2 == 0) {
+                auto wslen = count_chars(pushasm, ws_chars, hexlen);
+                if (pushasm.substr(hexlen + wslen).starts_with('>')) {
+                    auto b = TryParseHex<unsigned char>(pushasm.substr(0, hexlen));
+                    if (b) {
+                        pushscript.insert(pushscript.end(), b->begin(), b->end());
+                        if (!pushdata(pushop, script, pushscript)) return false;
+                        pushasm.remove_prefix(hexlen + wslen + 1);
+                        asmstr = pushasm;
+                        return true;
+                    }
+                }
+            }
+
+            if (!ReadAsmStr(Token::WORDS, pushasm, pushscript)) return false;
+            (void)ReadAsmStr(Token::WS, pushasm, pushscript);
+            if (!pushasm.starts_with('>')) return false;
+            if (!pushdata(pushop, script, pushscript)) return false;
+            pushasm.remove_prefix(1);
+            asmstr = pushasm;
+            return true;
+        }
+        case Token::WS: {
+            auto wslen = count_chars(asmstr, ws_chars);
+            if (wslen == 0) return false;
+            asmstr.remove_prefix(wslen);
+            return true;
+        }
+        } // switch (tok)
+        return false;
+    }
+};
+}
+
+std::optional<CScript> ParseAsmStr(std::string_view asmstr)
+{
+    CScript script;
+    if (AsmStrReader::ReadAsmStr(AsmStrReader::Token::ASMSTR, asmstr, script)) {
+        return script;
+    } else {
+        return std::nullopt;
+    }
+}
+
 // Check that all of the input and output scripts of a transaction contains valid opcodes
 static bool CheckTxScriptsSanity(const CMutableTransaction& tx)
 {
