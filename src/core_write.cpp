@@ -91,50 +91,45 @@ std::string SighashToStr(unsigned char sighash_type)
 /**
  * Create the assembly string representation of a CScript object.
  * @param[in] script    CScript object to convert into the asm string representation.
- * @param[in] fAttemptSighashDecode    Whether to attempt to decode sighash types on data within the script that matches the format
- *                                     of a signature. Only pass true for scripts you believe could contain signatures. For example,
- *                                     pass false, or omit the this argument (defaults to false), for scriptPubKeys.
  */
-std::string ScriptToAsmStr(const CScript& script, const bool fAttemptSighashDecode)
+std::string ScriptToAsmStr(const CScript& script)
 {
     std::string str;
     opcodetype opcode;
     std::vector<unsigned char> vch;
     CScript::const_iterator pc = script.begin();
+
     while (pc < script.end()) {
         if (!str.empty()) {
             str += " ";
         }
+        CScript::const_iterator pc_orig = pc;
         if (!script.GetOp(pc, opcode, vch)) {
-            str += "[error]";
+            str += strprintf("#%s", HexStr(std::vector<uint8_t>(pc_orig, script.end())));
             return str;
         }
         if (0 <= opcode && opcode <= OP_PUSHDATA4) {
-            if (vch.size() <= static_cast<std::vector<unsigned char>::size_type>(4)) {
-                str += strprintf("%d", CScriptNum(vch, false).getint());
-            } else {
-                // the IsUnspendable check makes sure not to try to decode OP_RETURN data that may match the format of a signature
-                if (fAttemptSighashDecode && !script.IsUnspendable()) {
-                    std::string strSigHashDecode;
-                    // goal: only attempt to decode a defined sighash type from data that looks like a signature within a scriptSig.
-                    // this won't decode correctly formatted public keys in Pubkey or Multisig scripts due to
-                    // the restrictions on the pubkey formats (see IsCompressedOrUncompressedPubKey) being incongruous with the
-                    // checks in CheckSignatureEncoding.
-                    if (CheckSignatureEncoding(vch, SCRIPT_VERIFY_STRICTENC, nullptr)) {
-                        const unsigned char chSigHashType = vch.back();
-                        const auto it = mapSigHashTypes.find(chSigHashType);
-                        if (it != mapSigHashTypes.end()) {
-                            strSigHashDecode = "[" + it->second + "]";
-                            vch.pop_back(); // remove the sighash type byte. it will be replaced by the decode.
-                        }
-                    }
-                    str += HexStr(vch) + strSigHashDecode;
+            bool minpush = CheckMinimalPush(vch, opcode);
+            if (minpush && vch.size() <= 5 && CScriptNum::CheckMinimalNumber(vch)) {
+                auto n = CScriptNum(vch, false, 5).GetInt64();
+                if (n >= 0 && str.empty() && pc == script.end()) {
+                    // disambiguate a script that is just a small number, versus the hex encoding of a script
+                    str += strprintf("+%d", n);
                 } else {
-                    str += HexStr(vch);
+                    str += strprintf("%d", n);
                 }
+            } else if (minpush || opcode < OP_PUSHDATA1) {
+                str += strprintf("<%s>", HexStr(vch));
+            } else {
+                str += strprintf("PUSHDATA%d<%s>", (1 << (opcode - OP_PUSHDATA1)), HexStr(vch));
             }
-        } else {
+        } else if (opcode <= OP_CHECKSIGADD) {
+            if (OP_1 <= opcode && opcode <= OP_16 && str.empty() && pc == script.end()) {
+                str += "OP_";
+            }
             str += GetOpName(opcode);
+        } else {
+            str += strprintf("#%02x%s", opcode, HexStr(vch));
         }
     }
     return str;
@@ -197,7 +192,7 @@ void TxToUniv(const CTransaction& tx, const uint256& block_hash, UniValue& entry
             in.pushKV("txid", txin.prevout.hash.GetHex());
             in.pushKV("vout", (int64_t)txin.prevout.n);
             UniValue o(UniValue::VOBJ);
-            o.pushKV("asm", ScriptToAsmStr(txin.scriptSig, true));
+            o.pushKV("asm", ScriptToAsmStr(txin.scriptSig));
             o.pushKV("hex", HexStr(txin.scriptSig));
             in.pushKV("scriptSig", std::move(o));
         }

@@ -1238,7 +1238,7 @@ static RPCHelpMan decodepsbt()
         // Final scriptSig and scriptwitness
         if (!input.final_script_sig.empty()) {
             UniValue scriptsig(UniValue::VOBJ);
-            scriptsig.pushKV("asm", ScriptToAsmStr(input.final_script_sig, true));
+            scriptsig.pushKV("asm", ScriptToAsmStr(input.final_script_sig));
             scriptsig.pushKV("hex", HexStr(input.final_script_sig));
             in.pushKV("final_scriptSig", std::move(scriptsig));
         }
