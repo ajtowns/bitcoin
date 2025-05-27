@@ -523,8 +523,10 @@ static RPCHelpMan decodescript()
     UniValue r(UniValue::VOBJ);
     CScript script;
     if (request.params[0].get_str().size() > 0){
-        std::vector<unsigned char> scriptData(ParseHexV(request.params[0], "argument"));
-        script = CScript(scriptData.begin(), scriptData.end());
+        //std::vector<unsigned char> scriptData(ParseHexV(request.params[0], "argument"));
+        //script = CScript(scriptData.begin(), scriptData.end());
+        auto maybescript = ParseAsmStr(request.params[0].get_str());
+        if (maybescript) script = *maybescript;
     } else {
         // Empty scripts are valid
     }
