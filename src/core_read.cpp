@@ -22,7 +22,7 @@ namespace {
 class OpCodeParser
 {
 private:
-    std::map<std::string, opcodetype> mapOpNames;
+    std::map<std::string, opcodetype, std::less<>> mapOpNames;
 
 public:
     OpCodeParser()
@@ -45,18 +45,25 @@ public:
             }
         }
     }
-    opcodetype Parse(const std::string& s) const
+    std::optional<opcodetype> Parse(std::string_view s) const
     {
         auto it = mapOpNames.find(s);
-        if (it == mapOpNames.end()) throw std::runtime_error("script parse error: unknown opcode");
+        if (it == mapOpNames.end()) return std::nullopt;
         return it->second;
     }
 };
 
-opcodetype ParseOpCode(const std::string& s)
+std::optional<opcodetype> ParseOpCodeNoThrow(const std::string_view s)
 {
     static const OpCodeParser ocp;
     return ocp.Parse(s);
+}
+
+opcodetype ParseOpCode(const std::string_view s)
+{
+    auto opcode = ParseOpCodeNoThrow(s);
+    if (!opcode) throw std::runtime_error("script parse error: unknown opcode");
+    return *opcode;
 }
 
 } // namespace
