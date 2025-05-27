@@ -248,7 +248,16 @@ public:
         if (vch.size() > nMaxNumSize) {
             throw scriptnum_error("script number overflow");
         }
-        if (fRequireMinimal && vch.size() > 0) {
+        if (fRequireMinimal && !CheckMinimalNumber(vch)) {
+            throw scriptnum_error("non-minimally encoded script number");
+
+        }
+        m_value = set_vch(vch);
+    }
+
+    static bool CheckMinimalNumber(std::span<const unsigned char> vch)
+    {
+        if (vch.size() > 0) {
             // Check that the number is encoded with the minimum possible
             // number of bytes.
             //
@@ -262,11 +271,11 @@ public:
                 // is +-255, which encode to 0xff00 and 0xff80 respectively.
                 // (big-endian).
                 if (vch.size() <= 1 || (vch[vch.size() - 2] & 0x80) == 0) {
-                    throw scriptnum_error("non-minimally encoded script number");
+                    return false;
                 }
             }
         }
-        m_value = set_vch(vch);
+        return true;
     }
 
     inline bool operator==(const int64_t& rhs) const    { return m_value == rhs; }
