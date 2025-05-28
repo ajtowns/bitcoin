@@ -29,6 +29,16 @@ FUZZ_TARGET(script_format, .init = initialize_script_format)
     (void)FormatScript(script);
     (void)ScriptToAsmStr(script);
 
+    std::string decode = ScriptToAsmStr(script);
+    auto recover = ParseAsmStr(decode);
+    if (!recover.has_value()) {
+        std::cerr << HexStr(script) << " vs nothing" << std::endl;
+    } else if (*recover != script) {
+        std::cerr << HexStr(script) << " vs " << HexStr(*recover) << std::endl;
+    }
+    assert(recover.has_value());
+    assert(*recover == script);
+
     UniValue o1(UniValue::VOBJ);
     auto include_hex = fuzzed_data_provider.ConsumeBool();
     auto include_address = fuzzed_data_provider.ConsumeBool();
