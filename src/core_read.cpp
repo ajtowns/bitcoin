@@ -27,9 +27,8 @@ private:
 public:
     OpCodeParser()
     {
-        for (unsigned int op = 0; op <= MAX_OPCODE; ++op) {
-            // Allow OP_RESERVED to get into mapOpNames
-            if (op < OP_NOP && op != OP_RESERVED) {
+        for (unsigned int op = 0; op <= OP_CHECKSIGADD; ++op) {
+            if (op < OP_1NEGATE) {
                 continue;
             }
 
@@ -41,6 +40,8 @@ public:
             // Convenience: OP_ADD and just ADD are both recognized:
             if (strName.starts_with("OP_")) {
                 mapOpNames[strName.substr(3)] = static_cast<opcodetype>(op);
+            } else {
+                mapOpNames[strprintf("OP_%s", strName)] = static_cast<opcodetype>(op);
             }
         }
     }
