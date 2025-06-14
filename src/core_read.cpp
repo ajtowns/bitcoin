@@ -157,8 +157,16 @@ public:
         }
     }
 
-    static bool ReadAsmStr(Token tok, std::string_view& asmstr, CScript& script)
+    static constexpr int MAX_DEPTH = 20;
+    static bool ReadAsmStr(std::string_view& asmstr, CScript& script)
     {
+        return ReadAsmStr(AsmStrReader::Token::ASMSTR, asmstr, script, 0);
+    }
+
+    static bool ReadAsmStr(Token tok, std::string_view& asmstr, CScript& script, int depth)
+    {
+        if (depth > MAX_DEPTH) return false;
+
         constexpr auto ws_chars = " \f\n\r\t\v";
 
         switch (tok) {
@@ -170,25 +178,25 @@ public:
                 script.insert(script.end(), b.begin(), b.end());
                 return true;
             }
-            if (!ReadAsmStr(Token::WORDS, asmstr, script)) return false;
+            if (!ReadAsmStr(Token::WORDS, asmstr, script, depth)) return false;
             if (asmstr.size() > 0) return false;
             return true;
         }
 
         /*** Remaining tokens do not update armstr or script if they return false ***/
         case Token::WORDS: {
-            if (!ReadAsmStr(Token::WORD, asmstr, script)) return false;
+            if (!ReadAsmStr(Token::WORD, asmstr, script, depth)) return false;
             while (true) {
-                if (!ReadAsmStr(Token::WS, asmstr, script)) break;
-                if (!ReadAsmStr(Token::WORD, asmstr, script)) break;
+                if (!ReadAsmStr(Token::WS, asmstr, script, depth)) break;
+                if (!ReadAsmStr(Token::WORD, asmstr, script, depth)) break;
             }
             return true;
         }
         case Token::WORD: {
-            if (ReadAsmStr(Token::HEXWORD, asmstr, script)) return true;
-            if (ReadAsmStr(Token::NUMBER, asmstr, script)) return true;
-            if (ReadAsmStr(Token::OPCODE, asmstr, script)) return true;
-            return ReadAsmStr(Token::PUSHDATA, asmstr, script);
+            if (ReadAsmStr(Token::HEXWORD, asmstr, script, depth)) return true;
+            if (ReadAsmStr(Token::NUMBER, asmstr, script, depth)) return true;
+            if (ReadAsmStr(Token::OPCODE, asmstr, script, depth)) return true;
+            return ReadAsmStr(Token::PUSHDATA, asmstr, script, depth);
         }
         case Token::HEXWORD: {
             if (!asmstr.starts_with('#')) return false;
@@ -242,7 +250,7 @@ public:
                 return false;
             }
             CScript pushscript;
-            (void)ReadAsmStr(Token::WS, pushasm, pushscript);
+            (void)ReadAsmStr(Token::WS, pushasm, pushscript, depth);
 
             auto hexlen = count_chars(pushasm, "0123456789abcdefABCDEF");
             if (hexlen % 2 == 0) {
@@ -259,8 +267,8 @@ public:
                 }
             }
 
-            if (!ReadAsmStr(Token::WORDS, pushasm, pushscript)) return false;
-            (void)ReadAsmStr(Token::WS, pushasm, pushscript);
+            if (!ReadAsmStr(Token::WORDS, pushasm, pushscript, depth+1)) return false;
+            (void)ReadAsmStr(Token::WS, pushasm, pushscript, depth);
             if (!pushasm.starts_with('>')) return false;
             if (!pushdata(pushop, script, pushscript)) return false;
             pushasm.remove_prefix(1);
@@ -282,7 +290,7 @@ public:
 std::optional<CScript> ParseAsmStr(std::string_view asmstr)
 {
     CScript script;
-    if (AsmStrReader::ReadAsmStr(AsmStrReader::Token::ASMSTR, asmstr, script)) {
+    if (AsmStrReader::ReadAsmStr(asmstr, script)) {
         return script;
     } else {
         return std::nullopt;
