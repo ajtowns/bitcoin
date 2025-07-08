@@ -15,10 +15,17 @@
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <vector>
+
+
+bool operator==(const SignalInfo& a, const SignalInfo& b)
+{
+    return a.height == b.height && a.revision == b.revision && a.activate == b.activate;
+}
 
 namespace {
 class TestConditionChecker : public VersionBitsConditionChecker
@@ -193,6 +200,35 @@ FUZZ_TARGET(versionbits, .init = initialize)
         }
     }
 
+    // helpers to track expected SignalInfo
+    const auto siginfo_nosignal = [&]() -> std::optional<SignalInfo> {
+        int year, number, revision;
+        if (checker.BINANA(year, number, revision)) {
+            if ((ver_nosignal & 0xFFFFFF00l) == (ver_activate & 0xFFFFFF00l)) {
+                return SignalInfo{.height = 0, .revision = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = true};
+            } else if ((ver_nosignal & 0xFFFFFF00l) == (ver_abandon & 0xFFFFFF00l)) {
+                return SignalInfo{.height = 0, .revision = static_cast<uint8_t>(ver_nosignal & 0xFF), .activate = false};
+            }
+        }
+        return std::nullopt;
+    }();
+
+    std::vector<SignalInfo> exp_siginfo = checker.GetSignalInfo(nullptr); // dummy
+    assert(exp_siginfo.empty());
+
+    auto update_exp_siginfo = [&]() {
+        size_t height = blocks.size() - 1;
+        int h = static_cast<int>(height);
+        if (height == abandon_block) {
+            exp_siginfo.push_back({.height = h, .revision = -1, .activate = false});
+        } else if (height == activate_block) {
+            exp_siginfo.push_back({.height = h, .revision = -1, .activate = true});
+        } else if (siginfo_nosignal) {
+            exp_siginfo.push_back(*siginfo_nosignal);
+            exp_siginfo.back().height = h;
+        }
+    };
+
     // now we mine the final period and check that everything looks sane
 
     // get the info for the first block of the period
@@ -209,20 +245,32 @@ FUZZ_TARGET(versionbits, .init = initialize)
     // mine (period-1) blocks and check state
     for (uint32_t b = 1; b < period; ++b) {
         CBlockIndex* current_block = mine_block();
+        update_exp_siginfo();
 
         // state and since don't change within the period
         const ThresholdState state = checker.GetStateFor(current_block);
         const int since = checker.GetStateSinceHeightFor(current_block);
         assert(state == exp_state);
         assert(since == exp_since);
+
+        // check SignalInfo
+        const std::vector<SignalInfo> siginfo = checker.GetSignalInfo(blocks.tip());
+        assert(siginfo.size() == exp_siginfo.size());
+        assert(std::equal(siginfo.begin(), siginfo.end(), exp_siginfo.rbegin(), exp_siginfo.rend()));
     }
 
     // mine the final block
     CBlockIndex* current_block = mine_block();
+    update_exp_siginfo();
 
     // More interesting is whether the state changed.
     const ThresholdState state = checker.GetStateFor(current_block);
     const int since = checker.GetStateSinceHeightFor(current_block);
+
+    // check final SignalInfo
+    const std::vector<SignalInfo> siginfo = checker.GetSignalInfo(blocks.tip());
+    assert(siginfo.size() == exp_siginfo.size());
+    assert(std::equal(siginfo.begin(), siginfo.end(), exp_siginfo.rbegin(), exp_siginfo.rend()));
 
     // since is straightforward:
     assert(since % period == 0);

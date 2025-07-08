@@ -1244,11 +1244,28 @@ static void SoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softfo
     bip9.pushKV("status_next", info.next_state);
 
     // If signalling is relevant, report what versions will signal
-    if (info.signal_activate.has_value()) {
-        bip9.pushKV("signal_activate", strprintf("%08x", *info.signal_activate));
-    }
     if (info.signal_abandon.has_value()) {
+        bool can_activate = info.signal_activate.has_value();
+        if (can_activate) {
+            bip9.pushKV("signal_activate", strprintf("%08x", *info.signal_activate));
+        }
         bip9.pushKV("signal_abandon", strprintf("%08x", *info.signal_abandon));
+
+        // Report observed signalling
+        UniValue signals(UniValue::VARR);
+        for (const auto& signal_info : chainman.m_versionbitscache.GetSignalInfo(blockindex, chainman.GetConsensus(), id)) {
+            UniValue s(UniValue::VOBJ);
+            if (signal_info.revision == -1) {
+                // don't report self-activation signals if already active
+                if (signal_info.activate && !can_activate) continue;
+            } else {
+                s.pushKV("revision", signal_info.revision);
+            }
+            s.pushKV("height", signal_info.height);
+            s.pushKV("action", (signal_info.activate ? "activate" : "abandon"));
+            signals.push_back(s);
+        }
+        bip9.pushKV("signals", signals);
     }
 
     UniValue rv(UniValue::VOBJ);
@@ -1366,6 +1383,13 @@ const std::vector<RPCResult> RPCHelpForDeployment{
         {RPCResult::Type::STR, "status_next", "status of deployment at the next block"},
         {RPCResult::Type::STR_HEX, "signal_activate", /*optional=*/true, "version number to trigger deployment activation"},
         {RPCResult::Type::STR_HEX, "signal_abandon", /*optional=*/true, "version number to trigger deployment abandonment"},
+        {RPCResult::Type::ARR, "signals", /*optional=*/true, "indicates blocks that signalled in the last period",
+            {{RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::NUM, "revision", /*optional=*/true, "revision being signalled"},
+                {RPCResult::Type::NUM, "height", "height of the signalling block"},
+                {RPCResult::Type::STR, "action", "action signalled (activate or abandon)"},
+            }}}},
     }},
 };
 

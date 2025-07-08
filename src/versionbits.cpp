@@ -195,6 +195,42 @@ int AbstractThresholdConditionChecker::GetStateSinceHeightFor(const CBlockIndex*
     return pindexPrev->nHeight + 1;
 }
 
+std::vector<SignalInfo> AbstractThresholdConditionChecker::GetSignalInfo(const CBlockIndex* pindex) const
+{
+    std::vector<SignalInfo> result;
+
+    int year = 0, number = 0, revision = 0;
+    const bool check_other_versions = BINANA(year, number, revision);
+
+    const int32_t activate = ActivateVersion();
+    const int32_t abandon = AbandonVersion();
+    const int period = Period();
+
+    while (pindex != nullptr) {
+        if (pindex->nVersion == activate) {
+            result.push_back({ .height = pindex->nHeight, .revision = -1, .activate = true });
+        } else if (pindex->nVersion == abandon) {
+            result.push_back({ .height = pindex->nHeight, .revision = -1, .activate = false });
+        } else if (check_other_versions) {
+            if ((pindex->nVersion & 0x07FFFF00l) == (activate & 0x07FFFF00l)) {
+                SignalInfo s;
+                s.height = pindex->nHeight;
+                s.revision = static_cast<uint8_t>(pindex->nVersion & 0xFF);
+                if ((pindex->nVersion & 0xF8000000l) == VERSIONBITS_TOP_ACTIVE) {
+                    s.activate = true;
+                    result.push_back(s);
+                } else if ((pindex->nVersion & 0xF8000000l) == VERSIONBITS_TOP_ABANDON) {
+                    s.activate = false;
+                    result.push_back(s);
+                }
+            }
+        }
+        if (pindex->nHeight % period == 0) break;
+        pindex = pindex->pprev;
+    }
+    return result;
+}
+
 BIP9Info VersionBitsCache::Info(const CBlockIndex& block_index, const Consensus::Params& params, Consensus::DeploymentPos id)
 {
     LOCK(m_mutex);
@@ -301,4 +337,10 @@ std::vector<std::pair<int, bool>> VersionBitsCache::CheckUnknownActivations(cons
 bool VersionBitsCache::BINANA(int& year, int& number, int& revision, const Consensus::Params& params, Consensus::DeploymentPos pos) const
 {
     return VersionBitsConditionChecker(params, pos).BINANA(year, number, revision);
+}
+
+std::vector<SignalInfo> VersionBitsCache::GetSignalInfo(const CBlockIndex* pindex, const
+Consensus::Params& params, Consensus::DeploymentPos pos) const
+{
+    return VersionBitsConditionChecker(params, pos).GetSignalInfo(pindex);
 }

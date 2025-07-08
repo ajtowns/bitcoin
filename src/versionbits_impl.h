@@ -50,6 +50,9 @@ public:
 
     /** Report BINANA id, based on nVersion signalling standard */
     bool BINANA(int& year, int& number, int& revision) const;
+
+    /** Returns signalling information */
+    std::vector<SignalInfo> GetSignalInfo(const CBlockIndex* pindex) const;
 };
 
 /**

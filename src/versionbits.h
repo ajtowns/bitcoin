@@ -32,6 +32,13 @@ enum class ThresholdState : uint8_t;
 // will either be nullptr or a block with (height + 1) % Period() == 0.
 typedef std::map<const CBlockIndex*, ThresholdState> ThresholdConditionCache;
 
+struct SignalInfo
+{
+    int height;
+    int revision; // -1 = this revision
+    bool activate; // true = activate, false = abandon
+};
+
 /** Detailed status of an enabled BIP9 deployment */
 struct BIP9Info {
     /** Height at which current_state started */
@@ -86,6 +93,9 @@ public:
 
     /** Report BINANA details, based on nVersion signalling standard */
     bool BINANA(int& year, int& number, int& revision, const Consensus::Params& params, Consensus::DeploymentPos pos) const;
+
+    /** Returns signalling information */
+    std::vector<SignalInfo> GetSignalInfo(const CBlockIndex* pindex, const Consensus::Params& params, Consensus::DeploymentPos pos) const;
 
     void Clear() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 };
