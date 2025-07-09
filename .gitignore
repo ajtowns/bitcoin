@@ -5,6 +5,8 @@
 
 *.pyc
 
+src/binana.h
+
 # Only ignore unexpected patches
 *.patch
 !contrib/guix/patches/*.patch

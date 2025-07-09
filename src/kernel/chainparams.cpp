@@ -5,6 +5,7 @@
 
 #include <kernel/chainparams.h>
 
+#include <binana.h>
 #include <chainparamsseeds.h>
 #include <consensus/amount.h>
 #include <consensus/merkle.h>
@@ -143,7 +144,10 @@ public:
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.enforce_BIP94 = false;
         consensus.fPowNoRetargeting = false;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
+
+        for (auto& dep : consensus.vDeployments) {
+            dep = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
+        }
 
         consensus.nMinimumChainWork = uint256{"0000000000000000000000000000000000000000b1f3b93b65b16d035a82be84"};
         consensus.defaultAssumeValid = uint256{"00000000000000000001b658dd1120e82e66d2790811f89ede9742ada3ed6d77"}; // 886157
@@ -265,6 +269,10 @@ public:
         consensus.fPowNoRetargeting = false;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
 
+        for (auto& dep : consensus.vDeployments) {
+            dep = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
+        }
+
         consensus.nMinimumChainWork = uint256{"0000000000000000000000000000000000000000000015f5e0c9f13455b0eb17"};
         consensus.defaultAssumeValid = uint256{"00000000000003fc7967410ba2d0a8a8d50daedc318d43e8baf1a9782c236a57"}; // 3974606
 
@@ -352,7 +360,10 @@ public:
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.enforce_BIP94 = true;
         consensus.fPowNoRetargeting = false;
-        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
+
+        for (auto& dep : consensus.vDeployments) {
+            dep = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 2016};
+        }
 
         consensus.nMinimumChainWork = uint256{"0000000000000000000000000000000000000000000001d6dce8651b6094e4c1"};
         consensus.defaultAssumeValid = uint256{"0000000000003ed4f08dbdf6f7d6b271a6bcffce25675cb40aa9fa43179a89f3"}; // 72600
@@ -482,6 +493,7 @@ public:
         consensus.powLimit = uint256{"00000377ae000000000000000000000000000000000000000000000000000000"};
 
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = SetupDeployment{.activate = 0x30000000, .abandon = 0, .never = true, .period = 432};
+        INQ_DEPLOYMENTS_SIGNET
 
         RenounceDeployments(options.renounce, consensus.vDeployments);
 
@@ -551,6 +563,7 @@ public:
 
         // 0x3000_0000 = bit 28 plus versionbits signalling; 0x5000_0000 = bit 38 plus VERSIONBITS_TOP_ABANDON
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY] = SetupDeployment{.start = 0, .timeout = Consensus::HereticalDeployment::NO_TIMEOUT, .activate = 0x30000000, .abandon = 0x50000000, .period = 144};
+        INQ_DEPLOYMENTS_REGTEST
 
         consensus.nMinimumChainWork = uint256{};
         consensus.defaultAssumeValid = uint256{};

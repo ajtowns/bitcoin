@@ -7,6 +7,7 @@
 #define BITCOIN_SCRIPT_SCRIPT_H
 
 #include <attributes.h>
+#include <binana.h>
 #include <crypto/common.h>
 #include <prevector.h> // IWYU pragma: export
 #include <serialize.h>
@@ -208,6 +209,8 @@ enum opcodetype
 
     // Opcode added by BIP 342 (Tapscript)
     OP_CHECKSIGADD = 0xba,
+
+    INQ_OPCODES
 
     OP_INVALIDOPCODE = 0xff,
 };

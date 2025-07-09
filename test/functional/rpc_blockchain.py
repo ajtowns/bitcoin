@@ -24,6 +24,7 @@ Tests correspond to code in rpc/blockchain.cpp.
 
 from decimal import Decimal
 import http.client
+import json
 import os
 import subprocess
 import textwrap
@@ -73,6 +74,14 @@ class BlockchainTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 1
         self.supports_cli = False
+
+
+    def add_options(self, parser):
+        parser.add_argument(
+            '--datafile',
+            default='data/binana.json',
+            help='Extra deployment info data file (default: %(default)s)',
+        )
 
     def run_test(self):
         self.wallet = MiniWallet(self.nodes[0])
@@ -208,7 +217,7 @@ class BlockchainTest(BitcoinTestFramework):
     def check_signalling_deploymentinfo_result(self, gdi_result, height, blockhash):
         assert height >= 144 and height <= 287
 
-        assert_equal(gdi_result, {
+        expected_depinfo = {
           "hash": blockhash,
           "height": height,
           "script_flags": ["CHECKLOCKTIMEVERIFY","CHECKSEQUENCEVERIFY","DERSIG","NULLDUMMY","P2SH","TAPROOT","WITNESS"],
@@ -235,7 +244,16 @@ class BlockchainTest(BitcoinTestFramework):
                 'active': False
             },
           }
-        })
+        }
+
+        # if this gives an error, try touching test/CMakeLists.txt and rebuilding
+        # to ensure the symlink in the build dir is generated
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), self.options.datafile)
+        binana_extra = json.load(open(path, "r", encoding="utf8"))
+        expected_depinfo["script_flags"] = sorted(expected_depinfo["script_flags"] + binana_extra["script_flags"])
+
+        expected_depinfo["deployments"].update(binana_extra["deployments"])
+        assert_equal(gdi_result, expected_depinfo)
 
     def _test_getdeploymentinfo(self):
         # Note: continues past -stopatheight height, so must be invoked

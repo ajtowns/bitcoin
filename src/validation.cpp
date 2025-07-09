@@ -8,6 +8,7 @@
 #include <validation.h>
 
 #include <arith_uint256.h>
+#include <binana.h>
 #include <chain.h>
 #include <checkqueue.h>
 #include <clientversion.h>
@@ -1221,6 +1222,18 @@ bool MemPoolAccept::PackageMempoolChecks(const std::vector<CTransactionRef>& txn
     return true;
 }
 
+
+static unsigned int DepDiscourageFlags(const CBlockIndex* tip, const ChainstateManager& chainman, const std::vector<std::pair<Consensus::DeploymentPos,unsigned int>>& depflags)
+{
+    unsigned int result = SCRIPT_VERIFY_NONE;
+    for (auto [dep, flags] : depflags) {
+        if (!DeploymentActiveAfter(tip, chainman, dep)) {
+            result |= flags;
+        }
+    }
+    return result;
+}
+
 bool MemPoolAccept::PolicyScriptChecks(const ATMPArgs& args, Workspace& ws)
 {
     AssertLockHeld(cs_main);
@@ -1228,7 +1241,9 @@ bool MemPoolAccept::PolicyScriptChecks(const ATMPArgs& args, Workspace& ws)
     const CTransaction& tx = *ws.m_ptx;
     TxValidationState& state = ws.m_state;
 
-    constexpr unsigned int scriptVerifyFlags = STANDARD_SCRIPT_VERIFY_FLAGS;
+    const unsigned int scriptVerifyFlags = STANDARD_SCRIPT_VERIFY_FLAGS | DepDiscourageFlags(m_active_chainstate.m_chain.Tip(), m_active_chainstate.m_chainman, {
+        INQ_POLICY_CHECKS
+    });
 
     // Check input scripts and signatures.
     // This is done last to help prevent CPU exhaustion denial-of-service attacks.
@@ -2401,9 +2416,10 @@ unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Chainstat
         flags |= SCRIPT_VERIFY_NULLDUMMY;
     }
 
+    INQ_CONSENSUS_CHECKS
+
     return flags;
 }
-
 
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()

@@ -5,6 +5,7 @@
 
 #include <script/interpreter.h>
 
+#include <binana.h>
 #include <crypto/ripemd160.h>
 #include <crypto/sha1.h>
 #include <crypto/sha256.h>
@@ -1786,6 +1787,13 @@ bool GenericTransactionSignatureChecker<T>::CheckSequence(const CScriptNum& nSeq
 template class GenericTransactionSignatureChecker<CTransaction>;
 template class GenericTransactionSignatureChecker<CMutableTransaction>;
 
+[[maybe_unused]] static std::optional<bool> op_success_check(unsigned int flags, unsigned int enforce, unsigned int discourage, ScriptError discourage_err, ScriptError* serror)
+{
+    if (flags & discourage) return set_error(serror, discourage_err);
+    if (!(flags & enforce)) return set_success(serror);
+    return std::nullopt;
+}
+
 std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned int flags, ScriptError* serror)
 {
     {
@@ -1799,10 +1807,18 @@ std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned
             }
             // New opcodes will be listed here. May use a different sigversion to modify existing opcodes.
             if (IsOpSuccess(opcode)) {
-                if (flags & SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS) {
-                    return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_SUCCESS);
+                switch(opcode) {
+                INQ_SUCCESS_OPCODES
+                case OP_RESERVED:
+                    // special case this to give an error if attempting to replace it,
+                    // and to avoid MSVC++ error message about no case statements
+                    [[fallthrough]];
+                default:
+                    if (flags & SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS) {
+                        return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_SUCCESS);
+                    }
+                    return set_success(serror);
                 }
-                return set_success(serror);
             }
         }
     }
