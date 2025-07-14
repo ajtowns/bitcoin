@@ -351,4 +351,7 @@ size_t CountWitnessSigOps(const CScript& scriptSig, const CScript& scriptPubKey,
 
 int FindAndDelete(CScript& script, const CScript& b);
 
+bool CastToBool(const std::vector<unsigned char>& vch);
+std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned int flags, ScriptError* serror);
+
 #endif // BITCOIN_SCRIPT_INTERPRETER_H
