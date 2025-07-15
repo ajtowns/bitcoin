@@ -13,13 +13,16 @@
  *  State transitions happen during retarget period if conditions are met
  *  In case of reorg, transitions can go backward. Without transition, state is
  *  inherited between periods. All blocks of a period share the same state.
+ *
+ *  States here are updated for heretical activations.
  */
 enum class ThresholdState : uint8_t {
-    DEFINED,   // First state that each softfork starts out as. The genesis block is by definition in this state for each deployment.
-    STARTED,   // For blocks past the starttime.
-    LOCKED_IN, // For at least one retarget period after the first retarget period with STARTED blocks of which at least threshold have the associated bit set in nVersion, until min_activation_height is reached.
-    ACTIVE,    // For all blocks after the LOCKED_IN retarget period (final state)
-    FAILED,    // For all blocks once the first retarget period after the timeout time is hit, if LOCKED_IN wasn't already reached (final state)
+    DEFINED,   // Inactive, waiting for begin time
+    STARTED,   // Inactive, waiting for signal/timeout
+    LOCKED_IN, // Activation signalled, will be active next period
+    ACTIVE,    // Active; will deactivate on signal or timeout
+    DEACTIVATING, // Still active, will be abandoned next period
+    ABANDONED, // Not active, terminal state
 };
 
 /** Get a string with the state name */
@@ -30,25 +33,26 @@ std::string StateName(ThresholdState state);
  */
 class AbstractThresholdConditionChecker {
 protected:
-    virtual bool Condition(const CBlockIndex* pindex) const =0;
     virtual int64_t BeginTime() const =0;
     virtual int64_t EndTime() const =0;
-    virtual int MinActivationHeight() const { return 0; }
     virtual int Period() const =0;
-    virtual int Threshold() const =0;
+    virtual int32_t ActivateVersion() const =0;
+    virtual int32_t AbandonVersion() const =0;
 
 public:
     virtual ~AbstractThresholdConditionChecker() = default;
 
-    /** Returns the numerical statistics of an in-progress BIP9 softfork in the period including pindex
-     * If provided, signalling_blocks is set to true/false based on whether each block in the period signalled
-     */
-    BIP9Stats GetStateStatisticsFor(const CBlockIndex* pindex, std::vector<bool>* signalling_blocks = nullptr) const;
     /** Returns the state for pindex A based on parent pindexPrev B. Applies any state transition if conditions are present.
      *  Caches state from first block of period. */
     ThresholdState GetStateFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
     /** Returns the height since when the ThresholdState has started for pindex A based on parent pindexPrev B, all blocks of a period share the same */
     int GetStateSinceHeightFor(const CBlockIndex* pindexPrev, ThresholdConditionCache& cache) const;
+
+    /** Report BINANA id, based on nVersion signalling standard */
+    bool BINANA(int& year, int& number, int& revision) const;
+
+    /** Returns signalling information */
+    std::vector<SignalInfo> GetSignalInfo(const CBlockIndex* pindex) const;
 };
 
 /**
@@ -56,30 +60,21 @@ public:
  */
 class VersionBitsConditionChecker : public AbstractThresholdConditionChecker {
 private:
-    const Consensus::BIP9Deployment& dep;
+    const Consensus::HereticalDeployment& dep;
 
 protected:
     int64_t BeginTime() const override { return dep.nStartTime; }
     int64_t EndTime() const override { return dep.nTimeout; }
-    int MinActivationHeight() const override { return dep.min_activation_height; }
     int Period() const override { return dep.period; }
-    int Threshold() const override { return dep.threshold; }
-
-    bool Condition(const CBlockIndex* pindex) const override
-    {
-        return Condition(pindex->nVersion);
-    }
 
 public:
-    explicit VersionBitsConditionChecker(const Consensus::BIP9Deployment& dep) : dep{dep} {}
+    explicit VersionBitsConditionChecker(const Consensus::HereticalDeployment& dep) : dep{dep} {}
     explicit VersionBitsConditionChecker(const Consensus::Params& params, Consensus::DeploymentPos id) : VersionBitsConditionChecker{params.vDeployments[id]} {}
 
-    uint32_t Mask() const { return (uint32_t{1}) << dep.bit; }
+    int32_t ActivateVersion() const override { return dep.signal_activate; }
+    int32_t AbandonVersion() const override { return dep.signal_abandon; }
 
-    bool Condition(int32_t nVersion) const
-    {
-        return (((nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) && (nVersion & Mask()) != 0);
-    }
+    BIP9Info Info(const CBlockIndex& block_index, ThresholdConditionCache& cache);
 };
 
 #endif // BITCOIN_VERSIONBITS_IMPL_H

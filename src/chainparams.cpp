@@ -23,6 +23,25 @@
 
 using util::SplitString;
 
+static void HandleRenounceArgs(const ArgsManager& args, CChainParams::RenounceParameters& renounce)
+{
+    if (!args.IsArgSet("-renounce")) return;
+    for (const std::string& dep_name : args.GetArgs("-renounce")) {
+        bool found = false;
+        for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
+            if (dep_name == VersionBitsDeploymentInfo[j].name) {
+                renounce.emplace_back(static_cast<Consensus::BuriedDeployment>(j));
+                found = true;
+                LogPrintf("Disabling deployment %s\n", dep_name);
+                break;
+            }
+        }
+        if (!found) {
+            throw std::runtime_error(strprintf("Invalid deployment (%s)", dep_name));
+        }
+    }
+}
+
 void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& options)
 {
     if (!args.GetArgs("-signetseednode").empty()) {
@@ -39,6 +58,7 @@ void ReadSigNetArgs(const ArgsManager& args, CChainParams::SigNetOptions& option
         }
         options.challenge.emplace(*val);
     }
+    HandleRenounceArgs(args, options.renounce);
 }
 
 void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& options)
@@ -66,10 +86,12 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         }
     }
 
+    HandleRenounceArgs(args, options.renounce);
+
     for (const std::string& strDeployment : args.GetArgs("-vbparams")) {
         std::vector<std::string> vDeploymentParams = SplitString(strDeployment, ':');
-        if (vDeploymentParams.size() < 3 || 4 < vDeploymentParams.size()) {
-            throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end[:min_activation_height]");
+        if (vDeploymentParams.size() != 3) {
+            throw std::runtime_error("Version bits parameters malformed, expecting deployment:start:end");
         }
         CChainParams::VersionBitsParameters vbparams{};
         if (!ParseInt64(vDeploymentParams[1], &vbparams.start_time)) {
@@ -78,19 +100,12 @@ void ReadRegTestArgs(const ArgsManager& args, CChainParams::RegTestOptions& opti
         if (!ParseInt64(vDeploymentParams[2], &vbparams.timeout)) {
             throw std::runtime_error(strprintf("Invalid nTimeout (%s)", vDeploymentParams[2]));
         }
-        if (vDeploymentParams.size() >= 4) {
-            if (!ParseInt32(vDeploymentParams[3], &vbparams.min_activation_height)) {
-                throw std::runtime_error(strprintf("Invalid min_activation_height (%s)", vDeploymentParams[3]));
-            }
-        } else {
-            vbparams.min_activation_height = 0;
-        }
         bool found = false;
         for (int j=0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++j) {
             if (vDeploymentParams[0] == VersionBitsDeploymentInfo[j].name) {
                 options.version_bits_parameters[Consensus::DeploymentPos(j)] = vbparams;
                 found = true;
-                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld, min_activation_height=%d\n", vDeploymentParams[0], vbparams.start_time, vbparams.timeout, vbparams.min_activation_height);
+                LogPrintf("Setting version bits activation parameters for %s to start=%ld, timeout=%ld\n", vDeploymentParams[0], vbparams.start_time, vbparams.timeout);
                 break;
             }
         }
