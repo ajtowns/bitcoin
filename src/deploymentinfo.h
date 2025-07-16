@@ -6,6 +6,7 @@
 #define BITCOIN_DEPLOYMENTINFO_H
 
 #include <consensus/params.h>
+#include <script/verify_flags.h>
 
 #include <array>
 #include <cassert>
@@ -36,6 +37,6 @@ std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string
 
 extern const std::map<std::string, uint32_t> g_verify_flag_names;
 
-std::vector<std::string> GetScriptFlagNames(uint32_t flags);
+std::vector<std::string> GetScriptFlagNames(script_verify_flags flags);
 
 #endif // BITCOIN_DEPLOYMENTINFO_H

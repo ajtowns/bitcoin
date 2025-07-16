@@ -83,13 +83,13 @@ const std::map<std::string, uint32_t> g_verify_flag_names{
 };
 #undef FLAG_NAME
 
-std::vector<std::string> GetScriptFlagNames(uint32_t flags)
+std::vector<std::string> GetScriptFlagNames(script_verify_flags flags)
 {
     std::vector<std::string> res;
     if (flags == SCRIPT_VERIFY_NONE) {
         return res;
     }
-    uint32_t leftover = flags;
+    script_verify_flags leftover = flags;
     for (const auto& [name, flag] : g_verify_flag_names) {
         if ((flags & flag) != 0) {
             res.push_back(name);

@@ -183,13 +183,13 @@ static std::string sigver2str(SigVersion sigver)
     return "unknown";
 }
 
-static uint32_t parse_verify_flags(const std::string& strFlags)
+static script_verify_flags parse_verify_flags(const std::string& strFlags)
 {
     if (strFlags.empty() || strFlags == "MANDATORY") return MANDATORY_SCRIPT_VERIFY_FLAGS;
     if (strFlags == "STANDARD") return STANDARD_SCRIPT_VERIFY_FLAGS;
     if (strFlags == "NONE") return 0;
 
-    unsigned int flags = 0;
+    script_verify_flags flags = 0;
     std::vector<std::string> words = util::SplitString(strFlags, ',');
 
     for (const std::string& word : words)
@@ -220,7 +220,7 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
 {
     UniValue result{UniValue::VOBJ};
 
-    uint32_t flags{0};
+    script_verify_flags flags{0};
     PrecomputedTransactionData txdata;
     ScriptExecutionData execdata;
 
