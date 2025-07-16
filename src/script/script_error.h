@@ -6,6 +6,8 @@
 #ifndef BITCOIN_SCRIPT_SCRIPT_ERROR_H
 #define BITCOIN_SCRIPT_SCRIPT_ERROR_H
 
+#include <binana.h>
+
 #include <string>
 
 typedef enum ScriptError_t
@@ -81,6 +83,9 @@ typedef enum ScriptError_t
     /* Constant scriptCode */
     SCRIPT_ERR_OP_CODESEPARATOR,
     SCRIPT_ERR_SIG_FINDANDDELETE,
+
+    /* Inquisition additions */
+    INQ_SCRIPTERR
 
     SCRIPT_ERR_ERROR_COUNT
 } ScriptError;

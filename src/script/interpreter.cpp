@@ -5,6 +5,7 @@
 
 #include <script/interpreter.h>
 
+#include <binana.h>
 #include <crypto/ripemd160.h>
 #include <crypto/sha1.h>
 #include <crypto/sha256.h>
@@ -451,24 +452,25 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 if (opcode > OP_16 && ++nOpCount > MAX_OPS_PER_SCRIPT) {
                     return set_error(serror, SCRIPT_ERR_OP_COUNT);
                 }
-            }
 
-            if (opcode == OP_CAT ||
-                opcode == OP_SUBSTR ||
-                opcode == OP_LEFT ||
-                opcode == OP_RIGHT ||
-                opcode == OP_INVERT ||
-                opcode == OP_AND ||
-                opcode == OP_OR ||
-                opcode == OP_XOR ||
-                opcode == OP_2MUL ||
-                opcode == OP_2DIV ||
-                opcode == OP_MUL ||
-                opcode == OP_DIV ||
-                opcode == OP_MOD ||
-                opcode == OP_LSHIFT ||
-                opcode == OP_RSHIFT)
-                return set_error(serror, SCRIPT_ERR_DISABLED_OPCODE); // Disabled opcodes (CVE-2010-5137).
+                if (opcode == OP_CAT ||
+                    opcode == OP_SUBSTR ||
+                    opcode == OP_LEFT ||
+                    opcode == OP_RIGHT ||
+                    opcode == OP_INVERT ||
+                    opcode == OP_AND ||
+                    opcode == OP_OR ||
+                    opcode == OP_XOR ||
+                    opcode == OP_2MUL ||
+                    opcode == OP_2DIV ||
+                    opcode == OP_MUL ||
+                    opcode == OP_DIV ||
+                    opcode == OP_MOD ||
+                    opcode == OP_LSHIFT ||
+                    opcode == OP_RSHIFT) {
+                    return set_error(serror, SCRIPT_ERR_DISABLED_OPCODE); // Disabled opcodes (CVE-2010-5137).
+                }
+            }
 
             // With SCRIPT_VERIFY_CONST_SCRIPTCODE, OP_CODESEPARATOR in non-segwit script is rejected even in an unexecuted branch
             if (opcode == OP_CODESEPARATOR && sigversion == SigVersion::BASE && (flags & SCRIPT_VERIFY_CONST_SCRIPTCODE))
@@ -1785,6 +1787,13 @@ bool GenericTransactionSignatureChecker<T>::CheckSequence(const CScriptNum& nSeq
 template class GenericTransactionSignatureChecker<CTransaction>;
 template class GenericTransactionSignatureChecker<CMutableTransaction>;
 
+[[maybe_unused]] static std::optional<bool> op_success_check(unsigned int flags, unsigned int enforce, unsigned int discourage, ScriptError discourage_err, ScriptError* serror)
+{
+    if (flags & discourage) return set_error(serror, discourage_err);
+    if (!(flags & enforce)) return set_success(serror);
+    return std::nullopt;
+}
+
 std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned int flags, ScriptError* serror)
 {
     {
@@ -1798,10 +1807,18 @@ std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned
             }
             // New opcodes will be listed here. May use a different sigversion to modify existing opcodes.
             if (IsOpSuccess(opcode)) {
-                if (flags & SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS) {
-                    return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_SUCCESS);
+                switch(opcode) {
+                INQ_SUCCESS_OPCODES
+                case OP_RESERVED:
+                    // special case this to give an error if attempting to replace it,
+                    // and to avoid MSVC++ error message about no case statements
+                    [[fallthrough]];
+                default:
+                    if (flags & SCRIPT_VERIFY_DISCOURAGE_OP_SUCCESS) {
+                        return set_error(serror, SCRIPT_ERR_DISCOURAGE_OP_SUCCESS);
+                    }
+                    return set_success(serror);
                 }
-                return set_success(serror);
             }
         }
     }

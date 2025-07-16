@@ -5,6 +5,7 @@
 
 #include <script/script.h>
 
+#include <binana.h>
 #include <crypto/common.h>
 #include <crypto/hex_base.h>
 #include <hash.h>
@@ -148,6 +149,8 @@ std::string GetOpName(opcodetype opcode)
 
     // Opcode added by BIP 342 (Tapscript)
     case OP_CHECKSIGADD            : return "OP_CHECKSIGADD";
+
+    INQ_OPCODE_NAMES
 
     case OP_INVALIDOPCODE          : return "OP_INVALIDOPCODE";
 

@@ -5,6 +5,8 @@
 
 #include <script/script_error.h>
 
+#include <binana.h>
+
 #include <string>
 
 std::string ScriptErrorString(const ScriptError serror)
@@ -115,6 +117,9 @@ std::string ScriptErrorString(const ScriptError serror)
             return "Using OP_CODESEPARATOR in non-witness script";
         case SCRIPT_ERR_SIG_FINDANDDELETE:
             return "Signature is found in scriptCode";
+
+        INQ_SCRIPTERR_STRING
+
         case SCRIPT_ERR_UNKNOWN_ERROR:
         case SCRIPT_ERR_ERROR_COUNT:
         default: break;

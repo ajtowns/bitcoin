@@ -6,6 +6,7 @@
 #ifndef BITCOIN_SCRIPT_INTERPRETER_H
 #define BITCOIN_SCRIPT_INTERPRETER_H
 
+#include <binana.h>
 #include <consensus/amount.h>
 #include <hash.h>
 #include <primitives/transaction.h>
@@ -142,6 +143,8 @@ enum : uint32_t {
 
     // Making unknown public key versions (in BIP 342 scripts) non-standard
     SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE = (1U << 20),
+
+    INQ_VERIFY_FLAGS
 
     // Constants to point to the highest flag in use. Add new flags above this line.
     //

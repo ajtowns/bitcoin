@@ -4,6 +4,7 @@
 
 #include <deploymentinfo.h>
 
+#include <binana.h>
 #include <consensus/params.h>
 #include <script/interpreter.h>
 #include <tinyformat.h>
@@ -15,6 +16,7 @@ const std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> Versi
         .name = "testdummy",
         .gbt_force = true,
     },
+    INQ_DEPLOYMENTS_GBT
 };
 
 std::string DeploymentName(Consensus::BuriedDeployment dep)
@@ -76,6 +78,7 @@ const std::map<std::string, uint32_t> g_verify_flag_names{
     FLAG_NAME(DISCOURAGE_UPGRADABLE_PUBKEYTYPE),
     FLAG_NAME(DISCOURAGE_OP_SUCCESS),
     FLAG_NAME(DISCOURAGE_UPGRADABLE_TAPROOT_VERSION),
+    INQ_VERIFY_FLAGS_NAMES
 };
 #undef FLAG_NAME
 

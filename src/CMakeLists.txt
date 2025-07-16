@@ -85,6 +85,14 @@ add_custom_target(generate_build_info
   COMMENT "Generating bitcoin-build-info.h"
   VERBATIM
 )
+add_custom_target(generate_binana_info
+    BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/binana.h ${CMAKE_SOURCE_DIR}/test/functional/data/binana.json
+    COMMAND ${PYTHON_COMMAND} ${CMAKE_CURRENT_SOURCE_DIR}/binana.py ${CMAKE_CURRENT_SOURCE_DIR}/binana/ ${CMAKE_CURRENT_SOURCE_DIR}/binana.h ${CMAKE_SOURCE_DIR}/test/functional/data/binana.json
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/binana.py
+    COMMENT "Generating src/binana.h and test/functional/data/binana.json"
+    VERBATIM
+)
 add_library(bitcoin_clientversion STATIC EXCLUDE_FROM_ALL
   clientversion.cpp
 )
@@ -93,6 +101,7 @@ target_link_libraries(bitcoin_clientversion
     core_interface
 )
 add_dependencies(bitcoin_clientversion generate_build_info)
+add_dependencies(bitcoin_clientversion generate_binana_info)
 
 add_subdirectory(crypto)
 add_subdirectory(util)
@@ -119,6 +128,7 @@ target_link_libraries(bitcoin_consensus
     bitcoin_crypto
     secp256k1
 )
+add_dependencies(bitcoin_consensus generate_binana_info)
 
 if(WITH_ZMQ)
   add_subdirectory(zmq)
@@ -189,6 +199,7 @@ target_link_libraries(bitcoin_common
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
     $<$<PLATFORM_ID:Windows>:ws2_32>
 )
+add_dependencies(bitcoin_common generate_binana_info)
 
 include(InstallBinaryComponent)
 
@@ -325,6 +336,7 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:libevent::pthreads>
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
+add_dependencies(bitcoin_node generate_binana_info)
 
 
 # Bitcoin Core bitcoind.
