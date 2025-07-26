@@ -35,7 +35,7 @@ inline std::string DeploymentName(Consensus::DeploymentPos pos)
 
 std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string_view deployment_name);
 
-extern const std::map<std::string, uint32_t> g_verify_flag_names;
+extern const std::map<std::string, script_verify_flag_name> g_verify_flag_names;
 
 std::vector<std::string> GetScriptFlagNames(script_verify_flags flags);
 

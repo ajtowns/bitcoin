@@ -56,7 +56,7 @@ std::optional<Consensus::BuriedDeployment> GetBuriedDeployment(const std::string
 }
 
 #define FLAG_NAME(flag) {std::string(#flag), SCRIPT_VERIFY_##flag}
-const std::map<std::string, uint32_t> g_verify_flag_names{
+const std::map<std::string, script_verify_flag_name> g_verify_flag_names{
     FLAG_NAME(P2SH),
     FLAG_NAME(STRICTENC),
     FLAG_NAME(DERSIG),
@@ -97,7 +97,7 @@ std::vector<std::string> GetScriptFlagNames(script_verify_flags flags)
         }
     }
     if (leftover != 0) {
-        res.push_back(strprintf("0x%08x", leftover));
+        res.push_back(strprintf("0x%08x", leftover.as_int()));
     }
     return res;
 }
