@@ -1220,6 +1220,13 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         }
     }
 
+    if (args.GetBoolArg("-printpriority", DEFAULT_PRINT_MODIFIED_FEE)) {
+        if (!LogInstance().WillLogCategory(BCLog::MINING)) {
+            LogInstance().EnableCategory(BCLog::MINING);
+            LogInfo("parameter interaction: -printpriority -> setting -debug=mining");
+        }
+    }
+
     // Also report errors from parsing before daemonization
     {
         kernel::Notifications notifications{};

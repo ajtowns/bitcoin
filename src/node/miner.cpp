@@ -279,7 +279,7 @@ void BlockAssembler::AddToBlock(const CTxMemPoolEntry& entry)
     nFees += entry.GetFee();
 
     if (*m_options.print_modified_fee) {
-        LogInfo("fee rate %s txid %s\n",
+        LogDebug(BCLog::MINING, "fee rate %s txid %s\n",
                   CFeeRate(entry.GetModifiedFee(), entry.GetTxSize()).ToString(),
                   entry.GetTx().GetHash().ToString());
     }
