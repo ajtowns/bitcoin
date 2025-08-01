@@ -45,7 +45,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const Wtxid& wtxid) const {
     return SipHashUint256(shorttxidk0, shorttxidk1, wtxid) & 0xffffffffffffL;
 }
 
-ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const std::vector<CTransactionRef>& extra_txn) {
+ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, ExtraTransactions&& extra_txn) {
     LogDebug(BCLog::CMPCTBLOCK, "Initializing PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
         return READ_STATUS_INVALID;
@@ -132,15 +132,12 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     }
     }
 
-    for (size_t i = 0; i < extra_txn.size(); i++) {
-        if (extra_txn[i] == nullptr) {
-            continue;
-        }
-        uint64_t shortid = cmpctblock.GetShortID(extra_txn[i]->GetWitnessHash());
+    while (auto extra = extra_txn.next()) {
+        uint64_t shortid = cmpctblock.GetShortID(extra->GetWitnessHash());
         std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
             if (!have_txn[idit->second]) {
-                txn_available[idit->second] = extra_txn[i];
+                txn_available[idit->second] = extra;
                 have_txn[idit->second]  = true;
                 mempool_count++;
                 extra_count++;
@@ -152,7 +149,7 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
                 // Note that we don't want duplication between extra_txn and mempool to
                 // trigger this case, so we compare witness hashes first
                 if (txn_available[idit->second] &&
-                        txn_available[idit->second]->GetWitnessHash() != extra_txn[i]->GetWitnessHash()) {
+                        txn_available[idit->second]->GetWitnessHash() != extra->GetWitnessHash()) {
                     txn_available[idit->second].reset();
                     mempool_count--;
                     extra_count--;
