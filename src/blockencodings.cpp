@@ -56,7 +56,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const Wtxid& wtxid) const
  * in a vector and iterate over the vector directly. This allows optimal
  * CPU caching behaviour, at a cost of only 40 bytes per transaction.
  */
-ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, const std::vector<std::pair<Wtxid, CTransactionRef>>& extra_txn)
+ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, ExtraTransactions&& extra_txn)
 {
     LogDebug(BCLog::CMPCTBLOCK, "Initializing PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
@@ -142,17 +142,21 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     }
     }
 
-    for (size_t i = 0; i < extra_txn.size(); i++) {
-        uint64_t shortid = cmpctblock.GetShortID(extra_txn[i].first);
+    while (true) {
+        auto [pwtxid, pextra] = extra_txn.next();
+        if (pwtxid == nullptr || pextra == nullptr) break;
+        const auto& wtxid = *pwtxid;
+        const auto& extra = *pextra;
+        uint64_t shortid = cmpctblock.GetShortID(wtxid);
         std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
             if (tx_source[idit->second] == TxSource::NONE) {
-                txn_available[idit->second] = extra_txn[i].second;
+                txn_available[idit->second] = extra;
                 tx_source[idit->second] = TxSource::EXTRA;
                 mempool_count++;
                 extra_count++;
             } else if (tx_source[idit->second] != TxSource::COLLIDED &&
-                       txn_available[idit->second]->GetWitnessHash() != extra_txn[i].second->GetWitnessHash()) {
+                       txn_available[idit->second]->GetWitnessHash() != extra->GetWitnessHash()) {
                 // If we find two mempool/extra txn that match the short id, just
                 // request it.
                 // This should be rare enough that the extra bandwidth doesn't matter,
