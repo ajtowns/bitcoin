@@ -57,7 +57,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const Wtxid& wtxid) const
  * in a vector and iterate over the vector directly. This allows optimal
  * CPU caching behaviour, at a cost of only 40 bytes per transaction.
  */
-ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, const std::vector<std::pair<Wtxid, CTransactionRef>>& extra_txn)
+ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, ExtraTransactions&& extra_txn)
 {
     LogDebug(BCLog::CMPCTBLOCK, "Initializing PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
@@ -169,16 +169,34 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     }
     }
 
-    for (size_t i = 0; i < extra_txn.size(); i++) {
-        uint64_t shortid = cmpctblock.GetShortID(extra_txn[i].first);
+    while (true) {
+        auto [pwtxid, pextra] = extra_txn.next();
+        if (pwtxid == nullptr || pextra == nullptr) break;
+        const auto& wtxid = *pwtxid;
+        const auto& extra = *pextra;
+
+        if (debug_log) {
+            const auto it{leftover_prefills.find(wtxid)};
+            if (it != leftover_prefills.end()) {
+                ++redundant_prefilled_extrapool_count;
+                redundant_prefilled_extrapool_size += it->second;
+                leftover_prefills.erase(it);
+            }
+
+            // if we finished populating, keep draining extra_txn anyway
+            // just for debug accounting purposes
+            if (available_count == shorttxids.size()) continue;
+        }
+
+        uint64_t shortid = cmpctblock.GetShortID(wtxid);
         std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
             if (tx_source[idit->second] == TxSource::NONE) {
-                txn_available[idit->second] = extra_txn[i].second;
+                txn_available[idit->second] = extra;
                 tx_source[idit->second] = TxSource::EXTRA;
                 ++available_count;
             } else if (tx_source[idit->second] != TxSource::COLLIDED &&
-                       txn_available[idit->second]->GetWitnessHash() != extra_txn[i].second->GetWitnessHash()) {
+                       txn_available[idit->second]->GetWitnessHash() != extra->GetWitnessHash()) {
                 // If we find two mempool/extra txn that match the short id, just
                 // request it.
                 // This should be rare enough that the extra bandwidth doesn't matter,
@@ -190,24 +208,15 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
                 tx_source[idit->second] = TxSource::COLLIDED;
             }
         }
+
         // Though ideally we'd continue scanning for the two-txn-match-shortid case,
         // the performance win of an early exit here is too good to pass up and worth
         // the extra risk.
-        if (available_count == shorttxids.size())
-            break;
+        if (!debug_log && available_count == shorttxids.size()) break;
     }
 
 
     if (debug_log) {
-        for (const auto& [id, tx] : extra_txn) {
-            if (!tx) continue;
-            const auto it{leftover_prefills.find(id)};
-            if (it == leftover_prefills.end()) continue;
-            ++redundant_prefilled_extrapool_count;
-            redundant_prefilled_extrapool_size += it->second;
-            leftover_prefills.erase(it);
-        }
-
         Assume(txn_available.size() == tx_source.size());
         for (size_t i = 0; i < txn_available.size(); i++) {
             switch (tx_source[i]) {
