@@ -45,9 +45,10 @@ static void SetupBitcoinUtilArgs(ArgsManager &argsman)
     argsman.AddArg("-tx", "The tx (hex encoded)", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-input", "The index of the input being spent", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-spent_output", "The spent prevouts (hex encode TxOut, may be specified multiple times).", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-ipk", "The internal public key for a tapscript spend", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
 
     argsman.AddCommand("grind", "Perform proof of work on hex header string");
-    argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion", "-script_flags", "-tx", "-input", "-spent_output"});
+    argsman.AddCommand("evalscript", "Interpret a bitcoin script", {"-sigversion", "-script_flags", "-tx", "-input", "-spent_output", "-ipk"});
 
     SetupChainParamsBaseOptions(argsman);
 }
@@ -209,7 +210,7 @@ class DummySignatureChecker final : public BaseSignatureChecker
 public:
     DummySignatureChecker() = default;
     bool CheckECDSASignature(const std::vector<unsigned char>& sig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override { return sig.size() != 0; }
-    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror) const override { return sig.size() != 0; }
+    bool CheckSchnorrSignature(Span<const unsigned char> sig, KeyVersion keyversion, Span<const unsigned char> pubkey, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror) const override { return sig.size() != 0; }
     bool CheckLockTime(const CScriptNum& nLockTime) const override { return true; }
     bool CheckSequence(const CScriptNum& nSequence) const override { return true; }
 };
@@ -266,6 +267,10 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
         }
     }
 
+    if (sigversion == SigVersion::TAPSCRIPT) {
+        execdata.m_internal_key.emplace(NUMS_H);
+    }
+
     if (const auto txhex = argsman.GetArg("-tx"); txhex.has_value()) {
         const int input = argsman.GetIntArg("-input", 0);
         const auto spent_outputs_hex = argsman.GetArgs("-spent_output");
@@ -311,6 +316,15 @@ static int EvalScript(const ArgsManager& argsman, const std::vector<std::string>
         checker = std::make_unique<TransactionSignatureChecker>(txTo.get(), input, amount, txdata, MissingDataBehavior::ASSERT_FAIL);
 
         if (sigversion == SigVersion::TAPSCRIPT && input >= 0 && input_in_range) {
+            if (const auto ipkhex = argsman.GetArg("-ipk"); ipkhex.has_value()) {
+                if (!IsHex(*ipkhex) || ipkhex->size() != 64) {
+                    strPrint = strprintf("Not a valid x-only pubkey: -ipk=%s", *ipkhex);
+                    return EXIT_FAILURE;
+                }
+                auto ipkbytes = ParseHex(*ipkhex);
+                std::copy(ipkbytes.begin(), ipkbytes.end(), execdata.m_internal_key->begin());
+            }
+
             const CTxIn& txin = txTo->vin.at(input);
             execdata.m_annex_present = false;
             if (txin.scriptWitness.stack.size() <= 1) {

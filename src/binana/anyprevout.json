@@ -1,0 +1,8 @@
+{
+    "binana": [2016, 118, 0],
+    "deployment": "ANYPREVOUT",
+    "start": 1625875200,
+    "timeout": 1941408000,
+    "scriptverify": true,
+    "scriptverify_discourage": true
+}

@@ -77,6 +77,8 @@ from test_framework.script import (
     SIGHASH_NONE,
     SIGHASH_SINGLE,
     SIGHASH_ANYONECANPAY,
+    SIGHASH_ANYPREVOUT,
+    SIGHASH_ANYPREVOUTANYSCRIPT,
     SegwitV0SignatureMsg,
     TaggedHash,
     TaprootSignatureMsg,
@@ -189,6 +191,10 @@ def default_hashtype(ctx):
     else:
         return SIGHASH_ALL
 
+def default_keyver(ctx):
+    """Default expression for "keyver": 0 (bip341/bip342)"""
+    return get(ctx, "tap").keyver
+
 def default_tapleaf(ctx):
     """Default expression for "tapleaf": looking up leaf in tap[2]."""
     return get(ctx, "tap").leaves[get(ctx, "leaf")]
@@ -231,7 +237,8 @@ def default_sigmsg(ctx):
             codeseppos = get(ctx, "codeseppos")
             leaf_ver = get(ctx, "leafversion")
             script = get(ctx, "script_taproot")
-            return TaprootSignatureMsg(tx, utxos, hashtype, idx, scriptpath=True, leaf_script=script, leaf_ver=leaf_ver, codeseparator_pos=codeseppos, annex=annex)
+            keyver = get(ctx, "keyver")
+            return TaprootSignatureMsg(tx, utxos, hashtype, idx, scriptpath=True, leaf_script=script, leaf_ver=leaf_ver, codeseparator_pos=codeseppos, annex=annex, key_ver=keyver)
         else:
             return TaprootSignatureMsg(tx, utxos, hashtype, idx, scriptpath=False, annex=annex)
     elif mode == "witv0":
@@ -393,6 +400,8 @@ DEFAULT_CONTEXT = {
     "negflag": default_negflag,
     # The leaf version to include in the sighash (this does not affect the one in the control block).
     "leafversion": default_leafversion,
+    # The key version to include in the sighash.
+    "keyver": default_keyver,
     # The Merkle path to include in the control block for a script path spend.
     "merklebranch": default_merklebranch,
     # The control block to push for a taproot script path spend.
@@ -625,6 +634,14 @@ VALID_SIGHASHES_ECDSA = [
 ]
 
 VALID_SIGHASHES_TAPROOT = [SIGHASH_DEFAULT] + VALID_SIGHASHES_ECDSA
+VALID_SIGHASHES_ANYPREVOUT = [SIGHASH_DEFAULT] + VALID_SIGHASHES_ECDSA + [
+    SIGHASH_ANYPREVOUT + SIGHASH_ALL,
+    SIGHASH_ANYPREVOUT + SIGHASH_NONE,
+    SIGHASH_ANYPREVOUT + SIGHASH_SINGLE,
+    SIGHASH_ANYPREVOUTANYSCRIPT + SIGHASH_ALL,
+    SIGHASH_ANYPREVOUTANYSCRIPT + SIGHASH_NONE,
+    SIGHASH_ANYPREVOUTANYSCRIPT + SIGHASH_SINGLE,
+]
 
 VALID_SIGHASHES_TAPROOT_SINGLE = [
     SIGHASH_SINGLE,
@@ -775,41 +792,48 @@ def spenders_taproot_active():
     add_spender(spenders, "sighash/hashtype1to0_keypath", tap=tap, key=secs[0], hashtype=SIGHASH_ALL, failure={"bytes_hashtype": b''}, **ERR_SIG_SCHNORR)
     add_spender(spenders, "sighash/hashtype1to0_scriptpath", tap=tap, leaf="pk_codesep", key=secs[1], **SINGLE_SIG, hashtype=SIGHASH_ALL, failure={"bytes_hashtype": b''}, **ERR_SIG_SCHNORR)
 
-    # Test aspects of signatures with unusual lengths
-    for hashtype in [SIGHASH_DEFAULT, random.choice(VALID_SIGHASHES_TAPROOT)]:
-        scripts = [
-            ("csv", CScript([pubs[2], OP_CHECKSIGVERIFY, OP_1])),
-            ("cs_pos", CScript([pubs[2], OP_CHECKSIG])),
-            ("csa_pos", CScript([OP_0, pubs[2], OP_CHECKSIGADD, OP_1, OP_EQUAL])),
-            ("cs_neg", CScript([pubs[2], OP_CHECKSIG, OP_NOT])),
-            ("csa_neg", CScript([OP_2, pubs[2], OP_CHECKSIGADD, OP_2, OP_EQUAL]))
-        ]
-        random.shuffle(scripts)
-        tap = taproot_construct(pubs[3], scripts)
-        # Empty signatures
-        add_spender(spenders, "siglen/empty_keypath", tap=tap, key=secs[3], hashtype=hashtype, failure={"sign": b""}, **ERR_SIG_SIZE)
-        add_spender(spenders, "siglen/empty_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_CHECKSIGVERIFY)
-        add_spender(spenders, "siglen/empty_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_NO_SUCCESS)
-        add_spender(spenders, "siglen/empty_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_NO_SUCCESS)
-        add_spender(spenders, "siglen/empty_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": lambda _: random.randbytes(random.randrange(1, 63))}, **ERR_SIG_SIZE)
-        add_spender(spenders, "siglen/empty_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": lambda _: random.randbytes(random.randrange(66, 100))}, **ERR_SIG_SIZE)
-        # Appending a zero byte to signatures invalidates them
-        add_spender(spenders, "siglen/padzero_keypath", tap=tap, key=secs[3], hashtype=hashtype, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        add_spender(spenders, "siglen/padzero_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        add_spender(spenders, "siglen/padzero_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        add_spender(spenders, "siglen/padzero_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        add_spender(spenders, "siglen/padzero_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        add_spender(spenders, "siglen/padzero_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
-        # Removing the last byte from signatures invalidates them
-        add_spender(spenders, "siglen/popbyte_keypath", tap=tap, key=secs[3], hashtype=hashtype, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        add_spender(spenders, "siglen/popbyte_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        add_spender(spenders, "siglen/popbyte_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        add_spender(spenders, "siglen/popbyte_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        add_spender(spenders, "siglen/popbyte_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        add_spender(spenders, "siglen/popbyte_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
-        # Verify that an invalid signature is not allowed, not even when the CHECKSIG* is expected to fail.
-        add_spender(spenders, "siglen/invalid_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SIG_SCHNORR)
-        add_spender(spenders, "siglen/invalid_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SIG_SCHNORR)
+    def spenders_taproot_active_script_path(prefix, valid_sighashes, keyver=1, cmt=""):
+        # Test aspects of signatures with unusual lengths
+        for hashtype in [SIGHASH_DEFAULT, random.choice(valid_sighashes)]:
+            scripts = [
+                ("csv", CScript([prefix+pubs[2], OP_CHECKSIGVERIFY, OP_1])),
+                ("cs_pos", CScript([prefix+pubs[2], OP_CHECKSIG])),
+                ("csa_pos", CScript([OP_0, prefix+pubs[2], OP_CHECKSIGADD, OP_1, OP_EQUAL])),
+                ("cs_neg", CScript([prefix+pubs[2], OP_CHECKSIG, OP_NOT])),
+                ("csa_neg", CScript([OP_2, prefix+pubs[2], OP_CHECKSIGADD, OP_2, OP_EQUAL]))
+            ]
+            random.shuffle(scripts)
+            tap = taproot_construct(pubs[3], scripts, keyver=keyver)
+            # key path
+            if keyver == 0:
+                add_spender(spenders, cmt+"siglen/empty_keypath", tap=tap, key=secs[3], hashtype=hashtype, failure={"sign": b""}, **ERR_SIG_SIZE)
+                add_spender(spenders, cmt+"siglen/padzero_keypath", tap=tap, key=secs[3], hashtype=hashtype, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+                add_spender(spenders, cmt+"siglen/popbyte_keypath", tap=tap, key=secs[3], hashtype=hashtype, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+
+            # Empty signatures
+            add_spender(spenders, cmt+"siglen/empty_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_CHECKSIGVERIFY)
+            add_spender(spenders, cmt+"siglen/empty_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_NO_SUCCESS)
+            add_spender(spenders, cmt+"siglen/empty_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, failure={"sign": b""}, **ERR_NO_SUCCESS)
+            add_spender(spenders, cmt+"siglen/empty_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": lambda _: random.randbytes(random.randrange(1, 63))}, **ERR_SIG_SIZE)
+            add_spender(spenders, cmt+"siglen/empty_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": lambda _: random.randbytes(random.randrange(66, 100))}, **ERR_SIG_SIZE)
+            # Appending a zero byte to signatures invalidates them
+            add_spender(spenders, cmt+"siglen/padzero_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+            add_spender(spenders, cmt+"siglen/padzero_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+            add_spender(spenders, cmt+"siglen/padzero_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+            add_spender(spenders, cmt+"siglen/padzero_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+            add_spender(spenders, cmt+"siglen/padzero_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_ADD_ZERO, **(ERR_SIG_HASHTYPE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SIZE))
+            # Removing the last byte from signatures invalidates them
+            add_spender(spenders, cmt+"siglen/popbyte_csv", tap=tap, key=secs[2], leaf="csv", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+            add_spender(spenders, cmt+"siglen/popbyte_cs", tap=tap, key=secs[2], leaf="cs_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+            add_spender(spenders, cmt+"siglen/popbyte_csa", tap=tap, key=secs[2], leaf="csa_pos", hashtype=hashtype, **SINGLE_SIG, **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+            add_spender(spenders, cmt+"siglen/popbyte_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+            add_spender(spenders, cmt+"siglen/popbyte_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", **SIG_POP_BYTE, **(ERR_SIG_SIZE if hashtype == SIGHASH_DEFAULT else ERR_SIG_SCHNORR))
+            # Verify that an invalid signature is not allowed, not even when the CHECKSIG* is expected to fail.
+            add_spender(spenders, cmt+"siglen/invalid_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SIG_SCHNORR)
+            add_spender(spenders, cmt+"siglen/invalid_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SIG_SCHNORR)
+
+    spenders_taproot_active_script_path(b'', VALID_SIGHASHES_TAPROOT, keyver=0)
+    spenders_taproot_active_script_path(b'\x01', VALID_SIGHASHES_ANYPREVOUT, keyver=1, cmt="apo/")
 
     # == Test that BIP341 spending only applies to witness version 1, program length 32, no P2SH ==
 
@@ -951,11 +975,11 @@ def spenders_taproot_active():
         # 15) OP_CHECKSIGADD with empty key that needs invalid signature
         ("t15", CScript([pubs[1], OP_CHECKSIGVERIFY, OP_0, OP_0, OP_CHECKSIGADD, OP_NOT])),
         # 16) OP_CHECKSIG with unknown pubkey type
-        ("t16", CScript([OP_1, OP_CHECKSIG])),
+        ("t16", CScript([OP_2, OP_CHECKSIG])),
         # 17) OP_CHECKSIGADD with unknown pubkey type
-        ("t17", CScript([OP_0, OP_1, OP_CHECKSIGADD])),
+        ("t17", CScript([OP_0, OP_2, OP_CHECKSIGADD])),
         # 18) OP_CHECKSIGVERIFY with unknown pubkey type
-        ("t18", CScript([OP_1, OP_CHECKSIGVERIFY, OP_1])),
+        ("t18", CScript([OP_2, OP_CHECKSIGVERIFY, OP_1])),
         # 19) script longer than 10000 bytes and over 201 non-push opcodes
         ("t19", CScript([OP_0, OP_0, OP_2DROP] * 10001 + [pubs[1], OP_CHECKSIG])),
         # 20) OP_CHECKSIGVERIFY with empty key
@@ -1015,11 +1039,11 @@ def spenders_taproot_active():
     add_spender(spenders, "tapscript/minimalnotif", leaf="t6", **common, inputs=[getter("sign"), b'\x01'], failure={"inputs": [getter("sign"), b'\x03']}, **ERR_MINIMALIF)
     add_spender(spenders, "tapscript/minimalif", leaf="t5", **common, inputs=[getter("sign"), b'\x01'], failure={"inputs": [getter("sign"), b'\x0001']}, **ERR_MINIMALIF)
     add_spender(spenders, "tapscript/minimalnotif", leaf="t6", **common, inputs=[getter("sign"), b'\x01'], failure={"inputs": [getter("sign"), b'\x0100']}, **ERR_MINIMALIF)
-    # Test that 1-byte public keys (which are unknown) are acceptable but nonstandard with unrelated signatures, but 0-byte public keys are not valid.
+    # Test that 1-byte OP_2 public keys (which are unknown) are acceptable but nonstandard with unrelated signatures, but 0-byte public keys are not valid.
     add_spender(spenders, "tapscript/unkpk/checksig", leaf="t16", standard=False, **common, **SINGLE_SIG, failure={"leaf": "t7"}, **ERR_UNKNOWN_PUBKEY)
     add_spender(spenders, "tapscript/unkpk/checksigadd", leaf="t17", standard=False, **common, **SINGLE_SIG, failure={"leaf": "t10"}, **ERR_UNKNOWN_PUBKEY)
     add_spender(spenders, "tapscript/unkpk/checksigverify", leaf="t18", standard=False, **common, **SINGLE_SIG, failure={"leaf": "t8"}, **ERR_UNKNOWN_PUBKEY)
-    # Test that 33-byte public keys (which are unknown) are acceptable but nonstandard with valid signatures, but normal pubkeys are not valid in that case.
+    # Test that 33-byte public keys beginning with 0x02 or 0x03 (which are unknown) are acceptable but nonstandard with valid signatures, but normal pubkeys are not valid in that case.
     add_spender(spenders, "tapscript/oldpk/checksig", leaf="t30", standard=False, **common, **SINGLE_SIG, sighash=bitflipper(default_sighash), failure={"leaf": "t1"}, **ERR_SIG_SCHNORR)
     add_spender(spenders, "tapscript/oldpk/checksigadd", leaf="t31", standard=False, **common, **SINGLE_SIG, sighash=bitflipper(default_sighash), failure={"leaf": "t2"}, **ERR_SIG_SCHNORR)
     add_spender(spenders, "tapscript/oldpk/checksigverify", leaf="t32", standard=False, **common, **SINGLE_SIG, sighash=bitflipper(default_sighash), failure={"leaf": "t28"}, **ERR_SIG_SCHNORR)
@@ -1234,11 +1258,14 @@ def spenders_taproot_nonstandard():
 LEGACY_FLAGS = "P2SH,DERSIG,CHECKLOCKTIMEVERIFY,CHECKSEQUENCEVERIFY,WITNESS,NULLDUMMY"
 # Consensus validation flags to use in dumps for all other tests.
 TAPROOT_FLAGS = "P2SH,DERSIG,CHECKLOCKTIMEVERIFY,CHECKSEQUENCEVERIFY,WITNESS,NULLDUMMY,TAPROOT"
+APO_FLAGS = "P2SH,DERSIG,CHECKLOCKTIMEVERIFY,CHECKSEQUENCEVERIFY,WITNESS,NULLDUMMY,TAPROOT,ANYPREVOUT"
 
 def dump_json_test(tx, input_utxos, idx, success, failure):
     spender = input_utxos[idx].spender
     # Determine flags to dump
     flags = LEGACY_FLAGS if spender.comment.startswith("legacy/") or spender.comment.startswith("inactive/") else TAPROOT_FLAGS
+    if spender.comment.startswith("apo/"):
+        flags = APO_FLAGS
 
     fields = [
         ("tx", tx.serialize().hex()),
