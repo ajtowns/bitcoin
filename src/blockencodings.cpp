@@ -45,7 +45,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const Wtxid& wtxid) const {
     return SipHashUint256(shorttxidk0, shorttxidk1, wtxid) & 0xffffffffffffL;
 }
 
-ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, ExtraTransactions&& extra_txn) {
+ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, ExtraTransactions&& extra_txn) {
     LogDebug(BCLog::CMPCTBLOCK, "Initializing PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
         return READ_STATUS_INVALID;
@@ -105,8 +105,8 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
 
     std::vector<bool> have_txn(txn_available.size());
     {
-    LOCK(pool->cs);
-    for (const auto& tx : pool->txns_randomized) {
+    LOCK(pool.cs);
+    for (const auto& tx : pool.txns_randomized) {
         uint64_t shortid = cmpctblock.GetShortID(tx->GetWitnessHash());
         std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
@@ -166,6 +166,18 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     LogDebug(BCLog::CMPCTBLOCK, "Initialized PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
 
     return READ_STATUS_OK;
+}
+
+size_t PartiallyDownloadedBlock::Weight() const
+{
+    if (header.IsNull()) return 0;
+
+    size_t weight = 0;
+    for (const auto& tx : txn_available) {
+        if (tx == nullptr) continue;
+        weight += GetTransactionWeight(*tx);
+    }
+    return weight;
 }
 
 bool PartiallyDownloadedBlock::IsTxAvailable(size_t index) const

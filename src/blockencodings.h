@@ -157,7 +157,6 @@ class PartiallyDownloadedBlock {
 protected:
     std::vector<CTransactionRef> txn_available;
     size_t prefilled_count = 0, mempool_count = 0, extra_count = 0;
-    const CTxMemPool* pool;
 public:
     CBlockHeader header;
 
@@ -165,17 +164,26 @@ public:
     using IsBlockMutatedFn = std::function<bool(const CBlock&, bool)>;
     IsBlockMutatedFn m_check_block_mutated_mock{nullptr};
 
-    explicit PartiallyDownloadedBlock(CTxMemPool* poolIn) : pool(poolIn) {}
+    PartiallyDownloadedBlock() = default;
+    explicit PartiallyDownloadedBlock(const CTxMemPool*) = delete;
+
+    void reset()
+    {
+        header.SetNull();
+        txn_available.clear();
+        prefilled_count = mempool_count = extra_count = 0;
+    }
 
     // extra_txn is a list of extra orphan/conflicted/etc transactions to look at
-    ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, ExtraTransactions&& extra_txn);
+    ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, ExtraTransactions&& extra_txn);
 
-    ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const std::vector<CTransactionRef>& extra_txn)
+    ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, const std::vector<CTransactionRef>& extra_txn)
     {
-        return InitData(cmpctblock, VectorExtraTransactions(extra_txn));
+        return InitData(cmpctblock, pool, VectorExtraTransactions(extra_txn));
     }
 
 
+    size_t Weight() const;
     bool IsTxAvailable(size_t index) const;
     // segwit_active enforces witness mutation checks just before reporting a healthy status
     ReadStatus FillBlock(CBlock& block, const std::vector<CTransactionRef>& vtx_missing, bool segwit_active);
