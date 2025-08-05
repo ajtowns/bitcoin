@@ -264,6 +264,11 @@ inline constexpr const char* WTXIDRELAY{"wtxidrelay"};
  * txreconciliation, as described by BIP 330.
  */
 inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
+
+inline constexpr const char* SENDTEMPLATE{"sendtemplate"};
+inline constexpr const char* GETTEMPLATE{"gettemplate"};
+inline constexpr const char* TEMPLATE{"template"};
+
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */

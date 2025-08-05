@@ -14,6 +14,7 @@
 #include <chainparams.h>
 #include <common/bloom.h>
 #include <consensus/amount.h>
+#include <consensus/merkle.h>
 #include <consensus/params.h>
 #include <consensus/validation.h>
 #include <core_memusage.h>
@@ -32,6 +33,7 @@
 #include <netmessagemaker.h>
 #include <node/blockstorage.h>
 #include <node/connection_types.h>
+#include <node/miner.h>
 #include <node/protocol_version.h>
 #include <node/timeoffsets.h>
 #include <node/txdownloadman.h>
@@ -205,6 +207,132 @@ struct QueuedBlock {
     /** Optional, used for CMPCTBLOCK downloads */
     std::unique_ptr<PartiallyDownloadedBlock> partialBlock;
 };
+
+class PartiallyDownloadedTemplate : public PartiallyDownloadedBlock
+{
+private:
+    static bool check_template(const CBlock& block, bool)
+    {
+        bool mutated;
+        uint256 merkle_root = BlockMerkleRoot(block, &mutated);
+        return (block.hashMerkleRoot == merkle_root && !mutated);
+    }
+
+public:
+    PartiallyDownloadedTemplate()
+    {
+        m_check_block_mutated_mock = check_template;
+    }
+};
+
+struct PeerTx
+{
+    CTransactionRef tx;
+    uint32_t num_peers{0};
+    bool in_mempool{false};
+    NodeClock::time_point next_mempool_check{NodeClock::time_point::min()};
+       // =min() -> unchecked
+       // =max() -> non-standard/invalid, never retry
+};
+using PeerTxSet = std::map<Wtxid, PeerTx>;
+using PeerTxRefVec = std::vector<PeerTxSet::iterator>;
+struct PeerTemplate
+{
+    PeerTxRefVec templatetxs;
+    size_t last_validated_idx{0};
+};
+
+class TemplateManager
+{
+public:
+    struct Template {
+        uint256 hash;
+        PeerTxRefVec txs;
+        CBlockHeaderAndShortTxIDs compact;
+        uint64_t inv_sequence;
+        // don't relay this template to peers whose m_last_sequence isn't at least this value
+    };
+    std::deque<Template> my_template;
+    NodeClock::time_point next_template_update{NodeClock::time_point::min()};
+
+    PeerTxSet peer_txs;
+    std::map<int, PeerTemplate> peer_template;
+
+    void DiscardTxs(PeerTxRefVec& txrv)
+    {
+        for (auto& it : txrv) {
+            if (--it->second.num_peers == 0) {
+                peer_txs.erase(it);
+            }
+        }
+        txrv.clear();
+    }
+
+    PeerTxRefVec AddTxs(const std::vector<CTransactionRef>& txs)
+    {
+        PeerTxRefVec result;
+        result.reserve(txs.size());
+        for (auto& tx : txs) {
+            const auto& wtxid = tx->GetWitnessHash();
+            auto [it, inserted] = peer_txs.try_emplace(wtxid, tx);
+            ++it->second.num_peers;
+            result.emplace_back(it);
+        }
+        return result;
+    }
+
+    void DUMP() const
+    {
+        LogDebug(BCLog::SHARETMPL, "TemplateMan: %d in my queue, %d peer templates, %d txs\n", my_template.size(), peer_template.size(), peer_txs.size());
+        LogTrace(BCLog::SHARETMPL, "store:\n");
+        int i = 42;
+        for (const auto& [wtxid, ptx] : peer_txs) {
+            if (--i <= 0) break;
+            LogTrace(BCLog::SHARETMPL, "    %p txid %s wtxid %s\n", &wtxid, ptx.tx->GetHash().ToString(), wtxid.ToString());
+        }
+        int j = 42;
+        for (const auto& [peer, txset] : peer_template) {
+            LogTrace(BCLog::SHARETMPL, "peer %d:\n", peer);
+            for (const auto& ref : txset.templatetxs) {
+                if (--j <= 0) break;
+                const auto& [wtxid, ptx] = *ref;
+                LogTrace(BCLog::SHARETMPL, "    %p txid %%s wtxid %%s\n", &wtxid); // ptx.tx->GetHash().ToString(), wtxid.ToString());
+            }
+        }
+    }
+
+    class ExtraTxns : public ExtraTransactions {
+    private:
+        const TemplateManager& tman;
+        const std::vector<CTransactionRef>& vec;
+        PeerTxSet::const_iterator it;
+        size_t vec_idx{0};
+
+    public:
+        ExtraTxns(const TemplateManager& tman, const std::vector<CTransactionRef>& vec) : tman{tman}, vec{vec}, it{tman.peer_txs.begin()} { }
+
+        CTransactionRef next() override
+        {
+            if (it != tman.peer_txs.end()) {
+                return (it++)->second.tx;
+            }
+            while (vec_idx < vec.size()) {
+                auto r = vec[vec_idx++];
+                if (r != nullptr) return r;
+            }
+            return nullptr;
+        }
+    };
+
+    ExtraTxns GetExtraTxns(const std::vector<CTransactionRef>& vec) const
+    {
+        return ExtraTxns(*this, vec);
+    }
+};
+
+static constexpr std::chrono::microseconds TEMPLATE_UPDATE_INTERVAL{30s};
+static constexpr std::chrono::microseconds TEMPLATE_REQUEST_INTERVAL{120s};
+static constexpr size_t TEMPLATE_HISTORY_COUNT{10};
 
 /**
  * Data structure for an individual peer. This struct is not protected by
@@ -411,6 +539,9 @@ struct Peer {
     /** Time offset computed during the version handshake based on the
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
+
+    NodeClock::time_point m_next_template_request GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
+    PartiallyDownloadedTemplate m_partial_template GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
@@ -1073,6 +1204,19 @@ private:
     void PushAddress(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     void LogBlockHeader(const CBlockIndex& index, const CNode& peer, bool via_compact_block);
+
+    TemplateManager m_template_man GUARDED_BY(g_msgproc_mutex);
+    bool ProcessTemplateManActions(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_peer_mutex, !m_tx_download_mutex);
+    bool CheckTemplateTx(Peer& peer, PeerTx& peertx, NodeClock::time_point now) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex);
+    void ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+    void SendTemplateTransactions(CNode& pfrom, Peer& peer, const TemplateManager::Template& my_template, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+    void MaybeSendGetTemplate(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+
+    TemplateManager::ExtraTxns GetExtraTxns() const
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex)
+    {
+        return m_template_man.GetExtraTxns(vExtraTxnForCompact);
+    }
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const
@@ -3534,6 +3678,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (greatest_common_version >= WTXID_RELAY_VERSION) {
             MakeAndPushMessage(pfrom, NetMsgType::WTXIDRELAY);
+            MakeAndPushMessage(pfrom, NetMsgType::SENDTEMPLATE);
         }
 
         // Signal ADDRv2 support (BIP155).
@@ -3754,6 +3899,18 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         // save whether peer selects us as BIP152 high-bandwidth peer
         // (receiving sendcmpct(1) signals high-bandwidth, sendcmpct(0) low-bandwidth)
         pfrom.m_bip152_highbandwidth_from = sendcmpct_hb;
+        return;
+    }
+
+    if (msg_type == NetMsgType::SENDTEMPLATE) {
+        if (pfrom.fSuccessfullyConnected) {
+            LogDebug(BCLog::NET, "sendtemplate received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        }
+        if (pfrom.IsManualOrFullOutboundConn()) {
+            peer->m_next_template_request = NodeClock::now();
+        }
         return;
     }
 
@@ -4147,6 +4304,14 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             return;
         }
 
+        for (const auto& tmp : m_template_man.my_template) {
+            LogDebug(BCLog::SHARETMPL, " checking req template %s against template %s\n", req.blockhash.ToString(), tmp.hash.ToString());
+            if (tmp.hash == req.blockhash) {
+                SendTemplateTransactions(pfrom, *peer, tmp, req);
+                return;
+            }
+        }
+
         FlatFilePos block_pos{};
         {
             LOCK(cs_main);
@@ -4338,6 +4503,66 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         return;
     }
 
+    if (msg_type == NetMsgType::GETTEMPLATE) {
+        auto tx_relay = peer->GetTxRelay();
+        if (tx_relay == nullptr) return;
+
+        for (const auto& tmp : m_template_man.my_template) {
+            if (tmp.inv_sequence <= tx_relay->m_last_inv_sequence) {
+                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, tmp.compact);
+                break;
+            }
+        }
+        return;
+    }
+
+    if (msg_type == NetMsgType::TEMPLATE) {
+        if (peer->m_next_template_request == NodeClock::time_point::max()) return;
+        auto tx_relay = peer->GetTxRelay();
+        if (tx_relay == nullptr) return;
+
+        // XXX should also ignore unrequested templates?
+
+        CBlockHeaderAndShortTxIDs cmpctblock;
+        vRecv >> cmpctblock;
+
+        const auto blockhash = cmpctblock.header.GetHash();
+
+        PartiallyDownloadedBlock& partialBlock = peer->m_partial_template;
+        partialBlock.reset();
+        ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
+        if (status == READ_STATUS_INVALID) {
+            Misbehaving(*peer, "invalid compact template");
+            partialBlock.reset();
+            return;
+        } else if (status == READ_STATUS_FAILED) {
+            LogDebug(BCLog::SHARETMPL, "template %s failed to decode peer=%d\n", blockhash.ToString(), peer->m_id);
+            partialBlock.reset();
+            return;
+        } else if (partialBlock.Weight() > MAX_BLOCK_WEIGHT) {
+            LogDebug(BCLog::SHARETMPL, "ignoring oversized template %s peer=%d\n", blockhash.ToString(), peer->m_id);
+            partialBlock.reset();
+            return;
+        }
+
+        BlockTransactionsRequest req;
+        for (size_t i = 0; i < cmpctblock.BlockTxCount(); i++) {
+            if (!partialBlock.IsTxAvailable(i))
+                req.indexes.push_back(i);
+        }
+        if (req.indexes.empty()) {
+            BlockTransactions txn;
+            txn.blockhash = blockhash;
+            ProcessCompactTemplateTxns(pfrom, *peer, txn);
+            partialBlock.reset();
+        } else {
+            // XXX should defer this until next INV to avoid leaking mempool info early
+            req.blockhash = blockhash;
+            MakeAndPushMessage(pfrom, NetMsgType::GETBLOCKTXN, req);
+        }
+        return;
+    }
+
     if (msg_type == NetMsgType::CMPCTBLOCK)
     {
         // Ignore cmpctblock received while importing
@@ -4463,7 +4688,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 }
 
                 PartiallyDownloadedBlock& partialBlock = *(*queuedBlockIt)->partialBlock;
-                ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
                 if (status == READ_STATUS_INVALID) {
                     RemoveBlockRequest(pindex->GetBlockHash(), pfrom.GetId()); // Reset in-flight state in case Misbehaving does not result in a disconnect
                     Misbehaving(*peer, "invalid compact block");
@@ -4514,7 +4739,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 // Optimistically try to reconstruct anyway since we might be
                 // able to without any round trips.
                 PartiallyDownloadedBlock tempBlock;
-                ReadStatus status = tempBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = tempBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
                 if (status != READ_STATUS_OK) {
                     // TODO: don't ignore failures
                     return;
@@ -4597,6 +4822,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         BlockTransactions resp;
         vRecv >> resp;
 
+        if (!resp.blockhash.IsNull() && resp.blockhash == peer->m_partial_template.header.GetHash()) {
+            ProcessCompactTemplateTxns(pfrom, *peer, resp);
+            return;
+        }
         return ProcessCompactBlockTxns(pfrom, *peer, resp);
     }
 
@@ -4988,6 +5217,183 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
+
+void PeerManagerImpl::MaybeSendGetTemplate(CNode& node, Peer& peer)
+{
+    if (m_template_man.next_template_update == NodeClock::time_point::min()) return;
+
+    auto now = NodeClock::now();
+    if (now >= peer.m_next_template_request) {
+        MakeAndPushMessage(node, NetMsgType::GETTEMPLATE);
+        peer.m_next_template_request = now + TEMPLATE_REQUEST_INTERVAL;
+    }
+}
+
+void PeerManagerImpl::SendTemplateTransactions(CNode& pfrom, Peer& peer, const TemplateManager::Template& my_template, const BlockTransactionsRequest& req)
+{
+    BlockTransactions resp(req);
+    unsigned int tx_requested_size = 0;
+    for (size_t i = 0; i < req.indexes.size(); i++) {
+        if (req.indexes[i] >= my_template.txs.size()) {
+            Misbehaving(peer, "getblocktxn with out-of-bounds tx indices");
+            return;
+        }
+        resp.txn[i] = my_template.txs[req.indexes[i]]->second.tx;
+        tx_requested_size += resp.txn[i]->GetTotalSize();
+    }
+
+    LogDebug(BCLog::SHARETMPL, "Peer %d sent us a GETBLOCKTXN for template %s, sending a BLOCKTXN with %u txns. (%u bytes)\n", pfrom.GetId(), my_template.hash.ToString(), resp.txn.size(), tx_requested_size);
+    MakeAndPushMessage(pfrom, NetMsgType::BLOCKTXN, resp);
+}
+
+bool PeerManagerImpl::CheckTemplateTx(Peer& peer, PeerTx& peertx, NodeClock::time_point now)
+{
+    const Wtxid wtxid = peertx.tx->GetWitnessHash();
+
+    if (m_mempool.exists(wtxid)) {
+        peertx.in_mempool = true;
+        peertx.next_mempool_check = now + 120s;
+        return false;
+    }
+
+    LOCK(::cs_main);
+    const auto result = m_chainman.ProcessTransaction(peertx.tx);
+    const auto& state = result.m_state;
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        LOCK(m_tx_download_mutex);
+        ProcessValidTx(peer.m_id, peertx.tx, result.m_replaced_transactions);
+        peertx.in_mempool = true;
+        peertx.next_mempool_check = now + 120s;
+        return true;
+    }
+
+    peertx.in_mempool = false;
+    peertx.next_mempool_check = NodeClock::time_point::max();
+    if (state.IsInvalid()) {
+        switch (state.GetResult()) {
+        case TxValidationResult::TX_NO_MEMPOOL:
+        case TxValidationResult::TX_UNKNOWN:
+            // impossible?
+            [[fallthrough]];
+        case TxValidationResult::TX_RESULT_UNSET:
+        case TxValidationResult::TX_CONSENSUS:
+        case TxValidationResult::TX_WITNESS_STRIPPED:
+            // invalid, whoopsy
+            [[fallthrough]];
+        case TxValidationResult::TX_MISSING_INPUTS:
+            // maybe needed to be processed as a package with parents
+            [[fallthrough]];
+        case TxValidationResult::TX_INPUTS_NOT_STANDARD:
+        case TxValidationResult::TX_NOT_STANDARD:
+        case TxValidationResult::TX_WITNESS_MUTATED: // non-standard witness
+        case TxValidationResult::TX_MEMPOOL_POLICY:
+            // non-standard, not worth retrying
+            peertx.next_mempool_check = NodeClock::time_point::max();
+            break;
+        case TxValidationResult::TX_PREMATURE_SPEND:
+            // invalid, but eventually worth retrying. don't rush.
+            peertx.next_mempool_check = now + 600s;
+            break;
+        case TxValidationResult::TX_CONFLICT:
+        case TxValidationResult::TX_RECONSIDERABLE:
+            peertx.next_mempool_check = now + 120s;
+            break;
+        }
+    }
+
+    return true;
+}
+
+bool PeerManagerImpl::ProcessTemplateManActions(Peer& peer)
+{
+    auto now = NodeClock::now();
+
+    if (m_template_man.next_template_update == NodeClock::time_point::min()) {
+        if (m_chainman.IsInitialBlockDownload() || !m_mempool.GetLoadTried()) {
+             return false;
+        } else {
+             m_template_man.next_template_update = now;
+        }
+    }
+
+    // update templates
+    if (now >= m_template_man.next_template_update) {
+        m_template_man.next_template_update = now + TEMPLATE_UPDATE_INTERVAL;
+
+        auto& my_template = m_template_man.my_template;
+        while (my_template.size() >= TEMPLATE_HISTORY_COUNT) {
+            m_template_man.DiscardTxs(my_template.back().txs);
+            my_template.pop_back();
+        }
+
+        const node::BlockAssembler::Options assemble_options{
+            .nBlockMaxWeight=MAX_BLOCK_WEIGHT,
+            .blockMinFeeRate=CFeeRate(0),
+            .test_block_validity=false,
+            .print_modified_fee=false
+        };
+        node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options};
+        auto& new_template = my_template.emplace_front();
+
+        auto block_template = assembler.CreateNewBlock();
+        const auto& block = block_template->block;
+        new_template.hash = block.GetHash();
+        new_template.compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
+        new_template.txs = m_template_man.AddTxs(block.vtx);
+        new_template.inv_sequence = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
+
+        LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d txs)\n", new_template.hash.ToString(), new_template.txs.size());
+    }
+
+    auto id_peer_tmp = m_template_man.peer_template.find(peer.m_id);
+    if (id_peer_tmp == m_template_man.peer_template.end()) return false;
+
+    auto& [_, peer_tmp] = *id_peer_tmp;
+
+    while (peer_tmp.last_validated_idx < peer_tmp.templatetxs.size()) {
+        LogTrace(BCLog::SHARETMPL, "Processed %d/%d template txs for peer=%d\n",
+            peer_tmp.last_validated_idx, peer_tmp.templatetxs.size(), peer.m_id);
+
+        auto& [_, peertx] = *peer_tmp.templatetxs[peer_tmp.last_validated_idx++];
+        if (now >= peertx.next_mempool_check && CheckTemplateTx(peer, peertx, now)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions)
+{
+    PartiallyDownloadedBlock& partialBlock = peer.m_partial_template;
+
+    /* we don't have a real coinbase so there's no witness commitment to check */
+    CBlock block;
+    ReadStatus status = partialBlock.FillBlock(block, block_transactions.txn, /*segwit_active=*/false);
+
+    if (status == READ_STATUS_INVALID) {
+        Misbehaving(peer, "invalid compact template/non-matching block transactions");
+        partialBlock.reset();
+    } else if (status == READ_STATUS_FAILED) {
+        LogDebug(BCLog::SHARETMPL, "Peer %d sent us %d transactions for compact template %s but it failed to reconstruct\n", pfrom.GetId(), block_transactions.txn.size(), block_transactions.blockhash.ToString());
+        partialBlock.reset();
+    } else {
+        // success!
+        LogDebug(BCLog::SHARETMPL, "Peer %d sent us compact template %s with %d transactions\n", pfrom.GetId(), block_transactions.blockhash.ToString(), block_transactions.txn.size());
+        auto [it, inserted] = m_template_man.peer_template.try_emplace(pfrom.GetId());
+        auto& peer_templatetxs = it->second.templatetxs;
+        it->second.last_validated_idx = 0;
+
+        std::vector<PeerTxSet::iterator> old_templatetxs = m_template_man.AddTxs(block.vtx);
+        std::swap(old_templatetxs, peer_templatetxs);
+        m_template_man.DiscardTxs(old_templatetxs);
+
+        m_template_man.DUMP();
+    }
+    partialBlock.reset();
+}
+
 bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)
 {
     AssertLockNotHeld(m_tx_download_mutex);
@@ -4995,6 +5401,8 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
 
     PeerRef peer = GetPeerRef(pfrom->GetId());
     if (peer == nullptr) return false;
+
+    if (ProcessTemplateManActions(*peer)) return true;
 
     // For outbound connections, ensure that the initial VERSION message
     // has been sent first before processing any incoming messages
@@ -5967,5 +6375,8 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             MakeAndPushMessage(*pto, NetMsgType::GETDATA, vGetData);
     } // release cs_main
     MaybeSendFeefilter(*pto, *peer, current_time);
+
+    MaybeSendGetTemplate(*pto, *peer);
+
     return true;
 }
