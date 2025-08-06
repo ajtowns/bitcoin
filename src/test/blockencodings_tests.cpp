@@ -81,8 +81,8 @@ BOOST_AUTO_TEST_CASE(SimpleRoundTripTest)
         CBlockHeaderAndShortTxIDs shortIDs2;
         stream >> shortIDs2;
 
-        PartiallyDownloadedBlock partialBlock(&pool);
-        BOOST_CHECK(partialBlock.InitData(shortIDs2, empty_extra_txn) == READ_STATUS_OK);
+        PartiallyDownloadedBlock partialBlock;
+        BOOST_CHECK(partialBlock.InitData(shortIDs2, pool, empty_extra_txn) == READ_STATUS_OK);
         BOOST_CHECK( partialBlock.IsTxAvailable(0));
         BOOST_CHECK(!partialBlock.IsTxAvailable(1));
         BOOST_CHECK( partialBlock.IsTxAvailable(2));
@@ -179,8 +179,8 @@ BOOST_AUTO_TEST_CASE(NonCoinbasePreforwardRTTest)
         CBlockHeaderAndShortTxIDs shortIDs2;
         stream >> shortIDs2;
 
-        PartiallyDownloadedBlock partialBlock(&pool);
-        BOOST_CHECK(partialBlock.InitData(shortIDs2, empty_extra_txn) == READ_STATUS_OK);
+        PartiallyDownloadedBlock partialBlock;
+        BOOST_CHECK(partialBlock.InitData(shortIDs2, pool, empty_extra_txn) == READ_STATUS_OK);
         BOOST_CHECK(!partialBlock.IsTxAvailable(0));
         BOOST_CHECK( partialBlock.IsTxAvailable(1));
         BOOST_CHECK( partialBlock.IsTxAvailable(2));
@@ -250,8 +250,8 @@ BOOST_AUTO_TEST_CASE(SufficientPreforwardRTTest)
         CBlockHeaderAndShortTxIDs shortIDs2;
         stream >> shortIDs2;
 
-        PartiallyDownloadedBlock partialBlock(&pool);
-        BOOST_CHECK(partialBlock.InitData(shortIDs2, empty_extra_txn) == READ_STATUS_OK);
+        PartiallyDownloadedBlock partialBlock;
+        BOOST_CHECK(partialBlock.InitData(shortIDs2, pool, empty_extra_txn) == READ_STATUS_OK);
         BOOST_CHECK( partialBlock.IsTxAvailable(0));
         BOOST_CHECK( partialBlock.IsTxAvailable(1));
         BOOST_CHECK( partialBlock.IsTxAvailable(2));
@@ -302,8 +302,8 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest)
         CBlockHeaderAndShortTxIDs shortIDs2;
         stream >> shortIDs2;
 
-        PartiallyDownloadedBlock partialBlock(&pool);
-        BOOST_CHECK(partialBlock.InitData(shortIDs2, empty_extra_txn) == READ_STATUS_OK);
+        PartiallyDownloadedBlock partialBlock;
+        BOOST_CHECK(partialBlock.InitData(shortIDs2, pool, empty_extra_txn) == READ_STATUS_OK);
         BOOST_CHECK(partialBlock.IsTxAvailable(0));
 
         CBlock block2;
@@ -348,10 +348,10 @@ BOOST_AUTO_TEST_CASE(ReceiveWithExtraTransactions) {
 
     {
         const CBlockHeaderAndShortTxIDs cmpctblock{block, rand_ctx.rand64()};
-        PartiallyDownloadedBlock partial_block(&pool);
-        PartiallyDownloadedBlock partial_block_with_extra(&pool);
+        PartiallyDownloadedBlock partial_block;
+        PartiallyDownloadedBlock partial_block_with_extra;
 
-        BOOST_CHECK(partial_block.InitData(cmpctblock, extra_txn) == READ_STATUS_OK);
+        BOOST_CHECK(partial_block.InitData(cmpctblock, pool, extra_txn) == READ_STATUS_OK);
         BOOST_CHECK( partial_block.IsTxAvailable(0));
         BOOST_CHECK(!partial_block.IsTxAvailable(1));
         BOOST_CHECK( partial_block.IsTxAvailable(2));
@@ -361,7 +361,7 @@ BOOST_AUTO_TEST_CASE(ReceiveWithExtraTransactions) {
         // and a tx from the block that's not in the mempool:
         extra_txn[1] = {block.vtx[1]->GetWitnessHash(), block.vtx[1]};
 
-        BOOST_CHECK(partial_block_with_extra.InitData(cmpctblock, extra_txn) == READ_STATUS_OK);
+        BOOST_CHECK(partial_block_with_extra.InitData(cmpctblock, pool, extra_txn) == READ_STATUS_OK);
         BOOST_CHECK(partial_block_with_extra.IsTxAvailable(0));
         // This transaction is now available via extra_txn:
         BOOST_CHECK(partial_block_with_extra.IsTxAvailable(1));
@@ -369,8 +369,8 @@ BOOST_AUTO_TEST_CASE(ReceiveWithExtraTransactions) {
 
         // Simulate a mempool collision after finding an unrelated extra transaction.
         extra_txn[2] = {block.vtx[2]->GetWitnessHash(), non_block_tx};
-        TestPartiallyDownloadedBlock partial_block_with_extra_collision{&pool};
-        BOOST_CHECK_EQUAL(partial_block_with_extra_collision.InitData(cmpctblock, extra_txn), READ_STATUS_OK);
+        TestPartiallyDownloadedBlock partial_block_with_extra_collision;
+        BOOST_CHECK_EQUAL(partial_block_with_extra_collision.InitData(cmpctblock, pool, extra_txn), READ_STATUS_OK);
         BOOST_CHECK(partial_block_with_extra_collision.IsTxAvailable(1));
         BOOST_CHECK(!partial_block_with_extra_collision.IsTxAvailable(2));
         BOOST_CHECK_EQUAL(partial_block_with_extra_collision.GetMempoolCount(), 1U);
@@ -378,8 +378,8 @@ BOOST_AUTO_TEST_CASE(ReceiveWithExtraTransactions) {
 
         // Now also collide the extra-sourced slot: both counters decrement exactly once.
         extra_txn[3] = {block.vtx[1]->GetWitnessHash(), non_block_tx};
-        TestPartiallyDownloadedBlock partial_block_with_extra_source_collision{&pool};
-        BOOST_CHECK_EQUAL(partial_block_with_extra_source_collision.InitData(cmpctblock, extra_txn), READ_STATUS_OK);
+        TestPartiallyDownloadedBlock partial_block_with_extra_source_collision;
+        BOOST_CHECK_EQUAL(partial_block_with_extra_source_collision.InitData(cmpctblock, pool, extra_txn), READ_STATUS_OK);
         BOOST_CHECK(!partial_block_with_extra_source_collision.IsTxAvailable(1));
         BOOST_CHECK(!partial_block_with_extra_source_collision.IsTxAvailable(2));
         BOOST_CHECK_EQUAL(partial_block_with_extra_source_collision.GetMempoolCount(), 0U);
@@ -388,8 +388,8 @@ BOOST_AUTO_TEST_CASE(ReceiveWithExtraTransactions) {
         // Collided slots are terminal: not even the genuine transactions refill them.
         extra_txn[4] = {block.vtx[2]->GetWitnessHash(), block.vtx[2]};
         extra_txn[5] = {block.vtx[1]->GetWitnessHash(), block.vtx[1]};
-        TestPartiallyDownloadedBlock partial_block_no_refill{&pool};
-        BOOST_CHECK_EQUAL(partial_block_no_refill.InitData(cmpctblock, extra_txn), READ_STATUS_OK);
+        TestPartiallyDownloadedBlock partial_block_no_refill;
+        BOOST_CHECK_EQUAL(partial_block_no_refill.InitData(cmpctblock, pool, extra_txn), READ_STATUS_OK);
         BOOST_CHECK(!partial_block_no_refill.IsTxAvailable(1));
         BOOST_CHECK(!partial_block_no_refill.IsTxAvailable(2));
         BOOST_CHECK_EQUAL(partial_block_no_refill.GetMempoolCount(), 0U);
