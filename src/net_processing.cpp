@@ -215,11 +215,24 @@ struct QueuedBlock {
 struct TemplateTx
 {
     CTransactionRef tx;
-    uint32_t num_templates{0};
+    mutable uint32_t num_templates{0};
+    mutable uint32_t cbvec_pos{0};
 
     explicit TemplateTx(CTransactionRef tx) : tx{std::move(tx)} { }
+
+    struct Cmp
+    {
+        using is_transparent = void;
+        static const Wtxid& get_cmp(const Wtxid& wtxid) { return wtxid; }
+        static const Wtxid& get_cmp(const TemplateTx& ttx) { return ttx.tx->GetWitnessHash(); }
+        template<typename A, typename B>
+        bool operator()(const A& a, const B& b) const
+        {
+            return get_cmp(a) < get_cmp(b);
+        }
+    };
 };
-using TemplateTxSet = std::map<Wtxid, TemplateTx>;
+using TemplateTxSet = std::set<TemplateTx, TemplateTx::Cmp>;
 using TemplateTxRefVec = std::vector<TemplateTxSet::iterator>;
 
 struct MyTemplate {
@@ -234,15 +247,25 @@ struct MyTemplate {
 
 class TemplateManager
 {
-public:
+private:
     TemplateTxSet template_txs;
+    std::vector<std::pair<Wtxid, TemplateTxSet::iterator>> cbvec;
 
+public:
     std::deque<MyTemplate> my_templates;
+
+    size_t size() const { return template_txs.size(); }
 
     void DiscardTxs(TemplateTxRefVec& txrv)
     {
         for (auto& it : txrv) {
-            if (--it->second.num_templates == 0) {
+            if (--it->num_templates == 0) {
+                if (cbvec.size() > 1) {
+                    auto pos = it->cbvec_pos;
+                    std::swap(cbvec[pos], cbvec.back());
+                    cbvec[pos].second->cbvec_pos = pos;
+                }
+                cbvec.pop_back();
                 template_txs.erase(it);
             }
         }
@@ -255,11 +278,50 @@ public:
         result.reserve(txs.size());
         for (auto& tx : txs) {
             const auto& wtxid = tx->GetWitnessHash();
-            auto [it, inserted] = template_txs.try_emplace(wtxid, tx);
-            ++it->second.num_templates;
+            auto it = template_txs.lower_bound(wtxid);
+            if (it == template_txs.end() || it->tx->GetWitnessHash() != wtxid) {
+                it = template_txs.emplace_hint(it, tx);
+                it->cbvec_pos = cbvec.size();
+                cbvec.emplace_back(wtxid, it);
+            }
+            ++it->num_templates;
             result.emplace_back(it);
         }
         return result;
+    }
+
+    class ExtraTxns : public ExtraTransactions {
+    private:
+        const TemplateManager& tman;
+        const std::vector<std::pair<Wtxid, CTransactionRef>>& vec;
+        bool processing_cbvec{true};
+        size_t vec_idx{0};
+
+    public:
+        ExtraTxns(const TemplateManager& tman, const std::vector<std::pair<Wtxid, CTransactionRef>>& vec) : tman{tman}, vec{vec} { }
+
+        WitRef next() override
+        {
+            if (processing_cbvec) {
+                if (vec_idx < tman.cbvec.size()) {
+                    auto& e = tman.cbvec[vec_idx++];
+                    return {&e.first, &e.second->tx};
+                } else {
+                    processing_cbvec = false;
+                    vec_idx = 0;
+                }
+            }
+            while (vec_idx < vec.size()) {
+                auto& r = vec[vec_idx++];
+                if (r.second != nullptr) return {&r.first, &r.second};
+            }
+            return {nullptr, nullptr};
+        }
+    };
+
+    ExtraTxns GetExtraTxns(const std::vector<std::pair<Wtxid,CTransactionRef>>& vec) const
+    {
+        return ExtraTxns(*this, vec);
     }
 };
 
@@ -1137,6 +1199,12 @@ private:
 
     void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templatestats_mutex);
     void SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplate& mytmp, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+
+    TemplateManager::ExtraTxns GetExtraTxns() const
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex)
+    {
+        return m_templateman.GetExtraTxns(vExtraTxnForCompact);
+    }
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const
@@ -4544,7 +4612,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 }
 
                 PartiallyDownloadedBlock& partialBlock = *(*queuedBlockIt)->partialBlock;
-                ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
                 if (status == READ_STATUS_INVALID) {
                     RemoveBlockRequest(pindex->GetBlockHash(), pfrom.GetId()); // Reset in-flight state in case Misbehaving does not result in a disconnect
                     Misbehaving(*peer, "invalid compact block");
@@ -4595,7 +4663,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 // Optimistically try to reconstruct anyway since we might be
                 // able to without any round trips.
                 PartiallyDownloadedBlock tempBlock;
-                ReadStatus status = tempBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = tempBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
                 if (status != READ_STATUS_OK) {
                     // TODO: don't ignore failures
                     return;
@@ -5078,7 +5146,7 @@ void PeerManagerImpl::SendTemplateTransactions(CNode& pfrom, Peer& peer, const M
             Misbehaving(peer, "getblocktxn with out-of-bounds tx indices");
             return;
         }
-        resp.txn[i] = mytmp.txs[req.indexes[i]]->second.tx;
+        resp.txn[i] = mytmp.txs[req.indexes[i]]->tx;
         tx_requested_size += resp.txn[i]->GetTotalSize();
     }
 
@@ -5142,7 +5210,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     LOCK(m_templatestats_mutex);
     m_templatestats.num_templates = my_templates.size();
     m_templatestats.max_templates = m_opts.share_template_count;
-    m_templatestats.num_transactions = m_templateman.template_txs.size();
+    m_templatestats.num_transactions = m_templateman.size();
     if (!m_templateman.my_templates.empty()) {
         const auto& tmp = m_templateman.my_templates.front();
         m_templatestats.latest_template_weight = tmp.weight;
