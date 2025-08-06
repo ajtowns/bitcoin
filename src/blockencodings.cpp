@@ -57,7 +57,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const Wtxid& wtxid) const
  * in a vector and iterate over the vector directly. This allows optimal
  * CPU caching behaviour, at a cost of only 40 bytes per transaction.
  */
-ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const std::vector<std::pair<Wtxid, CTransactionRef>>& extra_txn)
+ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, const std::vector<std::pair<Wtxid, CTransactionRef>>& extra_txn)
 {
     LogDebug(BCLog::CMPCTBLOCK, "Initializing PartiallyDownloadedBlock for block %s using a cmpctblock of %u bytes\n", cmpctblock.header.GetHash().ToString(), GetSerializeSize(cmpctblock));
     if (cmpctblock.header.IsNull() || (cmpctblock.shorttxids.empty() && cmpctblock.prefilledtxn.empty()))
@@ -131,10 +131,10 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     std::vector<TxSource> tx_source(txn_available.size(), TxSource::NONE);
     size_t available_count = 0;
     {
-    LOCK(pool->cs);
+    LOCK(pool.cs);
     if (debug_log) {
         for (auto it{leftover_prefills.begin()}; it != leftover_prefills.end();) {
-            if (pool->GetIter(it->first)) {
+            if (pool.GetIter(it->first)) {
                 ++redundant_prefilled_mempool_count;
                 redundant_prefilled_mempool_size += it->second;
                 it = leftover_prefills.erase(it);
@@ -144,7 +144,7 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
         }
     }
 
-    for (const auto& [wtxid, txit] : pool->txns_randomized) {
+    for (const auto& [wtxid, txit] : pool.txns_randomized) {
         uint64_t shortid = cmpctblock.GetShortID(wtxid);
         std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
