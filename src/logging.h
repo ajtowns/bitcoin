@@ -96,6 +96,7 @@ namespace BCLog {
         TXPACKAGES  = (CategoryMask{1} << 28),
         KERNEL      = (CategoryMask{1} << 29),
         MINER       = (CategoryMask{1} << 30),
+        SHARETMPL   = (CategoryMask{1} << 31),
         ALL         = ~NONE,
     };
     enum class Level {

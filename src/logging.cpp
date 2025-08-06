@@ -203,6 +203,7 @@ static const std::map<std::string, BCLog::LogFlags, std::less<>> LOG_CATEGORIES_
     {"txpackages", BCLog::TXPACKAGES},
     {"kernel", BCLog::KERNEL},
     {"miner", BCLog::MINER},
+    {"sharetmpl", BCLog::SHARETMPL},
 };
 
 static const std::unordered_map<BCLog::LogFlags, std::string> LOG_CATEGORIES_BY_FLAG{
