@@ -1,0 +1,9 @@
+{
+    "binana": [2024, 4, 0],
+    "deployment": "INTERNALKEY",
+    "scriptverify": true,
+    "scriptverify_discourage": true,
+    "opcodes": {
+        "INTERNALKEY": "0xcb"
+    }
+}
