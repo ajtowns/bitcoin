@@ -239,3 +239,12 @@ ReadStatus PartiallyDownloadedBlock::FillBlock(CBlock& block, const std::vector<
 
     return READ_STATUS_OK;
 }
+
+size_t PartiallyDownloadedBlock::Weight() const
+{
+    size_t weight = 0;
+    for (const auto& tx : txn_available) {
+        if (tx != nullptr) weight += GetTransactionWeight(*tx);
+    }
+    return weight;
+}

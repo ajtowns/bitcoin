@@ -173,6 +173,17 @@ public:
 
     explicit PartiallyDownloadedBlock() = default;
 
+    /** Reset to initial state */
+    void reset()
+    {
+        txn_available.clear();
+        prefilled_count = mempool_count = extra_count = 0;
+        header.SetNull();
+    }
+
+    /** Return total weight of (known) transactions in block */
+    size_t Weight() const;
+
     ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, ExtraTransactions&& extra_txn);
 
     ReadStatus InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const CTxMemPool& pool, const std::vector<std::pair<Wtxid,CTransactionRef>>& extra_txn)
