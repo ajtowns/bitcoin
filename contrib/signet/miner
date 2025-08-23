@@ -236,7 +236,7 @@ class Generate:
 
     def __init__(self, multiminer=None, ultimate_target=None, poisson=False, max_interval=1800,
                  standby_delay=0, backup_delay=0, set_block_time=None,
-                 poolid=None):
+                 poolid=None, nversion=None):
         if multiminer is None:
             multiminer = (0, 1, 1)
         (self.multi_low, self.multi_high, self.multi_period) = multiminer
@@ -246,6 +246,7 @@ class Generate:
         self.standby_delay = standby_delay
         self.backup_delay = backup_delay
         self.set_block_time = set_block_time
+        self.set_nversion = nversion
 
     def next_block_delta(self, last_nbits, last_hash):
         # strategy:
@@ -314,6 +315,8 @@ class Generate:
 
     def gbt(self, bcli, bestblockhash, now):
         tmpl = json.loads(bcli("getblocktemplate", '{"rules":["signet","segwit"]}'))
+        if self.set_nversion is not None:
+            tmpl["version"] = int(self.set_nversion, 16)
         if tmpl["previousblockhash"] != bestblockhash:
             logging.warning("GBT based off unexpected block (%s not %s), retrying", tmpl["previousblockhash"], bci["bestblockhash"])
             time.sleep(1)
@@ -374,8 +377,13 @@ def do_generate(args):
             logging.error("Must specify --nbits (use calibrate command to determine value)")
             return 1
 
+    if args.nversion is not None:
+        if re.match("^[0-9a-fA-F]{8}$", args.nversion) is None:
+            logging.error("--nversion must be 8 hex digits")
+            return 1
+
     if args.multiminer is None:
-       my_blocks = (0,1,1)
+        my_blocks = (0,1,1)
     else:
         if not args.ongoing:
             logging.error("Cannot specify --multiminer without --ongoing")
@@ -413,7 +421,8 @@ def do_generate(args):
     ultimate_target = nbits_to_target(int(args.nbits,16))
 
     gen = Generate(multiminer=my_blocks, ultimate_target=ultimate_target, poisson=args.poisson, max_interval=args.max_interval,
-                   standby_delay=args.standby_delay, backup_delay=args.backup_delay, set_block_time=args.set_block_time)
+                   standby_delay=args.standby_delay, backup_delay=args.backup_delay, set_block_time=args.set_block_time,
+                   nversion=args.nversion)
 
     mined_blocks = 0
     bestheader = {"hash": None}
@@ -584,6 +593,7 @@ def main():
     generate.add_argument("--standby-delay", default=0, type=int, help="Seconds to delay before mining blocks (default=0)")
     generate.add_argument("--max-interval", default=1800, type=int, help="Maximum interblock interval (seconds)")
     generate.add_argument("--wallets", default=None, type=str, help="Wallets used for signing, separated by commas")
+    generate.add_argument("--nversion", default=None, type=str, help="Override block nVersion (specify as hex)")
 
     calibrate = cmds.add_parser("calibrate", help="Calibrate difficulty")
     calibrate.set_defaults(fn=do_calibrate)
