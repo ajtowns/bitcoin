@@ -1,0 +1,9 @@
+{
+    "binana": [2024, 1, 0],
+    "deployment": "OP_CAT",
+    "scriptverify": true,
+    "scriptverify_discourage": true,
+    "opcodes": {
+        "CAT": "0x7e"
+    }
+}

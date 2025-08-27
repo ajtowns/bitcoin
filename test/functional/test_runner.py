@@ -326,6 +326,7 @@ BASE_SCRIPTS = [
     'wallet_listsinceblock.py --legacy-wallet',
     'wallet_listsinceblock.py --descriptors',
     'wallet_listdescriptors.py --descriptors',
+    'feature_opcat.py',
     'p2p_leak.py',
     'wallet_encryption.py --legacy-wallet',
     'wallet_encryption.py --descriptors',
