@@ -1276,6 +1276,25 @@ def spenders_taproot_nonstandard():
 
     return spenders
 
+def bip348_csfs_spenders_nonstandard():
+    """Spenders for testing that pre-active CHECKSIGFROMSTACK usage is discouraged but valid"""
+
+    spenders = []
+
+    sec = generate_privkey()
+    pub, _ = compute_xonly_pubkey(sec)
+    scripts = [
+        ("stilltrue", CScript([b'', b'', b'', OP_CHECKSIGFROMSTACK])),
+        ("still_opsuccess", CScript([OP_RETURN, OP_CHECKSIGFROMSTACK,])),
+    ]
+    tap = taproot_construct(pub, scripts)
+
+    # Valid prior to activation but nonstandard
+    add_spender(spenders, "discouraged_csfs/stilltrue", tap=tap, leaf="stilltrue", standard=False)
+    add_spender(spenders, "discouraged_csfs/still_opsuccess", tap=tap, leaf="still_opsuccess", standard=False)
+
+    return spenders
+
 def bip348_csfs_spenders():
     secs = [generate_privkey() for _ in range(2)]
     pubs = [compute_xonly_pubkey(sec)[0] for sec in secs]
@@ -1394,6 +1413,7 @@ class TaprootTest(BitcoinTestFramework):
 
     def set_test_params(self):
         self.num_nodes = 1
+        self.extra_args = [["-vbparams=checksigfromstack:0:3999999999"]]
         self.setup_clean_chain = True
 
     def block_submit(self, node, txs, msg, err_msg, cb_pubkey=None, fees=0, sigops_weight=0, witness=False, accept=False):
@@ -1864,6 +1884,23 @@ class TaprootTest(BitcoinTestFramework):
 
     def run_test(self):
         self.gen_test_vectors()
+
+        self.log.info("CSFS Pre-activation tests...")
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"defined")
+        self.generate(self.nodes[0], 144)
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"started")
+        signal_ver = int(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["signal_activate"], 16)
+
+        self.test_spenders(self.nodes[0], bip348_csfs_spenders_nonstandard(), input_counts=[1, 2])
+
+        self.log.info("Activating CSFS")
+        now = self.nodes[0].getblock(self.nodes[0].getbestblockhash())["time"]
+        coinbase_tx = create_coinbase(self.nodes[0].getblockcount() + 1)
+        block = create_block(hashprev=int(self.nodes[0].getbestblockhash(), 16), ntime=now, coinbase=coinbase_tx, version=signal_ver)
+        block.solve()
+        self.nodes[0].submitblock(block.serialize().hex())
+        self.generate(self.nodes[0], 288)
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"active")
 
         self.log.info("Post-activation tests...")
         consensus_spenders = spenders_taproot_active() + bip348_csfs_spenders()
