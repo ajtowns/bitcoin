@@ -1,6 +1,6 @@
-Bitcoin Core version 29.x is now available from:
+Bitcoin Core version 29.1rc1 is now available from:
 
-  <https://bitcoincore.org/bin/bitcoin-core-29.x/>
+  <https://bitcoincore.org/bin/bitcoin-core-29.1/test.rc1/>
 
 This release includes various bug fixes and performance
 improvements, as well as updated translations.
@@ -37,6 +37,34 @@ unsupported systems.
 Notable changes
 ===============
 
+### Mempool Policy
+
+- The maximum number of potentially executed legacy signature operations in a
+  single standard transaction is now limited to 2500. Signature operations in all
+  previous output scripts, in all input scripts, as well as all P2SH redeem
+  scripts (if there are any) are counted toward the limit. The new limit is
+  assumed to not affect any known typically formed standard transactions. The
+  change was done to prepare for a possible BIP54 deployment in the future.
+
+- #32521 policy: make pathological transactions packed with legacy sigops non-standard
+
+### Logging
+
+Unconditional logging to disk is now rate limited by giving each source location
+a quota of 1MiB per hour. Unconditional logging is any logging with a log level
+higher than debug, that is `info`, `warning`, and `error`. All logs will be
+prefixed with `[*]` if there is at least one source location that is currently
+being suppressed. (#32604)
+
+When `-logsourcelocations` is enabled, the log output now contains the entire
+function signature instead of just the function name. (#32604)
+
+### RPC
+
+- The `dumptxoutset` RPC now requires a `type` parameter to be specified. To maintain pre
+  v29.0 behavior, use the `latest` parameter. Documenting this change was missed in the v29.0
+  release notes. (#30808)
+
 ### Updated Settings
 
 - The `-maxmempool` and `-dbcache` startup parameters are now capped on
@@ -49,16 +77,27 @@ Notable changes
 - #31757 wallet: fix crash on double block disconnection
 - #32553 wallet: Fix logging of wallet version
 
+### P2P
+
+- #32826 p2p: add more bad ports
+
 ### Test
 
+- #32069 test: fix intermittent failure in wallet_reorgsrestore.py
 - #32286 test: Handle empty string returned by CLI as None in RPC tests
 - #32312 test: Fix feature_pruning test after nTime typo fix
 - #32336 test: Suppress upstream -Wduplicate-decl-specifier in bpfcc
+- #32463 test: fix an incorrect feature_fee_estimation.py subtest
 - #32483 test: fix two intermittent failures in wallet_basic.py
 - #32630 test: fix sync function in rpc_psbt.py
 - #32765 test: Fix list index out of range error in feature_bip68_sequence.py
 - #32742 test: fix catchup loop in outbound eviction functional test
+- #32823 test: Fix wait_for_getheaders() call in test_outbound_eviction_blocks_relay_only()
 - #32833 test: Add msgtype to msg_generic slots
+- #32841 feature_taproot: sample tx version border values more
+- #32850 test: check P2SH sigop count for coinbase tx
+- #32859 test: correctly detect nonstd TRUC tx vsize in feature_taproot
+- #33001 test: Do not pass tests on unhandled exceptions
 
 ### Util
 
@@ -74,10 +113,15 @@ Notable changes
 - #32568 depends: use "mkdir -p" when installing xproto
 - #32678 guix: warn and abort when SOURCE_DATE_EPOCH is set
 - #32690 depends: fix SHA256SUM command on OpenBSD (use GNU mode output)
+- #32716 depends: Override host compilers for FreeBSD and OpenBSD
 - #32760 depends: capnp 1.2.0
 - #32798 build: add root dir to CMAKE_PREFIX_PATH in toolchain
 - #32805 cmake: Use HINTS instead of PATHS in find_* commands
 - #32814 cmake: Explicitly specify Boost_ROOT for Homebrew's package
+- #32837 depends: fix libevent _WIN32_WINNT usage
+- #32943 depends: Force CMAKE_EXPORT_NO_PACKAGE_REGISTRY=TRUE
+- #32954 cmake: Drop no longer necessary "cmakeMinimumRequired" object
+- #33073 guix: warn SOURCE_DATE_EPOCH set in guix-codesign
 
 ### Gui
 
@@ -98,6 +142,12 @@ Notable changes
 - #32719 doc, windows: CompanyName "Bitcoin" => "Bitcoin Core project"
 - #32776 doc: taproot became always active in v24.0
 - #32777 doc: fix Transifex 404s
+- #32846 doc: clarify that the "-j N" goes after the "--build build" part
+- #32858 doc: Add workaround for vcpkg issue with paths with embedded spaces
+- #33070 doc/zmq: fix unix socket path example
+- #33088 doc: move cmake -B build -LH up in Unix build docs
+- #33133 rpc: fix getpeerinfo ping duration unit docs
+- #33119 rpc: Fix 'getdescriptoractivity' RPCHelpMan, add test to verify fix
 
 ### CI
 
@@ -108,24 +158,35 @@ Notable changes
 - #32187 refactor: Remove spurious virtual from final ~CZMQNotificationInterface
 - #32454 tracing: fix invalid argument in mempool_monitor
 - #32771 contrib: tracing: Fix read of pmsg_type in p2p_monitor.py
+- #33086 contrib: [tracing] fix pointer argument handling in mempool_monitor.py
 
 Credits
 =======
 
 Thanks to everyone who directly contributed to this release:
 
+- 0xB10C
 - achow101
+- Antoine Poinsot
 - benthecarman
+- bigspider
 - Brandon Odiwuor
+- brunoerg
+- Bufo
+- Christewart
+- Crypt-iQ
 - davidgumberg
+- deadmanoz
 - dergoegge
 - enirox001
 - fanquake
 - furszy
+- instagibbs
 - Hennadii Stepanov
 - hodlinator
 - ismaelsadeeq
 - jb55
+- jlopp
 - josibake
 - laanwj
 - luisschwab
@@ -133,7 +194,10 @@ Thanks to everyone who directly contributed to this release:
 - Martin Zumsande
 - monlovesmango
 - nervana21
+- pablomartin4btc
 - rkrux
+- romanz
+- ryanofsky
 - Sjors
 - theStack
 - willcl-ark
