@@ -419,6 +419,55 @@ static bool EvalChecksig(const valtype& sig, const valtype& pubkey, CScript::con
     assert(false);
 }
 
+/**
+ *  Returns false when script execution must immediately fail.
+ */
+static bool EvalChecksigFromStack(const valtype& sig, const valtype& msg, const valtype& pubkey_in, ScriptExecutionData& execdata, unsigned int flags, SigVersion sigversion, ScriptError* serror, bool& success_out)
+{
+    assert(sigversion == SigVersion::TAPSCRIPT);
+
+    /*
+     *  The following validation sequence is consensus critical. Please note how --
+     *    upgradable public key versions precede other rules;
+     *    the script execution fails when using empty signature with invalid public key;
+     *    the script execution fails when using non-empty invalid signature.
+     */
+    success_out = !sig.empty();
+    if (success_out) {
+        // Implement the sigops/witnesssize ratio test.
+        // Passing with an upgradable public key version is also counted.
+        assert(execdata.m_validation_weight_left_init);
+        execdata.m_validation_weight_left -= VALIDATION_WEIGHT_PER_SIGOP_PASSED;
+        if (execdata.m_validation_weight_left < 0) {
+            return set_error(serror, SCRIPT_ERR_TAPSCRIPT_VALIDATION_WEIGHT);
+        }
+    }
+    if (pubkey_in.size() == 0) {
+        return set_error(serror, SCRIPT_ERR_PUBKEYTYPE);
+    } else if (pubkey_in.size() == 32) {
+        if (success_out) {
+            if (sig.size() != 64) {
+                return set_error(serror, SCRIPT_ERR_SCHNORR_SIG_SIZE);
+            }
+            XOnlyPubKey pubkey{pubkey_in};
+            if (!pubkey.VerifySchnorr(msg, sig)) {
+                return set_error(serror, SCRIPT_ERR_SCHNORR_SIG);
+            }
+        }
+    } else {
+        /*
+         *  New public key version softforks should be defined before this `else` block.
+         *  Generally, the new code should not do anything but failing the script execution. To avoid
+         *  consensus bugs, it should not modify any existing values (including `success`).
+         */
+        if ((flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE) != 0) {
+            return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_PUBKEYTYPE);
+        }
+    }
+
+    return true;
+}
+
 bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror)
 {
     static const CScriptNum bnZero(0);
@@ -1279,6 +1328,40 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     }
                 }
                 break;
+
+                case OP_CHECKSIGFROMSTACK: {
+
+                    // DISCOURAGE for OP_CHECKSIGFROMSTACK is handled in OP_SUCCESS handling
+                    // OP_CHECKSIGFROMSTACK is only available in Tapscript
+                    if (sigversion == SigVersion::BASE || sigversion == SigVersion::WITNESS_V0) {
+                        return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
+                    }
+
+                    // If fewer than 3 elements are on the stack, the script MUST fail and terminate immediately
+                    if (stack.size() < 3) {
+                        return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+                    }
+
+                    // The public key (top element)
+                    // message (second to top element),
+                    // and signature (third from top element) are read from the stack.
+                    const valtype& pubkey = stacktop(-1);
+                    const valtype& msg = stacktop(-2);
+                    const valtype& sig = stacktop(-3);
+
+                    bool push_success = true;
+                    if (!EvalChecksigFromStack(sig, msg, pubkey, execdata, flags, sigversion, serror, push_success)) {
+                        return false; // serror set by EvalChecksigFromStack
+                    }
+
+                    popstack(stack);
+                    popstack(stack);
+                    popstack(stack);
+
+                    stack.push_back(push_success ? vchTrue : vchFalse);
+
+                    break;
+                }
 
                 default:
                     return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
