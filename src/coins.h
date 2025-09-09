@@ -75,6 +75,12 @@ public:
         ::Unserialize(s, Using<TxOutCompression>(out));
     }
 
+    /** This coin never existed */
+    bool IsEmpty() const
+    {
+        return nHeight == 0 && !fCoinBase;
+    }
+
     /** Either this coin never existed (see e.g. coinEmpty in coins.cpp), or it
       * did exist and has been spent.
       */
@@ -404,16 +410,9 @@ public:
     bool HaveCoinInCache(const COutPoint &outpoint) const;
 
     /**
-     * Return a reference to Coin in the cache, or coinEmpty if not found. This is
-     * more efficient than GetCoin.
-     *
-     * Generally, do not hold the reference returned for more than a short scope.
-     * While the current implementation allows for modifications to the contents
-     * of the cache while holding the reference, this behavior should not be relied
-     * on! To be safe, best to not hold the returned reference through any other
-     * calls to this cache.
+     * Return a Coin; result.IsEmpty() if not found.
      */
-    const Coin& AccessCoin(const COutPoint &output) const;
+    Coin AccessCoin(const COutPoint &output) const;
 
     /**
      * Add a coin. Set possible_overwrite to true if an unspent version may
@@ -499,7 +498,7 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction& tx, int nHeight, bool 
 //! This function can be quite expensive because in the event of a transaction
 //! which is not found in the cache, it can cause up to MAX_OUTPUTS_PER_BLOCK
 //! lookups to database, so it should be used with care.
-const Coin& AccessByTxid(const CCoinsViewCache& cache, const Txid& txid);
+Coin AccessByTxid(const CCoinsViewCache& cache, const Txid& txid);
 
 /**
  * This is a minimally invasive approach to shutdown on LevelDB read errors from the

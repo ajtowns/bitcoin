@@ -685,7 +685,7 @@ public:
 static void CheckAccessCoin(const CAmount base_value, const MaybeCoin& cache_coin, const MaybeCoin& expected)
 {
     SingleEntryCacheTest test{base_value, cache_coin};
-    auto& coin = test.cache.AccessCoin(OUTPOINT);
+    const Coin& coin = test.cache.AccessCoin(OUTPOINT);
     BOOST_CHECK_EQUAL(coin.IsSpent(), !test.cache.GetCoin(OUTPOINT));
     test.cache.SelfTest(/*sanity_check=*/false);
     BOOST_CHECK_EQUAL(GetCoinsMapEntry(test.cache.map()), expected);
