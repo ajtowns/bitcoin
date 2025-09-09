@@ -151,16 +151,6 @@ bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, Coin* moveout) {
 
 static const Coin coinEmpty;
 
-Coin CCoinsViewCache::AccessCoin(const COutPoint &outpoint) const
-{
-    CCoinsMap::const_iterator it = FetchCoin(outpoint);
-    if (it == cacheCoins.end()) {
-        return coinEmpty;
-    } else {
-        return it->second.coin;
-    }
-}
-
 bool CCoinsViewCache::HaveCoin(const COutPoint &outpoint) const {
     CCoinsMap::const_iterator it = FetchCoin(outpoint);
     return (it != cacheCoins.end() && !it->second.coin.IsSpent());

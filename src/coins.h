@@ -318,6 +318,15 @@ public:
     //! Retrieve the Coin (unspent transaction output) for a given outpoint.
     virtual std::optional<Coin> GetCoin(const COutPoint& outpoint) const;
 
+    /**
+     * Return a Coin; result.IsEmpty() if not found.
+     */
+    Coin AccessCoin(const COutPoint &outpoint) const
+    {
+        if (auto coin = GetCoin(outpoint)) return *coin;
+        return Coin{};
+    }
+
     //! Just check whether a given outpoint is unspent.
     virtual bool HaveCoin(const COutPoint &outpoint) const;
 
@@ -408,11 +417,6 @@ public:
      * the backing CCoinsView are made.
      */
     bool HaveCoinInCache(const COutPoint &outpoint) const;
-
-    /**
-     * Return a Coin; result.IsEmpty() if not found.
-     */
-    Coin AccessCoin(const COutPoint &output) const;
 
     /**
      * Add a coin. Set possible_overwrite to true if an unspent version may
