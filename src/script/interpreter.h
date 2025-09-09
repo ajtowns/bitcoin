@@ -49,7 +49,7 @@ enum
 
 static constexpr script_verify_flags SCRIPT_VERIFY_NONE{0};
 
-enum class script_verify_flag_name : uint32_t {
+enum class script_verify_flag_name : uint64_t {
     // Evaluate P2SH subscripts (BIP16).
     SCRIPT_VERIFY_P2SH      = (1U << 0),
 
@@ -160,7 +160,7 @@ enum class script_verify_flag_name : uint32_t {
 using enum script_verify_flag_name;
 
 // assert there is still a spare bit
-static_assert(static_cast<script_verify_flags::value_type>(SCRIPT_VERIFY_END_MARKER) < (1u << 31));
+static_assert(static_cast<script_verify_flags::value_type>(SCRIPT_VERIFY_END_MARKER) < (uint64_t{1} << 63));
 
 static constexpr script_verify_flags::value_type MAX_SCRIPT_VERIFY_FLAGS = ((static_cast<script_verify_flags::value_type>(SCRIPT_VERIFY_END_MARKER) - 1) << 1) - 1;
 static constexpr int MAX_SCRIPT_VERIFY_FLAGS_BITS = std::bit_width(MAX_SCRIPT_VERIFY_FLAGS);

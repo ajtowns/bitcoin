@@ -45,7 +45,7 @@ def get_binana_info(path):
     return data
 
 def gen_binana_h(data, header, depjson):
-    script_verify_bit = 30 # count backwards; 31 is assumed unused in unit tests
+    script_verify_bit = 60 # count backwards; note: 63 is assumed unused in unit tests
 
     defines = {a: [] for a in "DEPLOYMENTS DEPLOYMENTS_SIGNET DEPLOYMENTS_REGTEST DEPLOYMENTS_GBT VERIFY_FLAGS VERIFY_FLAGS_NAMES STANDARD_VERIFY_FLAGS OPCODES OPCODE_NAMES SUCCESS_OPCODES SCRIPTERR SCRIPTERR_STRING SCRIPTERR_TEST_NAMES CONSENSUS_CHECKS POLICY_CHECKS".split()}
 
@@ -90,7 +90,7 @@ def gen_binana_h(data, header, depjson):
         if b.get("scriptverify", False):
             jsoninfo["script_flags"].append(dep)
 
-            defines["VERIFY_FLAGS"].append(f'SCRIPT_VERIFY_{dep} = (1U << {script_verify_bit}),')
+            defines["VERIFY_FLAGS"].append(f'SCRIPT_VERIFY_{dep} = (1ULL << {script_verify_bit}),')
             script_verify_bit -= 1
 
             defines["VERIFY_FLAGS_NAMES"].append(f'{{ "{dep}", SCRIPT_VERIFY_{dep} }},')
@@ -102,7 +102,7 @@ def gen_binana_h(data, header, depjson):
         discourage = False
         if b.get("scriptverify", False) and b.get("scriptverify_discourage", False):
             discourage = True
-            defines["VERIFY_FLAGS"].append(f'SCRIPT_VERIFY_DISCOURAGE_{dep} = (1U << {script_verify_bit}),')
+            defines["VERIFY_FLAGS"].append(f'SCRIPT_VERIFY_DISCOURAGE_{dep} = (1ULL << {script_verify_bit}),')
             script_verify_bit -= 1
 
             defines["VERIFY_FLAGS_NAMES"].append(f'{{ "DISCOURAGE_{dep}", SCRIPT_VERIFY_DISCOURAGE_{dep} }},')

@@ -1763,9 +1763,9 @@ BOOST_AUTO_TEST_CASE(formatscriptflags)
 {
     // quick check that FormatScriptFlags reports any unknown/unexpected bits
     BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_P2SH), "P2SH");
-    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_P2SH | script_verify_flags::from_int(1u<<31)), "P2SH,0x80000000");
-    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_TAPROOT | script_verify_flags::from_int(1u<<31)), "TAPROOT,0x80000000");
-    BOOST_CHECK_EQUAL(FormatScriptFlags(script_verify_flags::from_int(1u<<31)), "0x80000000");
+    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_P2SH | script_verify_flags::from_int(uint64_t{1}<<63)), "P2SH,0x8000000000000000");
+    BOOST_CHECK_EQUAL(FormatScriptFlags(SCRIPT_VERIFY_TAPROOT | script_verify_flags::from_int(uint64_t{1}<<63)), "TAPROOT,0x8000000000000000");
+    BOOST_CHECK_EQUAL(FormatScriptFlags(script_verify_flags::from_int(uint64_t{1}<<63)), "0x8000000000000000");
 }
 
 void DoTapscriptTest(ScriptTest& test, std::vector<unsigned char> witVerifyScript, std::vector<std::vector<unsigned char>> witData, const std::string& message, int scriptError)
