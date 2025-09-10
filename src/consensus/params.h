@@ -7,6 +7,7 @@
 #define BITCOIN_CONSENSUS_PARAMS_H
 
 #include <binana.h>
+#include <script/verify_flags.h>
 #include <uint256.h>
 
 #include <array>
@@ -83,7 +84,7 @@ struct Params {
      * - buried in the chain, and
      * - fail if the default script verify flags are applied.
      */
-    std::map<uint256, uint32_t> script_flag_exceptions;
+    std::map<uint256, script_verify_flags> script_flag_exceptions;
     /** Block height and hash at which BIP34 becomes active */
     int BIP34Height;
     uint256 BIP34Hash;

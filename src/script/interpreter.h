@@ -12,9 +12,11 @@
 #include <primitives/transaction.h>
 #include <pubkey.h>
 #include <script/script_error.h> // IWYU pragma: export
+#include <script/verify_flags.h> // IWYU pragma: export
 #include <span.h>
 #include <uint256.h>
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -44,9 +46,10 @@ enum
  *  All flags are intended to be soft forks: the set of acceptable scripts under
  *  flags (A | B) is a subset of the acceptable scripts under flag (A).
  */
-enum : uint32_t {
-    SCRIPT_VERIFY_NONE      = 0,
 
+static constexpr script_verify_flags SCRIPT_VERIFY_NONE{0};
+
+enum class script_verify_flag_name : uint64_t {
     // Evaluate P2SH subscripts (BIP16).
     SCRIPT_VERIFY_P2SH      = (1U << 0),
 
@@ -154,8 +157,15 @@ enum : uint32_t {
     //
     SCRIPT_VERIFY_END_MARKER
 };
+using enum script_verify_flag_name;
 
-bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
+// assert there is still a spare bit
+static_assert(static_cast<script_verify_flags::value_type>(SCRIPT_VERIFY_END_MARKER) < (uint64_t{1} << 63));
+
+static constexpr script_verify_flags::value_type MAX_SCRIPT_VERIFY_FLAGS = ((static_cast<script_verify_flags::value_type>(SCRIPT_VERIFY_END_MARKER) - 1) << 1) - 1;
+static constexpr int MAX_SCRIPT_VERIFY_FLAGS_BITS = std::bit_width(MAX_SCRIPT_VERIFY_FLAGS);
+
+bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, script_verify_flags flags, ScriptError* serror);
 
 struct PrecomputedTransactionData
 {
@@ -385,15 +395,15 @@ uint256 ComputeTapbranchHash(Span<const unsigned char> a, Span<const unsigned ch
  *  Requires control block to have valid length (33 + k*32, with k in {0,1,..,128}). */
 uint256 ComputeTaprootMerkleRoot(Span<const unsigned char> control, const uint256& tapleaf_hash);
 
-bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* error = nullptr);
-bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, unsigned int flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* error = nullptr);
-bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CScriptWitness* witness, unsigned int flags, const BaseSignatureChecker& checker, ScriptError* serror = nullptr);
+bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, script_verify_flags flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* error = nullptr);
+bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, script_verify_flags flags, const BaseSignatureChecker& checker, SigVersion sigversion, ScriptError* error = nullptr);
+bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CScriptWitness* witness, script_verify_flags flags, const BaseSignatureChecker& checker, ScriptError* serror = nullptr);
 
-size_t CountWitnessSigOps(const CScript& scriptSig, const CScript& scriptPubKey, const CScriptWitness* witness, unsigned int flags);
+size_t CountWitnessSigOps(const CScript& scriptSig, const CScript& scriptPubKey, const CScriptWitness* witness, script_verify_flags flags);
 
 int FindAndDelete(CScript& script, const CScript& b);
 
 bool CastToBool(const std::vector<unsigned char>& vch);
-std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, unsigned int flags, ScriptError* serror);
+std::optional<bool> CheckTapscriptOpSuccess(const CScript& exec_script, script_verify_flags flags, ScriptError* serror);
 
 #endif // BITCOIN_SCRIPT_INTERPRETER_H
