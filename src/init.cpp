@@ -1277,16 +1277,17 @@ static bool ObfuscateBlocks(
     const fs::path& xor_new,
     const std::span<const std::byte> requested_key)
 {
-    // Read all block and undo file names
-    auto collect_block_files{[&blocks_dir]() -> std::vector<fs::path> {
-        std::vector<fs::path> files;
-        const std::regex dat_filename_pattern{R"(^(?:blk|rev)\d+\.dat$)", std::regex::optimize};
+    // Read all block and undo file names; preserve the numbers in order
+    auto collect_block_files{[&blocks_dir]() -> std::set<std::string> {
+        std::set<std::string> files;
+        const std::regex dat_filename_pattern{R"(^(blk|rev)(\d+)\.dat$)", std::regex::optimize};
         for (const auto& entry : fs::directory_iterator(blocks_dir)) {
-            if (entry.is_regular_file() && std::regex_match(fs::PathToString(entry.path().filename()), dat_filename_pattern)) {
-                files.push_back(entry.path());
+            std::string fname{fs::PathToString(entry.path().filename())};
+            std::smatch dat_match;
+            if (entry.is_regular_file() && std::regex_match(fname, dat_match, dat_filename_pattern)) {
+                files.insert(dat_match[2].str());
             }
         }
-        std::ranges::shuffle(files, FastRandomContext{}); // make progress more uniform regardless of file size
         return files;
     }};
 
@@ -1349,22 +1350,21 @@ static bool ObfuscateBlocks(
     const auto start{SteadyClock::now()};
 
     const auto delta_obfuscation{create_delta_obfuscation()};
+
+    const auto files{collect_block_files()};
+    LogInfo("[obfuscate] Reobfuscating %zu block and unfo files", files.size());
+    // Migrate undo and block files atomically in parallel
+
     std::vector<std::byte> buf;
     buf.resize(node::MAX_BLOCKFILE_SIZE);
-
-    const auto& files{collect_block_files()};
-    LogInfo("[obfuscate] Reobfuscating %zu block and unfo files", files.size());
-    // Migrate undo and block files atomically
-    double progress{0};
-    for (const auto& file : files) {
+    for (const auto& id: files) {
         if (interrupt) return false;
-        if (!migrate_single_blockfile(file, *delta_obfuscation, buf)) return false;
+        fs::path blk = blocks_dir / fs::PathFromString(strprintf("blk%s.dat", id));
+        fs::path rev = blocks_dir / fs::PathFromString(strprintf("rev%s.dat", id));
+        if (fs::is_regular_file(blk) && !migrate_single_blockfile(blk, *delta_obfuscation, buf)) return false;
+        if (fs::is_regular_file(rev) && !migrate_single_blockfile(rev, *delta_obfuscation, buf)) return false;
 
-        const auto new_progress{progress + 100.0 / files.size()};
-        if (auto percentage{int(new_progress)}; percentage > int(progress)) {
-            LogInfo("[obfuscate] Migrating %s - %d%% done", fs::PathToString(file.filename()), percentage);
-        }
-        progress = new_progress;
+        LogInfo("[obfuscate] Migrating %s and %s", fs::PathToString(blk.filename()), fs::PathToString(rev.filename()));
     }
 
     // After migration rename new files to old names and use the new obfuscation key
