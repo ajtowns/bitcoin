@@ -1330,14 +1330,15 @@ static bool ObfuscateBlocks(
         return Obfuscation{delta_bytes};
     }};
 
-    auto migrate_single_blockfile{[&](const fs::path& file, const Obfuscation& delta_obfuscation, std::vector<std::byte>& buf) -> bool {
+    auto migrate_single_blockfile{[&](const fs::path& file, const Obfuscation& delta_obfuscation, std::span<std::byte> buf) -> bool {
         AutoFile old_blocks{fsbridge::fopen(file, "rb"), delta_obfuscation}; // deobfuscate & reobfuscate with a single combined key
-        buf.resize(fs::file_size(file)); // reuse buffer
-        old_blocks.read(buf);
-
         AutoFile new_blocks{fsbridge::fopen(file + suffix, "wb")};
-        new_blocks.write_buffer(buf);
 
+        while (true) {
+            size_t size = old_blocks.detail_fread(buf);
+            if (size == 0) break;
+            new_blocks.write_buffer(buf.subspan(0, size));
+        }
         if (old_blocks.fclose() || !new_blocks.Commit() || new_blocks.fclose()) return false;
 
         fs::last_write_time(file + suffix, fs::last_write_time(file)); // preserve timestamp
@@ -1356,7 +1357,7 @@ static bool ObfuscateBlocks(
     // Migrate undo and block files atomically in parallel
 
     std::vector<std::byte> buf;
-    buf.resize(node::MAX_BLOCKFILE_SIZE);
+    buf.resize(node::BLOCKFILE_CHUNK_SIZE);
     for (const auto& id: files) {
         if (interrupt) return false;
         fs::path blk = blocks_dir / fs::PathFromString(strprintf("blk%s.dat", id));
