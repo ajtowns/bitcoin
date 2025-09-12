@@ -1275,7 +1275,8 @@ static bool ObfuscateBlocks(
     const fs::path& blocks_dir,
     const fs::path& xor_dat,
     const fs::path& xor_new,
-    const std::span<const std::byte> requested_key)
+    const std::span<const std::byte> requested_key,
+    size_t n_tasks)
 {
     // Read all block and undo file names; preserve the numbers in order
     auto collect_block_files{[&blocks_dir]() -> std::set<std::string> {
@@ -1330,7 +1331,7 @@ static bool ObfuscateBlocks(
         return Obfuscation{delta_bytes};
     }};
 
-    auto migrate_single_blockfile{[&](const fs::path& file, const Obfuscation& delta_obfuscation, std::span<std::byte> buf) -> bool {
+    auto migrate_single_blockfile{[](const fs::path& file, const std::string_view suffix, const Obfuscation& delta_obfuscation, std::span<std::byte> buf) -> bool {
         AutoFile old_blocks{fsbridge::fopen(file, "rb"), delta_obfuscation}; // deobfuscate & reobfuscate with a single combined key
         AutoFile new_blocks{fsbridge::fopen(file + suffix, "wb")};
 
@@ -1352,21 +1353,82 @@ static bool ObfuscateBlocks(
 
     const auto delta_obfuscation{create_delta_obfuscation()};
 
-    const auto files{collect_block_files()};
-    LogInfo("[obfuscate] Reobfuscating %zu block and unfo files", files.size());
+    class FilesQueue
+    {
+    private:
+        mutable Mutex m_mutex;
+        const fs::path m_blocks_dir;
+        const std::set<std::string> m_files;
+        bool m_failed GUARDED_BY(m_mutex){false};
+        std::set<std::string>::const_iterator m_next GUARDED_BY(m_mutex);
+
+    public:
+        FilesQueue(fs::path blocks_dir, std::set<std::string>&& files) :
+            m_blocks_dir{blocks_dir},
+            m_files{std::move(files)},
+            m_next{m_files.begin()}
+        {
+        }
+
+        bool IsError() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+        {
+            LOCK(m_mutex);
+            return m_failed;
+        }
+
+        void Error() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+        {
+             LOCK(m_mutex);
+             m_failed = true;
+        }
+
+        std::optional<std::pair<fs::path, fs::path>> GetNext() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+        {
+             LOCK(m_mutex);
+             if (m_failed) return std::nullopt;
+             if (m_next == m_files.end()) return std::nullopt;
+
+             fs::path blk = m_blocks_dir / fs::PathFromString(strprintf("blk%s.dat", *m_next));
+             fs::path rev = m_blocks_dir / fs::PathFromString(strprintf("rev%s.dat", *m_next));
+             ++m_next;
+             LogInfo("Reobfuscating %s and %s", fs::PathToString(blk.filename()), fs::PathToString(rev.filename()));
+
+             return {{std::move(blk), std::move(rev)}};
+        }
+
+        size_t size() const { return m_files.size(); }
+    };
+
+    FilesQueue files{blocks_dir, collect_block_files()};
+
+    LogInfo("[obfuscate] Reobfuscating %zu block and undo files", files.size());
+
     // Migrate undo and block files atomically in parallel
+    auto migrate_blockfiles{[&migrate_single_blockfile](FilesQueue& files, const std::string_view suffix, const Obfuscation& delta_obfuscation, const util::SignalInterrupt& interrupt) {
+        std::vector<std::byte> buf;
+        buf.resize(node::BLOCKFILE_CHUNK_SIZE);
+        fs::path blk, rev;
+        while (true) {
+            {
+                if (interrupt) return files.Error();
+                auto next = files.GetNext();
+                if (!next) return;
+                std::tie(blk, rev) = *next;
+            }
+            if (fs::is_regular_file(blk) && !migrate_single_blockfile(blk, suffix, delta_obfuscation, buf)) return files.Error();
+            if (fs::is_regular_file(rev) && !migrate_single_blockfile(rev, suffix, delta_obfuscation, buf)) return files.Error();
+        }
+    }};
 
-    std::vector<std::byte> buf;
-    buf.resize(node::BLOCKFILE_CHUNK_SIZE);
-    for (const auto& id: files) {
-        if (interrupt) return false;
-        fs::path blk = blocks_dir / fs::PathFromString(strprintf("blk%s.dat", id));
-        fs::path rev = blocks_dir / fs::PathFromString(strprintf("rev%s.dat", id));
-        if (fs::is_regular_file(blk) && !migrate_single_blockfile(blk, *delta_obfuscation, buf)) return false;
-        if (fs::is_regular_file(rev) && !migrate_single_blockfile(rev, *delta_obfuscation, buf)) return false;
-
-        LogInfo("[obfuscate] Migrating %s and %s", fs::PathToString(blk.filename()), fs::PathToString(rev.filename()));
+    std::vector<std::thread> threads;
+    threads.reserve(n_tasks);
+    for (size_t i = 0; i < n_tasks; ++i) {
+        threads.emplace_back(migrate_blockfiles, std::ref(files), suffix, std::ref(*delta_obfuscation), std::ref(interrupt));
     }
+    for (auto& t : threads) {
+        t.join();
+    }
+    if (files.IsError()) return false;
 
     // After migration rename new files to old names and use the new obfuscation key
     for (const auto& entry : fs::directory_iterator(blocks_dir)) {
@@ -1456,7 +1518,9 @@ static ChainstateLoadResult InitAndLoadChainstate(
         }
         // reobfuscate if requested or if resuming a previous run
         if (requested_key.size() || fs::exists(xor_new)) {
-            if (!ObfuscateBlocks(*g_shutdown, block_obfuscation_suffix, blocks_dir, xor_dat, xor_new, requested_key)) {
+            int n_tasks = args.GetIntArg("-par", 0);
+            if (n_tasks == 0) n_tasks = std::clamp<size_t>(GetNumCores(), 1, 8);
+            if (!ObfuscateBlocks(*g_shutdown, block_obfuscation_suffix, blocks_dir, xor_dat, xor_new, requested_key, n_tasks)) {
                 return {ChainstateLoadStatus::FAILURE, _("Block obfuscation failed")};
             }
         }
