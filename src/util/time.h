@@ -6,6 +6,7 @@
 #ifndef BITCOIN_UTIL_TIME_H
 #define BITCOIN_UTIL_TIME_H
 
+#include <atomic>
 #include <chrono> // IWYU pragma: export
 #include <cstdint>
 #include <optional>
@@ -55,6 +56,56 @@ struct MockableSteadyClock : public std::chrono::steady_clock {
 
     /** Clear mock time, go back to system steady clock. */
     static void ClearMockTime();
+};
+
+/**
+ * Helper to allow for atomic time_point
+ */
+template<typename Clock, typename Duration = typename Clock::duration>
+class AtomicTimePoint
+{
+public:
+    using TimePoint = std::chrono::time_point<Clock, Duration>;
+    using clock = Clock;
+    using duration = Duration;
+    using rep = typename duration::rep;
+    using period = typename duration::period;
+
+    AtomicTimePoint() = default;
+
+    explicit(false) AtomicTimePoint(const TimePoint& tp) : dur{tp.time_since_epoch()} { }
+    AtomicTimePoint& operator=(const TimePoint& tp) { dur = tp.time_since_epoch(); return *this; }
+
+    operator TimePoint() const { return TimePoint{dur.load()}; }
+
+    duration time_since_epoch() const { return dur.load(); }
+
+    friend auto operator==(const AtomicTimePoint& a, const TimePoint& b) noexcept
+    {
+        return TimePoint(a) == b;
+    }
+
+    friend auto operator<=>(const AtomicTimePoint& a, const TimePoint& b) noexcept
+    {
+        return a.time_since_epoch().count() <=> b.time_since_epoch().count();
+    }
+
+    friend auto operator==(const TimePoint& a, const AtomicTimePoint& b) noexcept
+    {
+        return a == TimePoint(b);
+    }
+
+    friend auto operator<=>(const TimePoint& a, const AtomicTimePoint& b) noexcept
+    {
+        return a.time_since_epoch().count() <=> b.time_since_epoch().count();
+    }
+
+    static constexpr TimePoint min() { return TimePoint::min(); }
+    static constexpr TimePoint max() { return TimePoint::max(); }
+
+private:
+    std::atomic<duration> dur;
+    static_assert(decltype(dur)::is_always_lock_free);
 };
 
 void UninterruptibleSleep(const std::chrono::microseconds& n);
