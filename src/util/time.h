@@ -71,6 +71,8 @@ public:
     using rep = typename duration::rep;
     using period = typename duration::period;
 
+    static_assert(std::is_trivially_copyable_v<duration>);
+
     AtomicTimePoint() = default;
 
     explicit(false) AtomicTimePoint(const TimePoint& tp) : dur{tp.time_since_epoch()} { }
@@ -104,7 +106,7 @@ public:
     static constexpr TimePoint max() { return TimePoint::max(); }
 
 private:
-    std::atomic<duration> dur;
+    std::atomic<duration> dur{};
     static_assert(decltype(dur)::is_always_lock_free);
 };
 
