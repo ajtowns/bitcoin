@@ -102,6 +102,24 @@ public:
         return a <=> TimePoint(b);
     }
 
+    template<typename Dur>
+    friend auto operator+(const AtomicTimePoint& tp, const Dur& d) noexcept
+    {
+        return TimePoint(tp) + d;
+    }
+
+    template<typename Other>
+    friend auto operator-(const AtomicTimePoint& a, const Other& b) noexcept
+    {
+        return TimePoint(a) - b;
+    }
+
+    template<typename Other>
+    friend auto operator-(const Other& a, const AtomicTimePoint& b) noexcept
+    {
+        return a - TimePoint(b);
+    }
+
     static constexpr TimePoint min() { return TimePoint::min(); }
     static constexpr TimePoint max() { return TimePoint::max(); }
 
