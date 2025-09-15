@@ -272,7 +272,7 @@ struct Peer {
     /** The pong reply we're expecting, or 0 if no pong expected. */
     std::atomic<uint64_t> m_ping_nonce_sent{0};
     /** When the last ping was sent, or 0 if no ping was ever sent */
-    std::atomic<std::chrono::microseconds> m_ping_start{0us};
+    AtomicTimePoint<NodeClock> m_ping_start;    // XXX
     /** Whether a ping has been requested by the user */
     std::atomic<bool> m_ping_queued{false};
 
@@ -284,7 +284,7 @@ struct Peer {
     CAmount m_fee_filter_sent GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
     /** Timestamp after which we will send the next BIP133 `feefilter` message
       * to the peer. */
-    std::chrono::microseconds m_next_send_feefilter GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+    std::chrono::microseconds m_next_send_feefilter GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};   // XXX
 
     struct TxRelay {
         mutable RecursiveMutex m_bloom_filter_mutex;
@@ -364,9 +364,9 @@ struct Peer {
     /** Guards address sending timers. */
     mutable Mutex m_addr_send_times_mutex;
     /** Time point to send the next ADDR message to this peer. */
-    std::chrono::microseconds m_next_addr_send GUARDED_BY(m_addr_send_times_mutex){0};
+    std::chrono::microseconds m_next_addr_send GUARDED_BY(m_addr_send_times_mutex){0};    // XXX
     /** Time point to possibly re-announce our local address to this peer. */
-    std::chrono::microseconds m_next_local_addr_send GUARDED_BY(m_addr_send_times_mutex){0};
+    std::chrono::microseconds m_next_local_addr_send GUARDED_BY(m_addr_send_times_mutex){0};  // XXX
     /** Whether the peer has signaled support for receiving ADDRv2 (BIP155)
      *  messages, indicating a preference to receive ADDRv2 instead of ADDR ones. */
     std::atomic_bool m_wants_addrv2{false};
@@ -376,7 +376,7 @@ struct Peer {
      *  permit self-announcement. */
     double m_addr_token_bucket GUARDED_BY(NetEventsInterface::g_msgproc_mutex){1.0};
     /** When m_addr_token_bucket was last updated */
-    std::chrono::microseconds m_addr_token_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){GetTime<std::chrono::microseconds>()};
+    std::chrono::microseconds m_addr_token_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){GetTime<std::chrono::microseconds>()};   // XXX
     /** Total number of addresses that were dropped due to rate limiting. */
     std::atomic<uint64_t> m_addr_rate_limited{0};
     /** Total number of addresses that were processed (excludes rate-limited ones). */
@@ -403,7 +403,7 @@ struct Peer {
     std::atomic<bool> m_sent_sendheaders{false};
 
     /** When to potentially disconnect peer for stalling headers download */
-    std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us}; // XXX
 
     /** Whether this peer wants invs or headers (when possible) for block announcements */
     bool m_prefers_headers GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
@@ -445,10 +445,10 @@ struct CNodeState {
     //! Whether we've started headers synchronization with this peer.
     bool fSyncStarted{false};
     //! Since when we're stalling block download progress (in microseconds), or 0.
-    std::chrono::microseconds m_stalling_since{0us};
+    std::chrono::microseconds m_stalling_since{0us}; // XXX
     std::list<QueuedBlock> vBlocksInFlight;
     //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
-    std::chrono::microseconds m_downloading_since{0us};
+    std::chrono::microseconds m_downloading_since{0us};  // XXX
     //! Whether we consider this a preferred download peer.
     bool fPreferredDownload{false};
     /** Whether this peer wants invs or cmpctblocks (when possible) for block announcements. */
@@ -544,7 +544,7 @@ public:
     };
     void UnitTestMisbehaving(NodeId peer_id) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex) { Misbehaving(*Assert(GetPeerRef(peer_id)), ""); };
     void ProcessMessage(CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
-                        const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc) override
+                        NodeClock::time_point time_received, const std::atomic<bool>& interruptMsgProc) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex);
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
@@ -937,7 +937,7 @@ private:
     BlockDownloadMap mapBlocksInFlight GUARDED_BY(cs_main);
 
     /** When our tip was last updated. */
-    std::atomic<std::chrono::seconds> m_last_tip_update{0s};
+    std::atomic<std::chrono::seconds> m_last_tip_update{0s};  // XXX
 
     /** Determine whether or not a peer can request a transaction, and return it (or nullptr if not found or not allowed). */
     CTransactionRef FindTxForGetData(const Peer::TxRelay& tx_relay, const GenTxid& gtxid)
@@ -1719,9 +1719,9 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
     // since pingtime does not update until the ping is complete, which might take a while.
     // So, if a ping is taking an unusually long time in flight,
     // the caller can immediately detect that this is happening.
-    auto ping_wait{0us};
-    if ((0 != peer->m_ping_nonce_sent) && (0 != peer->m_ping_start.load().count())) {
-        ping_wait = GetTime<std::chrono::microseconds>() - peer->m_ping_start.load();
+    NodeClock::duration ping_wait{0us};
+    if ((0 != peer->m_ping_nonce_sent) && !AtEpoch(peer->m_ping_start)) {
+        ping_wait = NodeClock::now() - peer->m_ping_start;
     }
 
     if (auto tx_relay = peer->GetTxRelay(); tx_relay != nullptr) {
@@ -1732,7 +1732,7 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
         stats.m_fee_filter_received = 0;
     }
 
-    stats.m_ping_wait = ping_wait;
+    stats.m_ping_wait = std::chrono::duration_cast<std::chrono::microseconds>(ping_wait);
     stats.m_addr_processed = peer->m_addr_processed.load();
     stats.m_addr_rate_limited = peer->m_addr_rate_limited.load();
     stats.m_addr_relay_enabled = peer->m_addr_relay_enabled.load();
@@ -3412,7 +3412,7 @@ void PeerManagerImpl::LogBlockHeader(const CBlockIndex& index, const CNode& peer
 }
 
 void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
-                                     const std::chrono::microseconds time_received,
+                                     NodeClock::time_point time_received,
                                      const std::atomic<bool>& interruptMsgProc)
 {
     AssertLockHeld(g_msgproc_mutex);
@@ -4763,10 +4763,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 if (nonce == peer->m_ping_nonce_sent) {
                     // Matching pong received, this ping is no longer outstanding
                     bPingFinished = true;
-                    const auto ping_time = ping_end - peer->m_ping_start.load();
+                    const auto ping_time = ping_end - peer->m_ping_start;
                     if (ping_time.count() >= 0) {
                         // Let connman know about this successful ping-pong
-                        pfrom.PongReceived(ping_time);
+                        pfrom.PongReceived(std::chrono::duration_cast<std::chrono::microseconds>(ping_time));
                     } else {
                         // This should never happen
                         sProblem = "Timing mishap";
