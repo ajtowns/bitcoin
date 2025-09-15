@@ -309,7 +309,7 @@ struct Peer {
         bool m_send_mempool GUARDED_BY(m_tx_inventory_mutex){false};
         /** The next time after which we will send an `inv` message containing
          *  transaction announcements to this peer. */
-        std::chrono::microseconds m_next_inv_send_time GUARDED_BY(m_tx_inventory_mutex){0};
+        AtomicTimePoint<NodeClock> m_next_inv_send_time;     // XXX
         /** The mempool sequence num at which we sent the last `inv` message to this peer.
          *  Can relay txs with lower sequence numbers than this (see CTxMempool::info_for_relay). */
         uint64_t m_last_inv_sequence GUARDED_BY(NetEventsInterface::g_msgproc_mutex){1};
@@ -807,7 +807,7 @@ private:
 
     uint32_t GetFetchFlags(const Peer& peer) const;
 
-    std::atomic<std::chrono::microseconds> m_next_inv_to_inbounds{0us};
+    AtomicTimePoint<NodeClock> m_next_inv_to_inbounds;   // XXX
 
     /** Number of nodes with fSyncStarted. */
     int nSyncStarted GUARDED_BY(cs_main) = 0;
@@ -841,9 +841,8 @@ private:
      * peer, a spy node could make multiple inbound connections to us to
      * accurately determine when we received the transaction (and potentially
      * determine the transaction's origin). */
-    std::chrono::microseconds NextInvToInbounds(std::chrono::microseconds now,
-                                                std::chrono::seconds average_interval) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
-
+    NodeClock::time_point NextInvToInbounds(NodeClock::time_point now, std::chrono::seconds average_interval)
+        EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
 
     // All of the following cache a recent block, and are protected by m_most_recent_block_mutex
     Mutex m_most_recent_block_mutex;
@@ -1142,10 +1141,10 @@ static bool CanServeWitnesses(const Peer& peer)
     return peer.m_their_services & NODE_WITNESS;
 }
 
-std::chrono::microseconds PeerManagerImpl::NextInvToInbounds(std::chrono::microseconds now,
-                                                             std::chrono::seconds average_interval)
+NodeClock::time_point PeerManagerImpl::NextInvToInbounds(NodeClock::time_point now,
+                                                         std::chrono::seconds average_interval)
 {
-    if (m_next_inv_to_inbounds.load() < now) {
+    if (m_next_inv_to_inbounds < now) {
         // If this function were called from multiple threads simultaneously
         // it would possible that both update the next send variable, and return a different result to their caller.
         // This is not possible in practice as only the net processing thread invokes this function.
@@ -2126,14 +2125,14 @@ void PeerManagerImpl::RelayTransaction(const Txid& txid, const Wtxid& wtxid)
         auto tx_relay = peer.GetTxRelay();
         if (!tx_relay) continue;
 
-        LOCK(tx_relay->m_tx_inventory_mutex);
         // Only queue transactions for announcement once the version handshake
         // is completed. The time of arrival for these transactions is
         // otherwise at risk of leaking to a spy, if the spy is able to
         // distinguish transactions received during the handshake from the rest
         // in the announcement.
-        if (tx_relay->m_next_inv_send_time == 0s) continue;
+        if (AtEpoch(tx_relay->m_next_inv_send_time)) continue;
 
+        LOCK(tx_relay->m_tx_inventory_mutex);
         const uint256& hash{peer.m_wtxid_relay ? wtxid.ToUint256() : txid.ToUint256()};
         if (!tx_relay->m_tx_inventory_known_filter.contains(hash)) {
             tx_relay->m_tx_inventory_to_send.insert(wtxid);
@@ -3692,10 +3691,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             // received during the version handshake would otherwise
             // immediately be advertised without random delay, potentially
             // leaking the time of arrival to a spy.
-            Assume(WITH_LOCK(
-                tx_relay->m_tx_inventory_mutex,
-                return tx_relay->m_tx_inventory_to_send.empty() &&
-                       tx_relay->m_next_inv_send_time == 0s));
+            Assume(AtEpoch(tx_relay->m_next_inv_send_time) &&
+                WITH_LOCK(tx_relay->m_tx_inventory_mutex, return tx_relay->m_tx_inventory_to_send.empty()));
         }
 
         {
@@ -5476,6 +5473,7 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
         return true;
 
     const auto current_time{GetTime<std::chrono::microseconds>()};
+    const auto now{NodeClock::now()};
 
     if (pto->IsAddrFetchConn() && current_time - pto->m_connected > 10 * AVG_ADDRESS_BROADCAST_INTERVAL) {
         LogDebug(BCLog::NET, "addrfetch connection timeout, %s\n", pto->DisconnectMsg(fLogIPs));
@@ -5708,12 +5706,12 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                 LOCK(tx_relay->m_tx_inventory_mutex);
                 // Check whether periodic sends should happen
                 bool fSendTrickle = pto->HasPermission(NetPermissionFlags::NoBan);
-                if (tx_relay->m_next_inv_send_time < current_time) {
+                if (tx_relay->m_next_inv_send_time < now) {
                     fSendTrickle = true;
                     if (pto->IsInboundConn()) {
-                        tx_relay->m_next_inv_send_time = NextInvToInbounds(current_time, INBOUND_INVENTORY_BROADCAST_INTERVAL);
+                        tx_relay->m_next_inv_send_time = NextInvToInbounds(now, INBOUND_INVENTORY_BROADCAST_INTERVAL);
                     } else {
-                        tx_relay->m_next_inv_send_time = current_time + m_rng.rand_exp_duration(OUTBOUND_INVENTORY_BROADCAST_INTERVAL);
+                        tx_relay->m_next_inv_send_time = now + m_rng.rand_exp_duration(OUTBOUND_INVENTORY_BROADCAST_INTERVAL);
                     }
                 }
 

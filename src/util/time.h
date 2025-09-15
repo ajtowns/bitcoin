@@ -134,6 +134,12 @@ constexpr int64_t count_seconds(std::chrono::seconds t) { return t.count(); }
 constexpr int64_t count_milliseconds(std::chrono::milliseconds t) { return t.count(); }
 constexpr int64_t count_microseconds(std::chrono::microseconds t) { return t.count(); }
 
+template <typename Timepoint>
+constexpr bool AtEpoch(const Timepoint& t)
+{
+    return t.time_since_epoch().count() == 0;
+}
+
 using HoursDouble = std::chrono::duration<double, std::chrono::hours::period>;
 using SecondsDouble = std::chrono::duration<double, std::chrono::seconds::period>;
 using MillisecondsDouble = std::chrono::duration<double, std::chrono::milliseconds::period>;
