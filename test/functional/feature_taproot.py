@@ -67,6 +67,7 @@ from test_framework.script import (
     OP_EQUAL,
     OP_EQUALVERIFY,
     OP_IF,
+    OP_INTERNALKEY,
     OP_NOP,
     OP_NOT,
     OP_NOTIF,
@@ -666,6 +667,22 @@ TRUC_MAX_VSIZE = 10000 # test doesn't cover in-mempool spends, so only this limi
 
 # === Actual test cases ===
 
+def spenders_internalkey_active():
+
+    secs = [generate_privkey() for _ in range(8)]
+    pubs = [compute_xonly_pubkey(sec)[0] for sec in secs]
+
+    spenders = []
+
+    scripts = [
+        ("ik", CScript([OP_INTERNALKEY, OP_EQUAL])),
+    ]
+
+    tap = taproot_construct(pubs[0], scripts)
+
+    add_spender(spenders, "ik/success", tap=tap, leaf="ik", inputs=[pubs[0]], failure={"inputs": [pubs[1]]})
+
+    return spenders
 
 def spenders_taproot_active():
     """Return a list of Spenders for testing post-Taproot activation behavior."""
@@ -1255,7 +1272,7 @@ def spenders_taproot_active():
             # For the standard non-witness p2sh case, we need inputs to be minimal push opcodes (not witness stack elements)
             # so we use arb non-0 byte push via valid pubkey
             add_spender(spenders, "compat/nocsfs", p2sh=p2sh, witv0=witv0, standard=p2sh or witv0, script=CScript([OP_IF, b'', b'', pubs[0], OP_CHECKSIGFROMSTACK, OP_DROP, OP_ENDIF]), inputs=[pubs[0], b''], failure={"inputs": [pubs[0], pubs[0]]}, **ERR_UNDECODABLE)
-
+            add_spender(spenders, "compat/noik", p2sh=p2sh, witv0=witv0, standard=p2sh or witv0, script=CScript([OP_IF, OP_INTERNALKEY, OP_RETURN, OP_ENDIF]), inputs=[pubs[0], b''], failure={"inputs": [pubs[0], pubs[0]]}, **ERR_UNDECODABLE)
     return spenders
 
 
@@ -1296,6 +1313,25 @@ def bip348_csfs_spenders_nonstandard():
     # Valid prior to activation but nonstandard
     add_spender(spenders, "discouraged_csfs/stilltrue", tap=tap, leaf="stilltrue", standard=False)
     add_spender(spenders, "discouraged_csfs/still_opsuccess", tap=tap, leaf="still_opsuccess", standard=False)
+
+    return spenders
+
+def bip349_ik_spenders_nonstandard():
+    """Spenders for testing that pre-active INTERNALKEY usage is discouraged but valid"""
+
+    spenders = []
+
+    sec = generate_privkey()
+    pub, _ = compute_xonly_pubkey(sec)
+    scripts = [
+        ("stilltrue", CScript([OP_INTERNALKEY])),
+        ("still_opsuccess", CScript([OP_RETURN, OP_INTERNALKEY])),
+    ]
+    tap = taproot_construct(pub, scripts)
+
+    # Valid prior to activation but nonstandard
+    add_spender(spenders, "discouraged_ik/stilltrue", tap=tap, leaf="stilltrue", standard=False)
+    add_spender(spenders, "discouraged_ik/still_opsuccess", tap=tap, leaf="still_opsuccess", standard=False)
 
     return spenders
 
@@ -1417,7 +1453,8 @@ class TaprootTest(BitcoinTestFramework):
 
     def set_test_params(self):
         self.num_nodes = 1
-        self.extra_args = [["-vbparams=checksigfromstack:0:3999999999"]]
+        self.extra_args = [["-vbparams=checksigfromstack:0:3999999999",
+                            "-vbparams=internalkey:0:3999999999"]]
         self.setup_clean_chain = True
 
     def block_submit(self, node, txs, msg, err_msg, cb_pubkey=None, fees=0, sigops_weight=0, witness=False, accept=False):
@@ -1890,25 +1927,31 @@ class TaprootTest(BitcoinTestFramework):
     def run_test(self):
         self.gen_test_vectors()
 
-        self.log.info("CSFS Pre-activation tests...")
+        self.log.info("CSFS and IK Pre-activation tests...")
         assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"defined")
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["internalkey"]["heretical"]["status"],"defined")
         self.generate(self.nodes[0], 144)
         assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"started")
-        signal_ver = int(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["signal_activate"], 16)
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["internalkey"]["heretical"]["status"],"started")
+        signal_ver_csfs = int(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["signal_activate"], 16)
+        signal_ver_ik = int(self.nodes[0].getdeploymentinfo()["deployments"]["internalkey"]["heretical"]["signal_activate"], 16)
 
-        self.test_spenders(self.nodes[0], bip348_csfs_spenders_nonstandard(), input_counts=[1, 2])
+        self.test_spenders(self.nodes[0], bip348_csfs_spenders_nonstandard() + bip349_ik_spenders_nonstandard(), input_counts=[1, 2])
 
-        self.log.info("Activating CSFS")
+        self.log.info("Activating CSFS and IK")
         now = self.nodes[0].getblock(self.nodes[0].getbestblockhash())["time"]
-        coinbase_tx = create_coinbase(self.nodes[0].getblockcount() + 1)
-        block = create_block(hashprev=int(self.nodes[0].getbestblockhash(), 16), ntime=now, coinbase=coinbase_tx, version=signal_ver)
-        block.solve()
-        self.nodes[0].submitblock(block.serialize().hex())
+        for signal in [signal_ver_csfs, signal_ver_ik]:
+            coinbase_tx = create_coinbase(self.nodes[0].getblockcount() + 1)
+            block = create_block(hashprev=int(self.nodes[0].getbestblockhash(), 16), ntime=now, coinbase=coinbase_tx, version=signal)
+            block.solve()
+            self.nodes[0].submitblock(block.serialize().hex())
+            now += 1
         self.generate(self.nodes[0], 288)
         assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["checksigfromstack"]["heretical"]["status"],"active")
+        assert_equal(self.nodes[0].getdeploymentinfo()["deployments"]["internalkey"]["heretical"]["status"],"active")
 
         self.log.info("Post-activation tests...")
-        consensus_spenders = spenders_taproot_active() + bip348_csfs_spenders()
+        consensus_spenders = spenders_taproot_active() + bip348_csfs_spenders() + spenders_internalkey_active()
         self.test_spenders(self.nodes[0], consensus_spenders, input_counts=[1, 2, 2, 2, 2, 3])
         # Run each test twice; once in isolation, and once combined with others. Testing in isolation
         # means that the standardness is verified in every test (as combined transactions are only standard

@@ -1364,6 +1364,19 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     break;
                 }
 
+                case OP_INTERNALKEY: {
+                    // OP_INTERNALKEY is only available in Tapscript
+                    if (sigversion == SigVersion::BASE || sigversion == SigVersion::WITNESS_V0) {
+                        return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
+                    }
+                    // Always present in Tapscript
+                    assert(flags & SCRIPT_VERIFY_INTERNALKEY);
+                    assert(sigversion == SigVersion::TAPSCRIPT);
+                    assert(execdata.m_internal_key);
+                    stack.emplace_back(execdata.m_internal_key->begin(), execdata.m_internal_key->end());
+                    break;
+                }
+
                 default:
                     return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
             }
