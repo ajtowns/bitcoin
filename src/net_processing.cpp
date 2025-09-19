@@ -239,6 +239,7 @@ struct TemplateTx
     CTransactionRef tx;
     mutable uint32_t num_templates{0};
     mutable uint32_t cbvec_pos{0};
+    mutable NodeClock::time_point next_mempool_check{NodeClock::time_point::min()};
 
     explicit TemplateTx(CTransactionRef tx) : tx{std::move(tx)} { }
 
@@ -270,6 +271,7 @@ struct MyTemplate {
 struct PeerTemplate
 {
     TemplateTxRefVec txs;
+    size_t last_validated_idx{0};
 };
 
 class TemplateManager
@@ -282,7 +284,11 @@ public:
     std::deque<MyTemplate> my_templates;
     std::map<int, PeerTemplate> peer_templates;
 
-    size_t size() const { return template_txs.size(); }
+    size_t size() const
+    {
+        assert(template_txs.size() == cbvec.size());
+        return template_txs.size();
+    }
 
     void DiscardTxs(TemplateTxRefVec& txrv)
     {
@@ -324,6 +330,13 @@ public:
             DiscardTxs(it->second.txs);
             peer_templates.erase(it);
         }
+    }
+
+    void BumpMempoolCheck(const Wtxid& hash, NodeClock::time_point next)
+    {
+        auto it = template_txs.find(hash);
+        if (it == template_txs.end()) return;
+        it->next_mempool_check = next;
     }
 
     class ExtraTxns : public ExtraTransactions {
@@ -1246,6 +1259,10 @@ private:
     // request and receive BIP153 templates
     void MaybeSendGetTemplate(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templateman_mutex);
     void ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templateman_mutex, !m_templatestats_mutex);
+
+    // attempt to add BIP153 template txs to mempool
+    bool ConsiderTemplateTransactions(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex, !m_templateman_mutex, !m_templatestats_mutex);
+    NodeClock::time_point ConsiderTemplateTx(Peer& peer, CTransactionRef templatetx, NodeClock::time_point now) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex, !m_templateman_mutex);
 
     TemplateManager::ExtraTxns GetExtraTxns() const
         EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templateman_mutex)
@@ -5289,6 +5306,7 @@ void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const
         LOCK(m_templateman_mutex);
         auto [it, inserted] = m_templateman.peer_templates.try_emplace(pfrom.GetId());
         auto& managed_txs = it->second.txs;
+        it->second.last_validated_idx = 0;
 
         auto txs = m_templateman.AddTxs(block.vtx);
         std::swap(managed_txs, txs);
@@ -5299,6 +5317,97 @@ void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const
         m_templatestats.num_peer_templates = m_templateman.peer_templates.size();
     }
     partialBlock.reset();
+}
+
+bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
+{
+    if (m_opts.share_template_count == 0) return false;
+    if (m_next_template_update == NodeClock::time_point::min()) return false;
+
+    WAIT_LOCK(m_templateman_mutex, templateman_lock);
+
+    // do we have a template?
+    auto it = m_templateman.peer_templates.find(peer.m_id);
+    if (it == m_templateman.peer_templates.end()) return false;
+
+    auto& peer_tmp = it->second;
+    auto now = NodeClock::now();
+
+    // XXX discard the template if it is out of date?
+
+    // we have an up to date template, try processing an unprocessed tx
+    while (peer_tmp.last_validated_idx < peer_tmp.txs.size()) {
+        const auto& ttx = *peer_tmp.txs[peer_tmp.last_validated_idx++];
+        if (now < ttx.next_mempool_check) continue;
+
+        if (m_mempool.exists(ttx.tx->GetWitnessHash())) {
+            ttx.next_mempool_check = now + 120s;
+            continue;
+        }
+
+        LogDebug(BCLog::SHARETMPL, "Considering template tx %d (of %d) txid=%s peer=%d\n",
+            peer_tmp.last_validated_idx, peer_tmp.txs.size(), ttx.tx->GetHash().ToString(), peer.m_id);
+
+        NodeClock::time_point next;
+        CTransactionRef tx = ttx.tx;
+        {
+             // avoid cs_main lock inversion
+             REVERSE_LOCK(templateman_lock, m_templateman_mutex);
+             next = ConsiderTemplateTx(peer, tx, now);
+        }
+        // in theory, template could have been deleted by other thread
+        m_templateman.BumpMempoolCheck(tx->GetWitnessHash(), next);
+        return true;
+    }
+
+    return false;
+}
+
+NodeClock::time_point PeerManagerImpl::ConsiderTemplateTx(Peer& peer, CTransactionRef tx, NodeClock::time_point now)
+{
+    AssertLockNotHeld(m_templateman_mutex); // avoid lock inversion with cs_main
+    AssertLockNotHeld(m_tx_download_mutex);
+
+    const auto result = WITH_LOCK(::cs_main, return m_chainman.ProcessTransaction(tx));
+    const auto& state = result.m_state;
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        LOCK(m_tx_download_mutex);
+        ProcessValidTx(peer.m_id, tx, result.m_replaced_transactions);
+        return now + 120s;
+    }
+
+    if (state.IsInvalid()) {
+        switch (state.GetResult()) {
+        case TxValidationResult::TX_NO_MEMPOOL:
+        case TxValidationResult::TX_UNKNOWN:
+            // impossible?
+            break;
+        case TxValidationResult::TX_RESULT_UNSET:
+        case TxValidationResult::TX_CONSENSUS:
+        case TxValidationResult::TX_WITNESS_STRIPPED:
+            // will never be valid
+            break;
+        case TxValidationResult::TX_INPUTS_NOT_STANDARD:
+        case TxValidationResult::TX_NOT_STANDARD:
+        case TxValidationResult::TX_WITNESS_MUTATED: // non-standard witness
+        case TxValidationResult::TX_MEMPOOL_POLICY:
+            // non-standard, will never be valid
+            break;
+        case TxValidationResult::TX_MISSING_INPUTS:
+            // maybe needed to be processed as a package with parents
+            return now + 600s;
+        case TxValidationResult::TX_PREMATURE_SPEND:
+            // invalid, but eventually worth retrying. don't rush.
+            return now + 1200s;
+        case TxValidationResult::TX_CONFLICT:
+        case TxValidationResult::TX_RECONSIDERABLE:
+            // worth reconsidering
+            return now + 180s;
+        }
+    }
+
+    return NodeClock::time_point::max();
 }
 
 TemplateStats PeerManagerImpl::GetTemplateStats() const
@@ -5404,6 +5513,9 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
         LOCK(peer->m_getdata_requests_mutex);
         if (!peer->m_getdata_requests.empty()) return true;
     }
+
+    // Attempt to add txs from peer's template to the mempool
+    if (ConsiderTemplateTransactions(*peer)) return true;
 
     // Don't bother if send buffer is too full to respond anyway
     if (pfrom->fPauseSend) return false;
