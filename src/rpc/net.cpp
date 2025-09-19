@@ -1208,6 +1208,7 @@ static RPCHelpMan gettemplateinfo()
                 {RPCResult::Type::NUM, "latest_template_weight", "weight of latest template"},
                 {RPCResult::Type::NUM, "latest_template_tx", "number of transactions in latest template"},
                 {RPCResult::Type::NUM, "next_update", "the next update expressed in UNIX epoch time"},
+                {RPCResult::Type::NUM, "peer_templates", "number of peers who have provided a template"},
             }
         },
         RPCExamples{
@@ -1226,6 +1227,7 @@ static RPCHelpMan gettemplateinfo()
             obj.pushKV("latest_template_weight", stats.latest_template_weight);
             obj.pushKV("latest_template_tx", stats.latest_template_tx);
             obj.pushKV("next_update", TicksSinceEpoch<std::chrono::seconds>(stats.next_update));
+            obj.pushKV("peer_templates", stats.num_peer_templates);
             return obj;
         },
     };

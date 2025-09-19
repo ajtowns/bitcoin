@@ -69,6 +69,7 @@ struct TemplateStats {
     int num_templates{0};
     int max_templates{0};
     int num_transactions{0};
+    int num_peer_templates{0};
     int latest_template_tx{0};
     int latest_template_weight{0};
     NodeClock::time_point next_update{NodeClock::time_point::max()};
