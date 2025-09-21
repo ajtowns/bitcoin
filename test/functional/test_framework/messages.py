@@ -75,7 +75,7 @@ DEFAULT_DESCENDANT_LIMIT = 25  # default max number of in-mempool descendants
 
 
 # Default setting for -datacarriersize.
-MAX_OP_RETURN_RELAY = 100_000
+MAX_OP_RETURN_RELAY = 160
 
 
 DEFAULT_MEMPOOL_EXPIRY_HOURS = 336  # hours
