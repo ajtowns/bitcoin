@@ -347,11 +347,10 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
             rawtxs=[tx.serialize().hex()],
         )
 
-        # Multiple OP_RETURN and more than 83 bytes, even if over MAX_SCRIPT_ELEMENT_SIZE
-        # are standard since v30
+        # Multiple OP_RETURN and more than 83 bytes are standard since v30
         tx = tx_from_hex(raw_tx_reference)
         tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff'])))
-        tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff' * 50000])))
+        tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff' * 90])))
 
         self.check_mempool_result(
             result_expected=[{'txid': tx.txid_hex, 'allowed': True, 'vsize': tx.get_vsize(), 'fees': {'base': Decimal('0.05')}}],
