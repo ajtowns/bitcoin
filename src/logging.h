@@ -357,6 +357,9 @@ inline void LogPrintFormatInternal(std::source_location&& source_loc, BCLog::Log
 #define LogWarning(...) LogPrintLevel_(BCLog::LogFlags::ALL, BCLog::Level::Warning, /*should_ratelimit=*/true, __VA_ARGS__)
 #define LogError(...) LogPrintLevel_(BCLog::LogFlags::ALL, BCLog::Level::Error, /*should_ratelimit=*/true, __VA_ARGS__)
 
+// Same as LogInfo, but never rate limited
+#define LogEssential(...) LogPrintLevel_(BCLog::LogFlags::ALL, BCLog::Level::Info, /*should_ratelimit=*/false, __VA_ARGS__)
+
 // Deprecated unconditional logging.
 #define LogPrintf(...) LogInfo(__VA_ARGS__)
 

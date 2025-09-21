@@ -739,7 +739,7 @@ pay attention to for reviewers of Bitcoin Core code.
 
 ## Logging
 
-The macros `LogInfo`, `LogDebug`, `LogTrace`, `LogWarning` and `LogError` are available for
+The macros `LogInfo`, `LogDebug`, `LogTrace`, `LogEssential`, `LogWarning` and `LogError` are available for
 logging messages. They should be used as follows:
 
 - `LogDebug(BCLog::CATEGORY, fmt, params...)` is what you want
@@ -758,6 +758,9 @@ logging messages. They should be used as follows:
 - `LogError(fmt, params...)` should be used in place of `LogInfo` for
   severe problems that require the node (or a subsystem) to shut down
   entirely (e.g., insufficient storage space).
+
+- `LogEssential(fmt, params...)` should be used in place of `LogInfo` for
+  essential messages that should never be subject to ratelimiting.
 
 - `LogWarning(fmt, params...)` should be used in place of `LogInfo` for
   severe problems that the node admin should address, but are not
