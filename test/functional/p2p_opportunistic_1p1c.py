@@ -77,6 +77,7 @@ class PackageRelayTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.num_nodes = 1
         self.extra_args = [[
+            "-datacarriersize=100000",
             "-maxmempool=5",
         ]]
 
