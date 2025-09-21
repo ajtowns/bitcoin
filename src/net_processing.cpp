@@ -5468,6 +5468,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     m_templatestats.num_templates = my_templates.size();
     m_templatestats.max_templates = m_opts.share_template_count;
     m_templatestats.num_transactions = m_templateman.size();
+    m_templatestats.num_peer_templates = m_templateman.peer_templates.size();
     if (!m_templateman.my_templates.empty()) {
         const auto& tmp = m_templateman.my_templates.front();
         m_templatestats.latest_template_weight = tmp.weight;
