@@ -272,6 +272,7 @@ struct PeerTemplate
 {
     TemplateTxRefVec txs;
     size_t last_validated_idx{0};
+    uint256 tiphash;
 };
 
 class TemplateManager
@@ -4557,7 +4558,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     }
 
     if (msg_type == NetMsgType::TEMPLATE) {
-        LogDebug(BCLog::SHARETMPL, "got TEMPLATE from peer=%d\n", peer->m_id);
         if (peer->m_next_template_request == NodeClock::time_point::max()) return;
 
         auto tx_relay = peer->GetTxRelay();
@@ -4572,6 +4572,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         PartiallyDownloadedBlock& partialBlock = peer->m_partial_template;
         partialBlock.reset();
         ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, GetExtraTxns());
+        LogDebug(BCLog::SHARETMPL, "got TEMPLATE from peer=%d prev=%s\n", peer->m_id, partialBlock.header.hashPrevBlock.ToString());
         if (status == READ_STATUS_INVALID) {
             Misbehaving(*peer, "invalid compact template");
             partialBlock.reset();
@@ -5292,6 +5293,7 @@ void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const
 {
     CBlock block;
     PartiallyDownloadedBlock& partialBlock = peer.m_partial_template;
+    uint256 prev_block_hash{partialBlock.header.hashPrevBlock}; // FillBlock resets this value
     ReadStatus status = partialBlock.FillBlock(block, block_transactions.txn, /*segwit_active=*/true);
 
     if (status == READ_STATUS_INVALID) {
@@ -5307,6 +5309,7 @@ void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const
         auto [it, inserted] = m_templateman.peer_templates.try_emplace(pfrom.GetId());
         auto& managed_txs = it->second.txs;
         it->second.last_validated_idx = 0;
+        it->second.tiphash = prev_block_hash;
 
         auto txs = m_templateman.AddTxs(block.vtx);
         std::swap(managed_txs, txs);
@@ -5324,6 +5327,9 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     if (m_opts.share_template_count == 0) return false;
     if (m_next_template_update == NodeClock::time_point::min()) return false;
 
+    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.ActiveTip());
+    if (tip == nullptr || tip->pprev == nullptr) return false;
+
     WAIT_LOCK(m_templateman_mutex, templateman_lock);
 
     // do we have a template?
@@ -5331,9 +5337,16 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     if (it == m_templateman.peer_templates.end()) return false;
 
     auto& peer_tmp = it->second;
-    auto now = NodeClock::now();
+    if (peer_tmp.last_validated_idx >= peer_tmp.txs.size()) return false;
 
-    // XXX discard the template if it is out of date?
+    // haven't considered all the txs in this template!
+
+    if (tip->GetBlockHash() != peer_tmp.tiphash && tip->pprev->GetBlockHash() != peer_tmp.tiphash) {
+        // template may be old, in the future, or for a reorged chain; ignore txs if so
+        return false;
+    }
+
+    auto now = NodeClock::now();
 
     // we have an up to date template, try processing an unprocessed tx
     while (peer_tmp.last_validated_idx < peer_tmp.txs.size()) {
