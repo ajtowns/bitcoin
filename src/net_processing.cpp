@@ -5457,6 +5457,8 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     auto& block = block_template->block;
     assert(block.vtx[0]->IsCoinBase());
     block.vtx.erase(block.vtx.begin());
+    block.nNonce = 0;
+    block.nTime = std::numeric_limits<uint32_t>::max();
 
     LOCK(m_templateman_mutex);
     auto& my_templates = m_templateman.my_templates;
