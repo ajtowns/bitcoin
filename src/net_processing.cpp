@@ -200,7 +200,7 @@ static constexpr uint64_t CMPCTBLOCKS_VERSION{2};
 /** How frequently to update templates for sharing */
 static constexpr std::chrono::microseconds TEMPLATE_UPDATE_INTERVAL{30s};
 /** How frequently to request updated templates from peers */
-static constexpr std::chrono::microseconds TEMPLATE_REQUEST_INTERVAL{120s};
+static constexpr auto TEMPLATE_REQUEST_INTERVAL{120s};
 /** Template weight limit */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 static_assert(MAX_TEMPLATE_WEIGHT == 2 * MAX_BLOCK_WEIGHT);
@@ -5285,7 +5285,7 @@ void PeerManagerImpl::MaybeSendGetTemplate(CNode& node, Peer& peer)
     if (now >= peer.m_next_template_request) {
         LogDebug(BCLog::SHARETMPL, "Sending GETREQ to peer %d\n", peer.m_id);
         MakeAndPushMessage(node, NetMsgType::GETTEMPLATE);
-        peer.m_next_template_request = now + TEMPLATE_REQUEST_INTERVAL;
+        peer.m_next_template_request = now + TEMPLATE_REQUEST_INTERVAL/2 + FastRandomContext().randrange<std::chrono::milliseconds>(TEMPLATE_REQUEST_INTERVAL);;
     }
 }
 
