@@ -5104,6 +5104,9 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     auto& block = block_template->block;
     assert(block.vtx[0]->IsCoinBase());
     block.vtx.erase(block.vtx.begin());
+    block.nNonce = 0;
+    block.nTime = std::numeric_limits<uint32_t>::max();
+
     new_template.hash = block.GetHash();
     new_template.compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
     new_template.weight = 0;
