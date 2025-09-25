@@ -338,7 +338,6 @@ target_link_libraries(bitcoin_node
 )
 add_dependencies(bitcoin_node generate_binana_info)
 
-
 # Bitcoin Core bitcoind.
 if(BUILD_DAEMON)
   add_executable(bitcoind

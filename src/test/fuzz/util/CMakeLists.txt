@@ -10,6 +10,7 @@ add_library(test_fuzz STATIC EXCLUDE_FROM_ALL
   ../fuzz.cpp
   ../util.cpp
 )
+add_dependencies(test_fuzz generate_binana_info)
 
 target_link_libraries(test_fuzz
   PRIVATE

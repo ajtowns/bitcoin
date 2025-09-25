@@ -140,6 +140,7 @@ target_link_libraries(bitcoinqt
     $<$<PLATFORM_ID:Darwin>:-framework\ AppKit>
     $<$<CXX_COMPILER_ID:MSVC>:shlwapi>
 )
+add_dependencies(bitcoinqt generate_binana_info)
 
 if(ENABLE_WALLET)
   target_sources(bitcoinqt

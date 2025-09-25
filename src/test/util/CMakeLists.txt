@@ -19,6 +19,7 @@ add_library(test_util STATIC EXCLUDE_FROM_ALL
   validation.cpp
   $<$<BOOL:${ENABLE_WALLET}>:${PROJECT_SOURCE_DIR}/src/wallet/test/util.cpp>
 )
+add_dependencies(test_util generate_binana_info)
 
 target_link_libraries(test_util
   PRIVATE

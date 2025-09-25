@@ -41,6 +41,7 @@ target_link_libraries(bitcoin_wallet
     Boost::headers
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
+add_dependencies(bitcoin_wallet generate_binana_info)
 
 if(NOT USE_SQLITE AND NOT USE_BDB)
   message(FATAL_ERROR "Wallet functionality requested but no BDB or SQLite support available.")

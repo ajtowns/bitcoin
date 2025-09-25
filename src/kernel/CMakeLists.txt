@@ -91,6 +91,7 @@ target_link_libraries(bitcoinkernel
   PUBLIC
     Boost::headers
 )
+add_dependencies(bitcoinkernel generate_binana_info)
 
 # libbitcoinkernel requires default symbol visibility, explicitly
 # specify that here so that things still work even when user
