@@ -19,3 +19,4 @@ target_link_libraries(bitcoin_zmq
     univalue
     zeromq
 )
+add_dependencies(bitcoin_zmq generate_binana_info)
