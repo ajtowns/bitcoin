@@ -198,7 +198,7 @@ static constexpr size_t MAX_ADDR_PROCESSING_TOKEN_BUCKET{MAX_ADDR_TO_SEND};
 /** The compactblocks version we support. See BIP 152. */
 static constexpr uint64_t CMPCTBLOCKS_VERSION{2};
 /** How frequently to update templates for sharing */
-static constexpr std::chrono::microseconds TEMPLATE_UPDATE_INTERVAL{30s};
+static constexpr auto TEMPLATE_UPDATE_INTERVAL{30s};
 /** How frequently to request updated templates from peers */
 static constexpr auto TEMPLATE_REQUEST_INTERVAL{120s};
 /** Template weight limit */
@@ -485,9 +485,6 @@ struct Peer {
 
         /** Minimum fee rate with which to filter transaction announcements to this node. See BIP133. */
         std::atomic<CAmount> m_fee_filter_received{0};
-
-        /** Whether this peer negotiated SENDTEMPLATE */
-        std::atomic<bool> m_support_sendtemplate{false};
     };
 
     /* Initializes a TxRelay struct for this peer. Can be called at most once for a peer. */
@@ -1252,6 +1249,8 @@ private:
 
     mutable Mutex m_templatestats_mutex;
     TemplateStats m_templatestats GUARDED_BY(m_templatestats_mutex);
+
+    bool AnnounceSendTemplate() const { return m_opts.share_template_count > 0 && !m_opts.ignore_incoming_txs; }
 
     // send BIP153 templates
     void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templateman_mutex, !m_templatestats_mutex);
@@ -3706,12 +3705,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             MakeAndPushMessage(pfrom, NetMsgType::WTXIDRELAY);
         }
 
-        if (greatest_common_version >= SENDTEMPLATE_VERSION) {
-            if (m_opts.share_template_count != 0) {
-                MakeAndPushMessage(pfrom, NetMsgType::SENDTEMPLATE);
-            }
-        }
-
         // Signal ADDRv2 support (BIP155).
         if (greatest_common_version >= 70016) {
             // BIP155 defines addrv2 and sendaddrv2 for all protocol versions, but some
@@ -3760,6 +3753,12 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 const uint64_t recon_salt = m_txreconciliation->PreRegisterPeer(pfrom.GetId());
                 MakeAndPushMessage(pfrom, NetMsgType::SENDTXRCNCL,
                                    TXRECONCILIATION_VERSION, recon_salt);
+            }
+        }
+
+        if (greatest_common_version >= SENDTEMPLATE_VERSION) {
+            if (AnnounceSendTemplate() && peer->GetTxRelay() != nullptr) {
+                MakeAndPushMessage(pfrom, NetMsgType::SENDTEMPLATE);
             }
         }
 
@@ -3939,12 +3938,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             pfrom.fDisconnect = true;
             return;
         }
-        if (m_opts.share_template_count == 0) {
+        if (!m_opts.request_templates) {
+            LogDebug(BCLog::SHARETMPL, "ignoring SENDTEMPLATE from peer=%d\n", pfrom.GetId());
             return;
         }
-        auto* tx_relay = peer->GetTxRelay();
-        if (tx_relay) tx_relay->m_support_sendtemplate = true;
-
         if (pfrom.IsManualOrFullOutboundConn()) {
             LogDebug(BCLog::SHARETMPL, "initialising next template req for peer=%d\n", pfrom.GetId());
             peer->m_next_template_request = NodeClock::time_point::min();
@@ -4544,8 +4541,9 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     }
 
     if (msg_type == NetMsgType::GETTEMPLATE) {
+        if (!AnnounceSendTemplate()) return;
         auto tx_relay = peer->GetTxRelay();
-        if (tx_relay == nullptr || !tx_relay->m_support_sendtemplate) return;
+        if (tx_relay == nullptr) return;
 
         LOCK(m_templateman_mutex);
         for (const auto& mytmp : m_templateman.my_templates) {
@@ -5276,7 +5274,8 @@ void PeerManagerImpl::SendTemplateTransactions(CNode& pfrom, Peer& peer, const M
 
 void PeerManagerImpl::MaybeSendGetTemplate(CNode& node, Peer& peer)
 {
-    if (m_opts.share_template_count == 0) return;
+    if (!m_opts.request_templates) return;
+    if (peer.m_next_template_request == NodeClock::time_point::max()) return;
     if (peer.m_next_template_request == NodeClock::time_point::min()) {
         if (!m_mempool.GetLoadTried()) return;
     }
@@ -5358,9 +5357,9 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
             continue;
         }
 
-        LogDebug(BCLog::SHARETMPL, "Considering template tx %d (of %d) txid=%s peer=%d\n",
-            peer_tmp.last_validated_idx, peer_tmp.txs.size(), ttx.tx->GetHash().ToString(), peer.m_id);
+        const size_t k = peer_tmp.last_validated_idx, n = peer_tmp.txs.size();
 
+        auto start = SteadyClock::now();
         NodeClock::time_point next;
         CTransactionRef tx = ttx.tx;
         {
@@ -5370,6 +5369,10 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
         }
         // in theory, template could have been deleted by other thread
         m_templateman.BumpMempoolCheck(tx->GetWitnessHash(), next);
+        LogDebug(BCLog::SHARETMPL, "Considering template tx %d (of %d) txid=%s wtxid=%s time=%.1fms peer=%d\n",
+            k, n,
+            tx->GetHash().ToString(), tx->GetWitnessHash().ToString(),
+            Ticks<MillisecondsDouble>(SteadyClock::now() - start), peer.m_id);
         return true;
     }
 
@@ -5442,7 +5445,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
 
     auto now = NodeClock::now();
     if (now < m_next_template_update) return;
-    m_next_template_update = now + TEMPLATE_UPDATE_INTERVAL;
+    m_next_template_update = now + TEMPLATE_UPDATE_INTERVAL/2 + FastRandomContext().randrange<std::chrono::milliseconds>(TEMPLATE_UPDATE_INTERVAL);
 
     const auto assemble_options = []() {
         node::BlockAssembler::Options opt;
@@ -5459,6 +5462,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     block.vtx.erase(block.vtx.begin());
     block.nNonce = 0;
     block.nTime = std::numeric_limits<uint32_t>::max();
+    block.hashMerkleRoot = BlockMerkleRoot(block);
 
     LOCK(m_templateman_mutex);
     auto& my_templates = m_templateman.my_templates;

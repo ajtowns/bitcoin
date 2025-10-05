@@ -101,6 +101,8 @@ public:
         uint32_t max_headers_result{MAX_HEADERS_RESULTS};
         //! Number of block templates to keep for sharing.
         uint32_t share_template_count{DEFAULT_SHARETMPL_COUNT};
+        //! Whether to request templates.
+        bool request_templates{true};
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,

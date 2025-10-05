@@ -28,6 +28,10 @@ void ApplyArgsManOptions(const ArgsManager& argsman, PeerManager::Options& optio
         // Arbitrary upper limit of 256 (equivalent to 2GB at 8MB per template, and a 2 hour backlog at 30s per update)
         options.share_template_count = static_cast<uint32_t>(std::clamp<int64_t>(*value, 0, 256));
     }
+
+    if (auto value{argsman.GetBoolArg("-requesttemplates")}) {
+        options.request_templates = *value;
+    }
 }
 
 } // namespace node
