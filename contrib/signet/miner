@@ -318,7 +318,7 @@ class Generate:
         if self.set_nversion is not None:
             tmpl["version"] = int(self.set_nversion, 16)
         if tmpl["previousblockhash"] != bestblockhash:
-            logging.warning("GBT based off unexpected block (%s not %s), retrying", tmpl["previousblockhash"], bci["bestblockhash"])
+            logging.warning("GBT based off unexpected block (%s not %s), retrying", tmpl["previousblockhash"], bestblockhash)
             time.sleep(1)
             return None
 
