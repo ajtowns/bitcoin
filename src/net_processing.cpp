@@ -11,6 +11,7 @@
 #include <blockfilter.h>
 #include <chainparams.h>
 #include <consensus/amount.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <deploymentstatus.h>
 #include <hash.h>
@@ -5098,7 +5099,6 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
         return opt;
     }();
     node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options, node::BlockAssembler::ALLOW_OVERSIZED_BLOCKS};
-    auto& new_template = my_templates.emplace_front();
 
     auto block_template = assembler.CreateNewBlock();
     auto& block = block_template->block;
@@ -5106,7 +5106,9 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     block.vtx.erase(block.vtx.begin());
     block.nNonce = 0;
     block.nTime = std::numeric_limits<uint32_t>::max();
+    block.hashMerkleRoot = BlockMerkleRoot(block);
 
+    auto& new_template = my_templates.emplace_front();
     new_template.hash = block.GetHash();
     new_template.compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
     new_template.weight = 0;
