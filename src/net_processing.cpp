@@ -220,17 +220,18 @@ struct QueuedBlock {
 class PartiallyDownloadedTemplate : public PartiallyDownloadedBlock
 {
 private:
-    static bool check_template(const CBlock& block, bool)
+    static bool check_template_mutated(const CBlock& block, bool)
     {
-        bool mutated;
-        auto merkle_root = BlockMerkleRoot(block, &mutated);
-        return (block.hashMerkleRoot == merkle_root && !mutated);
+        return false; // XXX is this worth checking?
+        //bool mutated;
+        //auto merkle_root = BlockMerkleRoot(block, &mutated);
+        //return (block.hashMerkleRoot != merkle_root || mutated);
     }
 
 public:
     PartiallyDownloadedTemplate()
     {
-        m_check_block_mutated_mock = check_template;
+        m_check_block_mutated_mock = check_template_mutated;
     }
 };
 
@@ -1261,7 +1262,7 @@ private:
     void ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templateman_mutex, !m_templatestats_mutex);
 
     // attempt to add BIP153 template txs to mempool
-    bool ConsiderTemplateTransactions(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex, !m_templateman_mutex, !m_templatestats_mutex);
+    bool ConsiderTemplateTransactions(Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex, !m_templateman_mutex, !m_templatestats_mutex, !m_most_recent_block_mutex);
     NodeClock::time_point ConsiderTemplateTx(Peer& peer, CTransactionRef templatetx, NodeClock::time_point now) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex, !m_templateman_mutex);
 
     TemplateManager::ExtraTxns GetExtraTxns() const
@@ -2195,8 +2196,6 @@ void PeerManagerImpl::NewPoWValidBlock(const CBlockIndex *pindex, const std::sha
     if (!DeploymentActiveAt(*pindex, m_chainman, Consensus::DEPLOYMENT_SEGWIT)) return;
 
     uint256 hashBlock(pblock->GetHash());
-    const std::shared_future<CSerializedNetMsg> lazy_ser{
-        std::async(std::launch::deferred, [&] { return NetMsg::Make(NetMsgType::CMPCTBLOCK, *pcmpctblock); })};
 
     {
         auto most_recent_block_txs = std::make_unique<std::map<GenTxid, CTransactionRef>>();
@@ -2212,6 +2211,8 @@ void PeerManagerImpl::NewPoWValidBlock(const CBlockIndex *pindex, const std::sha
         m_most_recent_block_txs = std::move(most_recent_block_txs);
     }
 
+    const std::shared_future<CSerializedNetMsg> lazy_ser{
+        std::async(std::launch::deferred, [&] { return NetMsg::Make(NetMsgType::CMPCTBLOCK, *pcmpctblock); })};
     m_connman.ForEachNode([this, pindex, &lazy_ser, &hashBlock](CNode* pnode) EXCLUSIVE_LOCKS_REQUIRED(::cs_main) {
         AssertLockHeld(::cs_main);
 
@@ -5293,13 +5294,14 @@ void PeerManagerImpl::ProcessCompactTemplateTxns(CNode& pfrom, Peer& peer, const
     CBlock block;
     PartiallyDownloadedBlock& partialBlock = peer.m_partial_template;
     uint256 prev_block_hash{partialBlock.header.hashPrevBlock}; // FillBlock resets this value
+    auto ntx = block_transactions.txn.size();
     ReadStatus status = partialBlock.FillBlock(block, block_transactions.txn, /*segwit_active=*/true);
 
     if (status == READ_STATUS_INVALID) {
         Misbehaving(peer, "invalid compact template/non-matching block transactions");
         partialBlock.reset();
     } else if (status == READ_STATUS_FAILED) {
-        LogDebug(BCLog::SHARETMPL, "Peer %d sent us %d transactions for compact template %s but it failed to reconstruct\n", pfrom.GetId(), block_transactions.txn.size(), block_transactions.blockhash.ToString());
+        LogDebug(BCLog::SHARETMPL, "Peer %d sent us %d transactions for compact template %s but it failed to reconstruct\n", pfrom.GetId(), ntx, block_transactions.blockhash.ToString());
         partialBlock.reset();
     } else {
         // success!
@@ -5326,8 +5328,13 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     if (m_opts.share_template_count == 0) return false;
     if (m_next_template_update == NodeClock::time_point::min()) return false;
 
-    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.ActiveTip());
-    if (tip == nullptr || tip->pprev == nullptr) return false;
+    uint256 best_blockhash, prev_blockhash;
+    {
+        LOCK(cs_main);
+        const CBlockIndex* tip = m_chainman.ActiveChain().Tip();
+        if (tip != nullptr) best_blockhash = tip->GetBlockHash();
+        if (tip != nullptr && tip->pprev != nullptr) prev_blockhash = tip->pprev->GetBlockHash();
+    }
 
     WAIT_LOCK(m_templateman_mutex, templateman_lock);
 
@@ -5338,45 +5345,70 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     auto& peer_tmp = it->second;
     if (peer_tmp.last_validated_idx >= peer_tmp.txs.size()) return false;
 
-    // haven't considered all the txs in this template!
-
-    if (tip->GetBlockHash() != peer_tmp.tiphash && tip->pprev->GetBlockHash() != peer_tmp.tiphash) {
-        // template may be old, in the future, or for a reorged chain; ignore txs if so
+    bool based_on_prev_block = false;
+    if (peer_tmp.tiphash == best_blockhash) {
+        // matches most recent block
+    } else if (peer_tmp.tiphash == prev_blockhash) {
+        based_on_prev_block = true;
+    } else {
+        // very old, from a competing reorg, or something newer than our tip, ignore
         return false;
     }
 
+    // haven't considered all the txs in this template!
+
+    size_t k = 0, n = 0;
+    CTransactionRef tx_consider;
     auto now = NodeClock::now();
 
-    // we have an up to date template, try processing an unprocessed tx
-    while (peer_tmp.last_validated_idx < peer_tmp.txs.size()) {
-        const auto& ttx = *peer_tmp.txs[peer_tmp.last_validated_idx++];
-        if (now < ttx.next_mempool_check) continue;
+    {
+        LOCK(m_most_recent_block_mutex);
 
-        if (m_mempool.exists(ttx.tx->GetWitnessHash())) {
-            ttx.next_mempool_check = now + 120s;
-            continue;
+        // in case most recent block hasn't been initialized
+        if (based_on_prev_block && !m_most_recent_block_txs) return false;
+
+        // we have an up to date template, try processing an unprocessed tx
+        while (peer_tmp.last_validated_idx < peer_tmp.txs.size()) {
+            const auto& ttx = *peer_tmp.txs[peer_tmp.last_validated_idx++];
+            if (now < ttx.next_mempool_check) continue;
+
+            if (based_on_prev_block && m_most_recent_block_txs->contains(ttx.tx->GetWitnessHash())) {
+                // already confirmed
+                ttx.next_mempool_check = now + 120s;
+                continue;
+            }
+
+            if (m_mempool.exists(ttx.tx->GetWitnessHash())) {
+                ttx.next_mempool_check = now + 120s;
+                continue;
+            }
+
+            k = peer_tmp.last_validated_idx;
+            n = peer_tmp.txs.size();
+            tx_consider = ttx.tx;
+            break;
         }
+    }
 
-        const size_t k = peer_tmp.last_validated_idx, n = peer_tmp.txs.size();
-
+    if (tx_consider) {
         auto start = SteadyClock::now();
         NodeClock::time_point next;
-        CTransactionRef tx = ttx.tx;
         {
              // avoid cs_main lock inversion
              REVERSE_LOCK(templateman_lock, m_templateman_mutex);
-             next = ConsiderTemplateTx(peer, tx, now);
+             next = ConsiderTemplateTx(peer, tx_consider, now);
         }
-        // in theory, template could have been deleted by other thread
-        m_templateman.BumpMempoolCheck(tx->GetWitnessHash(), next);
-        LogDebug(BCLog::SHARETMPL, "Considering template tx %d (of %d) txid=%s wtxid=%s time=%.1fms peer=%d\n",
+        // in theory, template could have been deleted by other thread while lock was released
+        m_templateman.BumpMempoolCheck(tx_consider->GetWitnessHash(), next);
+        LogDebug(BCLog::SHARETMPL, "Considered %stemplate tx %d (of %d) txid=%s wtxid=%s time=%.1fms peer=%d\n",
+            (based_on_prev_block ? "old " : ""),
             k, n,
-            tx->GetHash().ToString(), tx->GetWitnessHash().ToString(),
+            tx_consider->GetHash().ToString(), tx_consider->GetWitnessHash().ToString(),
             Ticks<MillisecondsDouble>(SteadyClock::now() - start), peer.m_id);
         return true;
+    } else {
+        return false;
     }
-
-    return false;
 }
 
 NodeClock::time_point PeerManagerImpl::ConsiderTemplateTx(Peer& peer, CTransactionRef tx, NodeClock::time_point now)
