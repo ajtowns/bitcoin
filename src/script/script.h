@@ -560,6 +560,9 @@ public:
     bool IsPushOnly(const_iterator pc) const;
     bool IsPushOnly() const;
 
+    /** Policy check to limit push size */
+    bool IsSmallPushOnly(const_iterator pc, size_t max_size) const;
+
     /** Check if the script contains valid OP_CODES */
     bool HasValidOps() const;
 

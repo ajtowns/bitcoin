@@ -310,11 +310,12 @@ bool CScript::HasValidOps() const
     return true;
 }
 
-bool GetScriptOp(CScriptBase::const_iterator& pc, CScriptBase::const_iterator end, opcodetype& opcodeRet, std::vector<unsigned char>* pvchRet)
+static inline bool GetScriptOpPushSize(CScriptBase::const_iterator& pc, CScriptBase::const_iterator end, opcodetype& opcodeRet, std::vector<unsigned char>* pvchRet, size_t* push_size)
 {
     opcodeRet = OP_INVALIDOPCODE;
     if (pvchRet)
         pvchRet->clear();
+    if (push_size != nullptr) *push_size = 0;
     if (pc >= end)
         return false;
 
@@ -356,9 +357,35 @@ bool GetScriptOp(CScriptBase::const_iterator& pc, CScriptBase::const_iterator en
         if (pvchRet)
             pvchRet->assign(pc, pc + nSize);
         pc += nSize;
+        if (push_size != nullptr) *push_size = nSize;
     }
 
     opcodeRet = static_cast<opcodetype>(opcode);
+    return true;
+}
+
+bool GetScriptOp(CScriptBase::const_iterator& pc, CScriptBase::const_iterator end, opcodetype& opcodeRet, std::vector<unsigned char>* pvchRet)
+{
+    return GetScriptOpPushSize(pc, end, opcodeRet, pvchRet, nullptr);
+}
+
+bool CScript::IsSmallPushOnly(const_iterator pc, size_t max_size) const
+{
+    while (pc < end())
+    {
+        opcodetype opcode;
+        size_t push_size;
+        if (!GetScriptOpPushSize(pc, end(), opcode, nullptr, &push_size)) {
+            return false;
+        }
+        if (push_size > max_size) return false;
+        // Note that IsPushOnly() *does* consider OP_RESERVED to be a
+        // push-type opcode, however execution of OP_RESERVED fails, so
+        // it's not relevant to P2SH/BIP62 as the scriptSig would fail prior to
+        // the P2SH special validation code being executed.
+        if (opcode > OP_16)
+            return false;
+    }
     return true;
 }
 

@@ -148,6 +148,10 @@ bool IsStandardTx(const CTransaction& tx, const std::optional<unsigned>& max_dat
                 return false;
             }
             datacarrier_bytes_left -= size;
+            if (!txout.scriptPubKey.IsSmallPushOnly(txout.scriptPubKey.begin()+1, MAX_OP_RETURN_PUSH)) {
+                reason = "datacarrier-largepush";
+                return false;
+            }
         } else if ((whichType == TxoutType::MULTISIG) && (!permit_bare_multisig)) {
             reason = "bare-multisig";
             return false;

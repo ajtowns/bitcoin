@@ -78,6 +78,8 @@ static const bool DEFAULT_ACCEPT_DATACARRIER = true;
  * Default setting for -datacarriersize in vbytes.
  */
 static const unsigned int MAX_OP_RETURN_RELAY = MAX_STANDARD_TX_WEIGHT / WITNESS_SCALE_FACTOR;
+/** Max size of individual data push in OP_RETURN output */
+static constexpr size_t MAX_OP_RETURN_PUSH = 520;
 /**
  * An extra transaction can be added to a package, as long as it only has one
  * ancestor and is no larger than this. Not really any reason to make this

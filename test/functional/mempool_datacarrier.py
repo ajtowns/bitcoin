@@ -36,7 +36,10 @@ class DataCarrierTest(BitcoinTestFramework):
 
     def test_null_data_transaction(self, node: TestNode, data, success: bool) -> None:
         tx = self.wallet.create_self_transfer(fee_rate=0)["tx"]
-        data = [] if data is None else [data]
+        if data is None:
+            data = []
+        elif not isinstance(data, list):
+            data = [data]
         tx.vout.append(CTxOut(nValue=0, scriptPubKey=CScript([OP_RETURN] + data)))
         tx.vout[0].nValue -= tx.get_vsize()  # simply pay 1sat/vbyte fee
 
@@ -66,12 +69,14 @@ class DataCarrierTest(BitcoinTestFramework):
         custom_size_data = randbytes(CUSTOM_DATACARRIER_ARG - 3)
         too_long_data = randbytes(CUSTOM_DATACARRIER_ARG - 2)
         extremely_long_data = randbytes(MAX_OP_RETURN_RELAY - 200)
+        many_max_size_data = [randbytes(520)] * (MAX_OP_RETURN_RELAY//523 - 1)
         one_byte = randbytes(1)
         zero_bytes = randbytes(0)
 
-        self.log.info("Testing a null data transaction succeeds for default arg regardless of size.")
+        self.log.info("Testing a null data transaction for default arg.")
         self.test_null_data_transaction(node=self.nodes[0], data=too_long_data, success=True)
-        self.test_null_data_transaction(node=self.nodes[0], data=extremely_long_data, success=True)
+        self.test_null_data_transaction(node=self.nodes[0], data=extremely_long_data, success=False)
+        self.test_null_data_transaction(node=self.nodes[0], data=many_max_size_data, success=True)
 
         self.log.info("Testing a null data transaction with -datacarrier=false.")
         self.test_null_data_transaction(node=self.nodes[1], data=custom_size_data, success=False)
