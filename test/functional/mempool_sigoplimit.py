@@ -18,6 +18,7 @@ from test_framework.messages import (
 )
 from test_framework.script import (
     CScript,
+    OP_0,
     OP_2DUP,
     OP_CHECKMULTISIG,
     OP_CHECKSIG,
@@ -88,12 +89,12 @@ class BytesPerSigOpTest(BitcoinTestFramework):
         # use a 256-byte data-push as lower bound in the output script, in order
         # to avoid having to compensate for tx size changes caused by varying
         # length serialization sizes (both for scriptPubKey and data-push lengths)
-        tx = self.create_p2wsh_spending_tx(witness_script, CScript([OP_RETURN, b'X'*256]))
+        tx = self.create_p2wsh_spending_tx(witness_script, CScript([OP_RETURN] + [OP_0]*256))
 
         # bump the tx to reach the sigop-limit equivalent size by padding the datacarrier output
         assert_greater_than_or_equal(sigop_equivalent_vsize, tx.get_vsize())
         vsize_to_pad = sigop_equivalent_vsize - tx.get_vsize()
-        tx.vout[0].scriptPubKey = CScript([OP_RETURN, b'X'*(256+vsize_to_pad)])
+        tx.vout[0].scriptPubKey = CScript([OP_RETURN] + [OP_0]*(256+vsize_to_pad))
         assert_equal(sigop_equivalent_vsize, tx.get_vsize())
 
         res = self.nodes[0].testmempoolaccept([tx.serialize().hex()])[0]
@@ -102,7 +103,7 @@ class BytesPerSigOpTest(BitcoinTestFramework):
 
         # increase the tx's vsize to be right above the sigop-limit equivalent size
         # => tx's vsize in mempool should also grow accordingly
-        tx.vout[0].scriptPubKey = CScript([OP_RETURN, b'X'*(256+vsize_to_pad+1)])
+        tx.vout[0].scriptPubKey = CScript([OP_RETURN] + [OP_0]*(256+vsize_to_pad+1))
         res = self.nodes[0].testmempoolaccept([tx.serialize().hex()])[0]
         assert_equal(res['allowed'], True)
         assert_equal(res['vsize'], sigop_equivalent_vsize+1)
@@ -111,7 +112,7 @@ class BytesPerSigOpTest(BitcoinTestFramework):
         # => tx's vsize in mempool should stick at the sigop-limit equivalent
         # bytes level, as it is higher than the tx's serialized vsize
         # (the maximum of both is taken)
-        tx.vout[0].scriptPubKey = CScript([OP_RETURN, b'X'*(256+vsize_to_pad-1)])
+        tx.vout[0].scriptPubKey = CScript([OP_RETURN] + [OP_0]*(256+vsize_to_pad-1))
         res = self.nodes[0].testmempoolaccept([tx.serialize().hex()])[0]
         assert_equal(res['allowed'], True)
         assert_equal(res['vsize'], sigop_equivalent_vsize)

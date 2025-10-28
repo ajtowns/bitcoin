@@ -656,8 +656,8 @@ def check_node_connections(*, node, num_in, num_out):
 # total serialized size of the txouts is about 66k vbytes.
 def gen_return_txouts():
     from .messages import CTxOut
-    from .script import CScript, OP_RETURN
-    txouts = [CTxOut(nValue=0, scriptPubKey=CScript([OP_RETURN, b'\x01'*67437]))]
+    from .script import CScript, OP_RETURN, OP_1
+    txouts = [CTxOut(nValue=0, scriptPubKey=CScript([OP_RETURN] + [OP_1]*67442))]
     assert_equal(sum([len(txout.serialize()) for txout in txouts]), 67456)
     return txouts
 

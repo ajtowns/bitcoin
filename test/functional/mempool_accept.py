@@ -351,7 +351,8 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
         # are standard since v30
         tx = tx_from_hex(raw_tx_reference)
         tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff'])))
-        tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff' * 50000])))
+        tx.vout.append(CTxOut(0, CScript([OP_RETURN, b'\xff' * 520, b'\xfe' * 520])))
+        tx.vout.append(CTxOut(0, CScript([OP_RETURN] + [OP_0] * 50000)))
 
         self.check_mempool_result(
             result_expected=[{'txid': tx.txid_hex, 'allowed': True, 'vsize': tx.get_vsize(), 'fees': {'base': Decimal('0.05')}}],
@@ -373,8 +374,8 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
         self.log.info("A transaction with an OP_RETURN output that bumps into the max standardness tx size.")
         tx = tx_from_hex(raw_tx_reference)
         tx.vout[0].scriptPubKey = CScript([OP_RETURN])
-        data_len = int(MAX_STANDARD_TX_WEIGHT / 4) - tx.get_vsize() - 5 - 4  # -5 for PUSHDATA4 and -4 for script size
-        tx.vout[0].scriptPubKey = CScript([OP_RETURN, b"\xff" * (data_len)])
+        data_len = int(MAX_STANDARD_TX_WEIGHT / 4) - tx.get_vsize() - 4 # -4 for script size
+        tx.vout[0].scriptPubKey = CScript([OP_RETURN] + [OP_0] * (data_len))
         assert_equal(tx.get_vsize(), int(MAX_STANDARD_TX_WEIGHT / 4))
         self.check_mempool_result(
             result_expected=[{"txid": tx.txid_hex, "allowed": True, "vsize": tx.get_vsize(), "fees": {"base": Decimal("0.1") - Decimal("0.05")}}],
