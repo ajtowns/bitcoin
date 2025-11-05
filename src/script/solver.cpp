@@ -82,7 +82,7 @@ static std::optional<int> GetScriptNumber(opcodetype opcode, valtype data, int m
     return count;
 }
 
-static bool MatchMultisig(const CScript& script, int& required_sigs, std::vector<valtype>& pubkeys)
+static bool MatchMultisig(const CScript& script, int& required_sigs, std::vector<valtype>& pubkeys, bool allow_invalid_keys)
 {
     opcodetype opcode;
     valtype data;
@@ -94,7 +94,7 @@ static bool MatchMultisig(const CScript& script, int& required_sigs, std::vector
     auto req_sigs = GetScriptNumber(opcode, data, 1, MAX_PUBKEYS_PER_MULTISIG);
     if (!req_sigs) return false;
     required_sigs = *req_sigs;
-    while (script.GetOp(it, opcode, data) && CPubKey::ValidSize(data)) {
+    while (script.GetOp(it, opcode, data) && (allow_invalid_keys ? data.size() >= 33 && data.size() <= 65 : CPubKey::ValidSize(data))) {
         pubkeys.emplace_back(std::move(data));
     }
     auto num_keys = GetScriptNumber(opcode, data, required_sigs, MAX_PUBKEYS_PER_MULTISIG);
@@ -138,7 +138,7 @@ std::optional<std::pair<int, std::vector<std::span<const unsigned char>>>> Match
     return std::pair{*threshold, std::move(keyspans)};
 }
 
-TxoutType Solver(const CScript& scriptPubKey, std::vector<std::vector<unsigned char>>& vSolutionsRet)
+TxoutType Solver(const CScript& scriptPubKey, std::vector<std::vector<unsigned char>>& vSolutionsRet, bool allow_invalid_multisig_keys)
 {
     vSolutionsRet.clear();
 
@@ -199,7 +199,7 @@ TxoutType Solver(const CScript& scriptPubKey, std::vector<std::vector<unsigned c
 
     int required;
     std::vector<std::vector<unsigned char>> keys;
-    if (MatchMultisig(scriptPubKey, required, keys)) {
+    if (MatchMultisig(scriptPubKey, required, keys, allow_invalid_multisig_keys)) {
         vSolutionsRet.push_back({static_cast<unsigned char>(required)}); // safe as required is in range 1..20
         vSolutionsRet.insert(vSolutionsRet.end(), keys.begin(), keys.end());
         vSolutionsRet.push_back({static_cast<unsigned char>(keys.size())}); // safe as size is in range 1..20

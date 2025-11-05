@@ -224,7 +224,7 @@ bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
         const CTxOut& prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
 
         std::vector<std::vector<unsigned char> > vSolutions;
-        TxoutType whichType = Solver(prev.scriptPubKey, vSolutions);
+        TxoutType whichType = Solver(prev.scriptPubKey, vSolutions, /*allow_invalid_multisig_keys=*/true);
         if (whichType == TxoutType::NONSTANDARD || whichType == TxoutType::WITNESS_UNKNOWN) {
             // WITNESS_UNKNOWN failures are typically also caught with a policy
             // flag in the script interpreter, but it can be helpful to catch
