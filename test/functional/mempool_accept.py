@@ -508,5 +508,30 @@ class MempoolAcceptanceTest(BitcoinTestFramework):
             maxfeerate=0,
         )
 
+        self.log.info("Restarting node with -permitbaremultisig=1")
+        self.restart_node(0, extra_args=["-permitbaremultisig=1"])
+        self.log.info('Creating counterparty-style txs is non-standard, but spending is standard')
+        address = self.wallet.get_address()
+        tx = self.wallet.create_self_transfer()['tx']  # Pick a random coin(base) to spend
+        privkey, pubkey = generate_keypair()
+        data = b'\x42'*33
+        tx.vout[0].scriptPubKey = keys_to_multisig_script([data, pubkey, data], k=1)  # Counterparty style script
+        self.check_mempool_result(
+            result_expected=[{'txid': tx.txid_hex, 'allowed': False, 'reject-reason': 'scriptpubkey'}],
+            rawtxs=[tx.serialize().hex()],
+            maxfeerate=0,
+        )
+        self.generateblock(node, address, [tx.serialize().hex()])
+        tx_spend = CTransaction()
+        tx_spend.vin.append(CTxIn(COutPoint(tx.txid_int, 0), b""))
+        tx_spend.vout.append(CTxOut(tx.vout[0].nValue - int(fee*COIN), script_to_p2wsh_script(CScript([OP_TRUE]))))
+        sign_input_legacy(tx_spend, 0, tx.vout[0].scriptPubKey, privkey, sighash_type=SIGHASH_ALL)
+        tx_spend.vin[0].scriptSig = bytes(CScript([OP_0])) + tx_spend.vin[0].scriptSig
+        self.check_mempool_result(
+            result_expected=[{'txid': tx_spend.txid_hex, 'allowed': True, 'vsize': tx_spend.get_vsize(), 'fees': { 'base': Decimal('0.00000700')}}],
+            rawtxs=[tx_spend.serialize().hex()],
+            maxfeerate=0,
+        )
+
 if __name__ == '__main__':
     MempoolAcceptanceTest(__file__).main()
