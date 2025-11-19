@@ -5140,10 +5140,10 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
         opt.print_modified_fee=false;
         return opt;
     }();
-    node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options, node::BlockAssembler::ALLOW_OVERSIZED_BLOCKS};
+    node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options};
 
-    auto block_template = assembler.CreateNewBlock();
-    auto& block = block_template->block;
+    auto block_templates = assembler.CreateNewBlocks(2);
+    auto& block = block_templates[0]->block;
     assert(block.vtx.size() > 0 && block.vtx[0]->IsCoinBase());
     block.vtx.erase(block.vtx.begin());
     block.nNonce = 0;
@@ -5161,6 +5161,8 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     new_template.inv_sequence = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
 
     LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d txs, %d weight)\n", new_template.hash.ToString(), new_template.txs.size(), new_template.weight);
+
+    // XXX what about block_templates[2] ?
 
     LOCK(m_templatestats_mutex);
     m_templatestats.num_templates = my_templates.size();

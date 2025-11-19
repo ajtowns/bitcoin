@@ -56,10 +56,13 @@ struct CBlockTemplate
 class BlockAssembler
 {
 private:
-    // The constructed block template
-    std::unique_ptr<CBlockTemplate> pblocktemplate;
+    // The constructed block templates
+    std::vector<std::unique_ptr<CBlockTemplate>> blocktemplates;
+
+    CBlockTemplate* pblocktemplate = nullptr; /* points at blocktemplates.back() */
 
     // Information on the current status of the block
+    uint64_t total_templates_weight;
     uint64_t nBlockWeight;
     uint64_t nBlockTx;
     uint64_t nBlockSigOpsCost;
@@ -73,8 +76,6 @@ private:
     const CTxMemPool* const m_mempool;
     Chainstate& m_chainstate;
 
-    struct AllowOversizedBlocks_tag { explicit AllowOversizedBlocks_tag() = default; };
-
 public:
     struct Options : BlockCreateOptions {
         // Configuration parameters for the block size
@@ -87,11 +88,15 @@ public:
 
     explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options);
 
-    static constexpr AllowOversizedBlocks_tag ALLOW_OVERSIZED_BLOCKS{};
-    explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options, AllowOversizedBlocks_tag);
+    /** Construct new block templates */
+    std::vector<std::unique_ptr<CBlockTemplate>> CreateNewBlocks(size_t n_blocks);
 
     /** Construct a new block template */
-    std::unique_ptr<CBlockTemplate> CreateNewBlock();
+    std::unique_ptr<CBlockTemplate> CreateNewBlock()
+    {
+        auto v = CreateNewBlocks(1);
+        return std::move(v[0]);
+    }
 
     /** The number of transactions in the last assembled block (excluding coinbase transaction) */
     inline static std::optional<int64_t> m_last_block_num_txs{};
@@ -104,6 +109,8 @@ private:
     // utility functions
     /** Clear the block's state and prepare for assembling a new block */
     void resetBlock();
+    /** Add a new block template */
+    void NewBlock();
     /** Add a tx to the block */
     void AddToBlock(const CTxMemPoolEntry& entry);
 
@@ -112,7 +119,7 @@ private:
       *
       * @pre BlockAssembler::m_mempool must not be nullptr
     */
-    void addChunks() EXCLUSIVE_LOCKS_REQUIRED(m_mempool->cs);
+    void addChunks(size_t n_blocks) EXCLUSIVE_LOCKS_REQUIRED(m_mempool->cs);
 
     // helper functions for addChunks()
     /** Test if a new package would "fit" in the block */

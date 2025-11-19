@@ -93,14 +93,6 @@ BlockAssembler::BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool
 {
 }
 
-BlockAssembler::BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options, AllowOversizedBlocks_tag)
-    : chainparams{chainstate.m_chainman.GetParams()},
-      m_mempool{options.use_mempool ? mempool : nullptr},
-      m_chainstate{chainstate},
-      m_options{options}
-{
-}
-
 void ApplyArgsManOptions(const ArgsManager& args, BlockAssembler::Options& options)
 {
     // Block resource limits
@@ -114,23 +106,32 @@ void ApplyArgsManOptions(const ArgsManager& args, BlockAssembler::Options& optio
 
 void BlockAssembler::resetBlock()
 {
-    // Reserve space for fixed-size block header, txs count, and coinbase tx.
-    nBlockWeight = m_options.block_reserved_weight;
-    nBlockSigOpsCost = m_options.coinbase_output_max_additional_sigops;
-
     // These counters do not include coinbase tx
     nBlockTx = 0;
     nFees = 0;
+    total_templates_weight = 0;
 }
 
-std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
+void BlockAssembler::NewBlock()
+{
+    blocktemplates.emplace_back(std::make_unique<CBlockTemplate>());
+    pblocktemplate = blocktemplates.back().get();
+
+    // Reserve space for fixed-size block header, txs count, and coinbase tx.
+    nBlockWeight = m_options.block_reserved_weight;
+    nBlockSigOpsCost = m_options.coinbase_output_max_additional_sigops;
+}
+
+std::vector<std::unique_ptr<CBlockTemplate>> BlockAssembler::CreateNewBlocks(size_t n_blocks)
 {
     const auto time_start{SteadyClock::now()};
 
     resetBlock();
 
-    pblocktemplate.reset(new CBlockTemplate());
-    CBlock* const pblock = &pblocktemplate->block; // pointer for convenience
+    blocktemplates.clear();
+    NewBlock();
+
+    CBlock* const pblock = &blocktemplates[0]->block; // pointer for convenience
 
     // Add dummy coinbase tx as first transaction. It is skipped by the
     // getblocktemplate RPC and mining interface consumers must not use it.
@@ -154,7 +155,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     if (m_mempool) {
         LOCK(m_mempool->cs);
         m_mempool->StartBlockBuilding();
-        addChunks();
+        addChunks(n_blocks);
         m_mempool->StopBlockBuilding();
     }
 
@@ -163,7 +164,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     m_last_block_num_txs = nBlockTx;
     m_last_block_weight = nBlockWeight;
 
-    // Create coinbase transaction.
+    // Create coinbase transaction (for the first block only).
     CMutableTransaction coinbaseTx;
     coinbaseTx.vin.resize(1);
     coinbaseTx.vin[0].prevout.SetNull();
@@ -175,9 +176,9 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     Assert(nHeight > 0);
     coinbaseTx.nLockTime = static_cast<uint32_t>(nHeight - 1);
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
-    pblocktemplate->vchCoinbaseCommitment = m_chainstate.m_chainman.GenerateCoinbaseCommitment(*pblock, pindexPrev);
+    blocktemplates[0]->vchCoinbaseCommitment = m_chainstate.m_chainman.GenerateCoinbaseCommitment(*pblock, pindexPrev);
 
-    LogDebug(BCLog::MINER, "CreateNewBlock(): block weight: %u txs: %u fees: %ld sigops %d\n", GetBlockWeight(*pblock), nBlockTx, nFees, nBlockSigOpsCost);
+    LogDebug(BCLog::MINER, "CreateNewBlock(): block weight: %u templates weight: %u txs: %u fees: %ld sigops %d\n", GetBlockWeight(*pblock), total_templates_weight, nBlockTx, nFees, nBlockSigOpsCost);
 
     // Fill in header
     pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
@@ -197,7 +198,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
              Ticks<MillisecondsDouble>(time_2 - time_1),
              Ticks<MillisecondsDouble>(time_2 - time_start));
 
-    return std::move(pblocktemplate);
+    return std::move(blocktemplates);
 }
 
 bool BlockAssembler::TestPackage(FeePerWeight package_feerate, int64_t packageSigOpsCost) const
@@ -228,7 +229,9 @@ void BlockAssembler::AddToBlock(const CTxMemPoolEntry& entry)
     pblocktemplate->block.vtx.emplace_back(entry.GetSharedTx());
     pblocktemplate->vTxFees.push_back(entry.GetFee());
     pblocktemplate->vTxSigOpsCost.push_back(entry.GetSigOpCost());
-    nBlockWeight += entry.GetTxWeight();
+    auto w = entry.GetTxWeight();
+    nBlockWeight += w;
+    total_templates_weight += w;
     ++nBlockTx;
     nBlockSigOpsCost += entry.GetSigOpCost();
     nFees += entry.GetFee();
@@ -240,7 +243,7 @@ void BlockAssembler::AddToBlock(const CTxMemPoolEntry& entry)
     }
 }
 
-void BlockAssembler::addChunks()
+void BlockAssembler::addChunks(size_t n_blocks)
 {
     // Limit the number of attempts to add transactions to the block when it is
     // close to full; this is just a simple heuristic to finish quickly if the
@@ -270,7 +273,9 @@ void BlockAssembler::addChunks()
         }
 
         // Check to see if this chunk will fit.
-        if (!TestPackage(chunk_feerate, package_sig_ops) || !TestPackageTransactions(selected_transactions)) {
+        const bool does_not_fit = !TestPackage(chunk_feerate, package_sig_ops) || !TestPackageTransactions(selected_transactions);
+
+        if (does_not_fit && blocktemplates.size() >= n_blocks) {
             // This chunk won't fit, so we skip it and will try the next best one.
             m_mempool->SkipBuilderChunk();
             ++nConsecutiveFailed;
@@ -281,6 +286,10 @@ void BlockAssembler::addChunks()
                 return;
             }
         } else {
+            if (does_not_fit) {
+                NewBlock();
+            }
+
             m_mempool->IncludeBuilderChunk();
 
             // This chunk will fit, so add it to the block.
