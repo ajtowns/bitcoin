@@ -54,6 +54,7 @@
 #include <span.h>
 #include <streams.h>
 #include <sync.h>
+#include <templateman.h>
 #include <tinyformat.h>
 #include <txmempool.h>
 #include <uint256.h>
@@ -199,9 +200,6 @@ static constexpr size_t MAX_ADDR_PROCESSING_TOKEN_BUCKET{MAX_ADDR_TO_SEND};
 static constexpr uint64_t CMPCTBLOCKS_VERSION{2};
 /** How frequently to update templates for sharing */
 static constexpr std::chrono::microseconds TEMPLATE_UPDATE_INTERVAL{30s};
-/** Template weight limit */
-static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
-static_assert(MAX_TEMPLATE_WEIGHT == 2 * MAX_BLOCK_WEIGHT);
 
 // Internal stuff
 namespace {
@@ -211,57 +209,6 @@ struct QueuedBlock {
     const CBlockIndex* pindex;
     /** Optional, used for CMPCTBLOCK downloads */
     std::unique_ptr<PartiallyDownloadedBlock> partialBlock;
-};
-
-struct TemplateTx
-{
-    CTransactionRef tx;
-    uint32_t num_templates{0};
-
-    explicit TemplateTx(CTransactionRef tx) : tx{std::move(tx)} { }
-};
-using TemplateTxSet = std::map<Wtxid, TemplateTx>;
-using TemplateTxRefVec = std::vector<TemplateTxSet::iterator>;
-
-struct MyTemplate {
-    uint256 hash;
-    TemplateTxRefVec txs;
-    CBlockHeaderAndShortTxIDs compact;
-
-    // don't relay this template to peers whose m_last_sequence isn't at least this value
-    uint64_t inv_sequence;
-    uint32_t weight;
-};
-
-class TemplateManager
-{
-public:
-    TemplateTxSet template_txs;
-
-    std::deque<MyTemplate> my_templates;
-
-    void DiscardTxs(TemplateTxRefVec& txrv)
-    {
-        for (auto& it : txrv) {
-            if (--it->second.num_templates == 0) {
-                template_txs.erase(it);
-            }
-        }
-        txrv.clear();
-    }
-
-    TemplateTxRefVec AddTxs(const std::vector<CTransactionRef>& txs)
-    {
-        TemplateTxRefVec result;
-        result.reserve(txs.size());
-        for (auto& tx : txs) {
-            const auto& wtxid = tx->GetWitnessHash();
-            auto [it, inserted] = template_txs.try_emplace(wtxid, tx);
-            ++it->second.num_templates;
-            result.emplace_back(it);
-        }
-        return result;
-    }
 };
 
 /**
@@ -4221,12 +4168,11 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (auto* tx_relay = peer->GetTxRelay(); tx_relay) {
             LOCK(tx_relay->m_tx_inventory_mutex);
-            for (const auto& mytmp : m_templateman.my_templates) {
-                if (mytmp.hash == req.blockhash && tx_relay->m_last_inv_sequence >= mytmp.inv_sequence) {
-                    LogDebug(BCLog::SHARETMPL, "Sending requested txns for template %s peer=%d\n", mytmp.hash.ToString(), peer->m_id);
-                    SendTemplateTransactions(pfrom, *peer, mytmp, req);
-                    return;
-                }
+            const MyTemplate* mytmp = m_templateman.GetMyTemplate(req.blockhash, tx_relay->m_last_inv_sequence);
+            if (mytmp != nullptr) {
+                LogDebug(BCLog::SHARETMPL, "Sending requested txns for template %s peer=%d\n", mytmp->hash.ToString(), peer->m_id);
+                SendTemplateTransactions(pfrom, *peer, *mytmp, req);
+                return;
             }
         }
 
@@ -4425,11 +4371,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         if (tx_relay == nullptr) return;
 
         LOCK(tx_relay->m_tx_inventory_mutex);
-        for (const auto& mytmp : m_templateman.my_templates) {
-            if (mytmp.inv_sequence <= tx_relay->m_last_inv_sequence) {
-                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp.compact);
-                break;
-            }
+        if (const MyTemplate* mytmp = m_templateman.GetMyBestTemplate(tx_relay->m_last_inv_sequence); mytmp != nullptr) {
+            MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->compact);
         }
         return;
     }
@@ -5113,7 +5056,7 @@ TemplateStats PeerManagerImpl::GetTemplateStats() const
 
 void PeerManagerImpl::MaybeGenerateNewTemplate()
 {
-    if (m_opts.share_template_count == 0) return;
+    if (m_opts.share_template_count <= 0) return;
     if (m_next_template_update == NodeClock::time_point::min()) {
         if (m_chainman.IsInitialBlockDownload() || !m_mempool.GetLoadTried()) {
              return;
@@ -5126,11 +5069,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     if (now < m_next_template_update) return;
     m_next_template_update = now + TEMPLATE_UPDATE_INTERVAL;
 
-    auto& my_templates = m_templateman.my_templates;
-    while (my_templates.size() >= m_opts.share_template_count) {
-        m_templateman.DiscardTxs(my_templates.back().txs);
-        my_templates.pop_back();
-    }
+    m_templateman.TrimMyTemplates(m_opts.share_template_count - 1);
 
     const auto assemble_options = []() {
         node::BlockAssembler::Options opt;
@@ -5141,41 +5080,21 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
         return opt;
     }();
     node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options};
-
     auto block_templates = assembler.CreateNewBlocks(2);
-    auto& block = block_templates[0]->block;
-    assert(block.vtx.size() > 0 && block.vtx[0]->IsCoinBase());
-    block.vtx.erase(block.vtx.begin());
-    block.nNonce = 0;
-    block.nTime = std::numeric_limits<uint32_t>::max();
-    block.hashMerkleRoot = BlockMerkleRoot(block);
 
-    auto& new_template = my_templates.emplace_front();
-    new_template.hash = block.GetHash();
-    new_template.compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
-    new_template.weight = 0;
-    for (auto& tx : block.vtx) {
-        new_template.weight += GetTransactionWeight(*tx);
-    }
-    new_template.txs = m_templateman.AddTxs(block.vtx);
-    new_template.inv_sequence = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
+    auto inv_seq = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
+    const auto& new_template = m_templateman.AddMyTemplate(inv_seq, std::move(block_templates));
 
     LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d txs, %d weight)\n", new_template.hash.ToString(), new_template.txs.size(), new_template.weight);
 
     // XXX what about block_templates[2] ?
 
     LOCK(m_templatestats_mutex);
-    m_templatestats.num_templates = my_templates.size();
+    m_templatestats.num_templates = m_templateman.NumMyTemplates();
     m_templatestats.max_templates = m_opts.share_template_count;
     m_templatestats.num_transactions = m_templateman.template_txs.size();
-    if (!m_templateman.my_templates.empty()) {
-        const auto& tmp = m_templateman.my_templates.front();
-        m_templatestats.latest_template_weight = tmp.weight;
-        m_templatestats.latest_template_tx = tmp.txs.size();
-    } else {
-        m_templatestats.latest_template_weight = 0;
-        m_templatestats.latest_template_tx = 0;
-    }
+    m_templatestats.latest_template_weight = new_template.weight;
+    m_templatestats.latest_template_tx = new_template.txs.size();
     m_templatestats.next_update = m_next_template_update;
 }
 
