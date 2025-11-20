@@ -1083,7 +1083,7 @@ private:
     TemplateStats m_templatestats GUARDED_BY(m_templatestats_mutex);
 
     void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templatestats_mutex);
-    void SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplate& mytmp, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+    void SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplatePart& mytmp, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const
@@ -4168,10 +4168,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (auto* tx_relay = peer->GetTxRelay(); tx_relay) {
             LOCK(tx_relay->m_tx_inventory_mutex);
-            const MyTemplate* mytmp = m_templateman.GetMyTemplate(req.blockhash, tx_relay->m_last_inv_sequence);
-            if (mytmp != nullptr) {
-                LogDebug(BCLog::SHARETMPL, "Sending requested txns for template %s peer=%d\n", mytmp->hash.ToString(), peer->m_id);
-                SendTemplateTransactions(pfrom, *peer, *mytmp, req);
+            const MyTemplatePart* mypart = m_templateman.GetMyTemplatePart(req.blockhash, tx_relay->m_last_inv_sequence);
+            if (mypart != nullptr) {
+                LogDebug(BCLog::SHARETMPL, "Sending requested txns for template %s peer=%d\n", mypart->hash.ToString(), peer->m_id);
+                SendTemplateTransactions(pfrom, *peer, *mypart, req);
                 return;
             }
         }
@@ -4372,7 +4372,11 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         LOCK(tx_relay->m_tx_inventory_mutex);
         if (const MyTemplate* mytmp = m_templateman.GetMyBestTemplate(tx_relay->m_last_inv_sequence); mytmp != nullptr) {
-            MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->compact);
+            if (mytmp->parts[1].txs.empty()) {
+                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->parts[0].compact);
+            } else {
+                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->parts[0].compact, mytmp->parts[1].compact);
+            }
         }
         return;
     }
@@ -5031,7 +5035,7 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
-void PeerManagerImpl::SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplate& mytmp, const BlockTransactionsRequest& req)
+void PeerManagerImpl::SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplatePart& mytmp, const BlockTransactionsRequest& req)
 {
     BlockTransactions resp(req);
     unsigned int tx_requested_size = 0;
@@ -5085,7 +5089,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     auto inv_seq = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
     const auto& new_template = m_templateman.AddMyTemplate(inv_seq, std::move(block_templates));
 
-    LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d txs, %d weight)\n", new_template.hash.ToString(), new_template.txs.size(), new_template.weight);
+    LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d blocks, %d txs, %d weight)\n", new_template.parts[0].hash.ToString(), new_template.Parts(), new_template.Txs(), new_template.weight);
 
     // XXX what about block_templates[2] ?
 
@@ -5094,7 +5098,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     m_templatestats.max_templates = m_opts.share_template_count;
     m_templatestats.num_transactions = m_templateman.template_txs.size();
     m_templatestats.latest_template_weight = new_template.weight;
-    m_templatestats.latest_template_tx = new_template.txs.size();
+    m_templatestats.latest_template_tx = new_template.Txs();
     m_templatestats.next_update = m_next_template_update;
 }
 

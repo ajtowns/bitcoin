@@ -29,14 +29,36 @@ struct TemplateTx
 using TemplateTxSet = std::map<Wtxid, TemplateTx>;
 using TemplateTxRefVec = std::vector<TemplateTxSet::iterator>;
 
-struct MyTemplate {
-    uint256 hash;
+struct MyTemplatePart {
     TemplateTxRefVec txs;
+    uint256 hash;
     CBlockHeaderAndShortTxIDs compact;
+};
+
+struct MyTemplate {
+    std::array<MyTemplatePart, 2> parts; // parts[1].txs.empty() if only one part
 
     // don't relay this template to peers whose m_last_sequence isn't at least this value
     uint64_t inv_sequence;
     uint32_t weight;
+
+    uint32_t Parts() const {
+        uint32_t n = 0;
+        for (const auto& part : parts) {
+            if (part.txs.empty()) break;
+            ++n;
+        }
+        return n;
+    }
+
+    uint32_t Txs() const {
+        uint32_t txs = 0;
+        for (const auto& part : parts) {
+            if (part.txs.empty()) break;
+            txs += part.txs.size();
+        }
+        return txs;
+    }
 };
 
 class TemplateManager
@@ -61,7 +83,11 @@ public:
     void TrimMyTemplates(uint32_t max_templates)
     {
         while (my_templates.size() > max_templates) {
-            DiscardTxs(my_templates.back().txs);
+            for (auto& part : my_templates.back().parts) {
+                if (!part.txs.empty()) {
+                    DiscardTxs(part.txs);
+                }
+            }
             my_templates.pop_back();
         }
     }
@@ -76,11 +102,15 @@ public:
         return nullptr;
     }
 
-    const MyTemplate* GetMyTemplate(const uint256& hash, uint64_t inv_seq)
+    const MyTemplatePart* GetMyTemplatePart(const uint256& hash, uint64_t inv_seq)
     {
         for (const auto& mytmp : my_templates) {
-            if (inv_seq >= mytmp.inv_sequence && mytmp.hash == hash) {
-                return &mytmp;
+            if (inv_seq >= mytmp.inv_sequence) {
+                for (const auto& mypart : mytmp.parts) {
+                    if (!mypart.txs.empty() && mypart.hash == hash) {
+                        return &mypart;
+                    }
+                }
             }
         }
         return nullptr;
@@ -88,23 +118,36 @@ public:
 
     const MyTemplate& AddMyTemplate(uint32_t inv_seq, std::vector<std::unique_ptr<node::CBlockTemplate>>&& block_templates)
     {
-        auto& block = block_templates[0]->block;
-        assert(block.vtx.size() > 0 && block.vtx[0]->IsCoinBase());
-        block.vtx.erase(block.vtx.begin());
-        block.nNonce = 0;
-        block.nTime = std::numeric_limits<uint32_t>::max();
-        block.hashMerkleRoot = BlockMerkleRoot(block);
+        // always create a new template, even if it's empty, so that we
+        // we expire out old templates
 
         auto& new_template = my_templates.emplace_front();
-        new_template.hash = block.GetHash();
-        new_template.compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
         new_template.weight = 0;
-        for (auto& tx : block.vtx) {
-            new_template.weight += GetTransactionWeight(*tx);
-        }
-        new_template.txs = AddTxs(block.vtx);
         new_template.inv_sequence = inv_seq;
 
+        for (size_t i = 0; i < new_template.parts.size(); ++i) {
+            if (i >= block_templates.size()) break;
+
+            auto& block = block_templates[i]->block;
+
+            // no coinbase, 0 nonce, max timestamp, calc merkleroot, prevhash
+            if (block.vtx.size() > 0 && block.vtx[0]->IsCoinBase()) {
+                block.vtx.erase(block.vtx.begin());
+            }
+            block.nNonce = 0;
+            block.nTime = std::numeric_limits<uint32_t>::max();
+            block.hashMerkleRoot = BlockMerkleRoot(block);
+            if (i > 1) {
+                block.hashPrevBlock = new_template.parts[i-1].hash;
+            }
+
+            new_template.parts[i].hash = block.GetHash();
+            new_template.parts[i].compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
+            new_template.parts[i].txs = AddTxs(block.vtx);
+            for (auto& tx : block.vtx) {
+                new_template.weight += GetTransactionWeight(*tx);
+            }
+        }
         return new_template;
     }
 
