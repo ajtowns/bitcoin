@@ -4372,11 +4372,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         LOCK(tx_relay->m_tx_inventory_mutex);
         if (const MyTemplate* mytmp = m_templateman.GetMyBestTemplate(tx_relay->m_last_inv_sequence); mytmp != nullptr) {
-            if (mytmp->parts[1].txs.empty()) {
-                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->parts[0].compact);
-            } else {
-                MakeAndPushMessage(pfrom, NetMsgType::TEMPLATE, mytmp->parts[0].compact, mytmp->parts[1].compact);
-            }
+            m_connman.PushMessage(&pfrom, mytmp->MakeHeaderAndIdNetMsg(NetMsgType::TEMPLATE));
         }
         return;
     }

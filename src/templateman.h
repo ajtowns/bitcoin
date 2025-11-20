@@ -6,8 +6,10 @@
 #define BITCOIN_TEMPLATEMAN_H
 
 #include <blockencodings.h>
+#include <net.h>
 #include <node/miner.h>
 #include <primitives/transaction.h>
+#include <serialize.h>
 #include <uint256.h>
 
 #include <cstdint>
@@ -58,6 +60,19 @@ struct MyTemplate {
             txs += part.txs.size();
         }
         return txs;
+    }
+
+    CSerializedNetMsg MakeHeaderAndIdNetMsg(std::string msg_type) const
+    {
+        CSerializedNetMsg msg;
+        msg.m_type = std::move(msg_type);
+        VectorWriter vw{msg.data, 0};
+        WriteCompactSize(vw, Parts());
+        for (const auto& part : parts) {
+            if (part.txs.empty()) break;
+            vw << part.compact;
+        }
+        return msg;
     }
 };
 
