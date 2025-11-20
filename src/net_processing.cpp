@@ -199,7 +199,7 @@ static constexpr size_t MAX_ADDR_PROCESSING_TOKEN_BUCKET{MAX_ADDR_TO_SEND};
 /** The compactblocks version we support. See BIP 152. */
 static constexpr uint64_t CMPCTBLOCKS_VERSION{2};
 /** How frequently to update templates for sharing */
-static constexpr std::chrono::microseconds TEMPLATE_UPDATE_INTERVAL{30s};
+static constexpr auto TEMPLATE_UPDATE_INTERVAL{30s};
 
 // Internal stuff
 namespace {
@@ -5067,7 +5067,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
 
     auto now = NodeClock::now();
     if (now < m_next_template_update) return;
-    m_next_template_update = now + TEMPLATE_UPDATE_INTERVAL;
+    m_next_template_update = now + TEMPLATE_UPDATE_INTERVAL/2 + FastRandomContext().randrange<std::chrono::milliseconds>(TEMPLATE_UPDATE_INTERVAL);
 
     m_templateman.TrimMyTemplates(m_opts.share_template_count - 1);
 
