@@ -417,6 +417,9 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
+    /** What version of SENDTEMPLATE protocol is supported? */
+    uint32_t m_sendtemplate_version GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+
     /** Requested a template */
     std::atomic<uint64_t> m_wants_template_after_inv_seq{0};
 
@@ -3540,7 +3543,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (greatest_common_version >= SENDTEMPLATE_VERSION) {
             if (m_opts.share_template_count != 0) {
-                MakeAndPushMessage(pfrom, NetMsgType::SENDTEMPLATE);
+                MakeAndPushMessage(pfrom, NetMsgType::SENDTEMPLATE, uint32_t{2});
             }
         }
 
@@ -3771,7 +3774,12 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             pfrom.fDisconnect = true;
             return;
         }
-        // we don't request templates, so ignore this message
+        if (vRecv.empty()) {
+            peer->m_sendtemplate_version = 1;
+        } else {
+            vRecv >> peer->m_sendtemplate_version;
+            if (peer->m_sendtemplate_version > 2) peer->m_sendtemplate_version = 0;
+        }
         return;
     }
 
@@ -4377,6 +4385,15 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     }
 
     if (msg_type == NetMsgType::TEMPLATE) {
+        if (peer->m_sendtemplate_version == 0) {
+            return; // don't know how to parse
+        }
+
+        if (peer->m_sendtemplate_version == 1) {
+            XXX
+        } else {
+            XXX
+        }
         return; // ignore these for now
     }
 
@@ -5104,8 +5121,6 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     const auto& new_template = m_templateman.AddMyTemplate(inv_seq, std::move(block_templates));
 
     LogDebug(BCLog::SHARETMPL, "Generated template for sharing hash=%s (%d blocks, %d txs, %d weight)\n", new_template.parts[0].hash.ToString(), new_template.Parts(), new_template.Txs(), new_template.weight);
-
-    // XXX what about block_templates[2] ?
 
     LOCK(m_templatestats_mutex);
     m_templatestats.num_templates = m_templateman.NumMyTemplates();
