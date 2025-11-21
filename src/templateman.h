@@ -11,6 +11,7 @@
 #include <primitives/transaction.h>
 #include <serialize.h>
 #include <uint256.h>
+#include <util/time.h>
 
 #include <cstdint>
 #include <deque>
@@ -76,12 +77,24 @@ struct MyTemplate {
     }
 };
 
+struct PeerTemplate {
+    NodeId nodeid;
+    NodeClock::time_point recv_time;
+    TemplateTxRefVec txs;
+    size_t last_validated_idx{0};
+};
+
 class TemplateManager
 {
 public:
     TemplateTxSet template_txs;
 
     std::deque<MyTemplate> my_templates;
+    std::deque<PeerTemplate> peer_templates;
+
+    using PeerTemplateIt = std::deque<PeerTemplate>::iterator;
+
+    std::unordered_map<NodeId, PeerTemplateIt> map_peer_to_template;
 
     size_t NumMyTemplates() const { return my_templates.size(); }
 
@@ -153,7 +166,7 @@ public:
 
             new_template.parts[i].hash = block.GetHash();
             new_template.parts[i].compact = CBlockHeaderAndShortTxIDs(block, FastRandomContext().rand64());
-            new_template.parts[i].txs = AddTxs(block.vtx);
+            AddTxs(new_template.parts[i].txs, block.vtx);
             for (auto& tx : block.vtx) {
                 new_template.weight += GetTransactionWeight(*tx);
             }
@@ -161,17 +174,38 @@ public:
         return new_template;
     }
 
-    TemplateTxRefVec AddTxs(const std::vector<CTransactionRef>& txs)
+    void AddPeerTemplate(NodeId nodeid, NodeClock::time_point now, const std::vector<CTransactionRef>& txs)
     {
-        TemplateTxRefVec result;
-        result.reserve(txs.size());
+        PeerTemplate& peertmp = peer_templates.emplace_back(nodeid, now);
+        AddTxs(peertmp.txs, txs);
+        map_peer_to_template.insert_or_assign(nodeid, peer_templates.end() - 1);
+    }
+
+    void ExtendPeerTemplate(NodeId nodeid, const std::vector<CTransactionRef>& txs)
+    {
+        if (auto it = map_peer_to_template.find(nodeid); it != map_peer_to_template.end()) {
+            AddTxs(it->second->txs, txs);
+        }
+    }
+
+    void DiscardPeerTemplate(PeerTemplateIt peertmpit) {
+        if (auto it = map_peer_to_template.find(peertmpit->nodeid); it != map_peer_to_template.end()) {
+            if (it->second == peertmpit) {
+                map_peer_to_template.erase(it);
+            }
+        }
+        DiscardTxs(peertmpit.txs);
+    }
+
+    void AddTxs(TemplateTxRefVec& track, const std::vector<CTransactionRef>& txs)
+    {
+        track.reserve(track.size() + txs.size());
         for (auto& tx : txs) {
             const auto& wtxid = tx->GetWitnessHash();
             auto [it, inserted] = template_txs.try_emplace(wtxid, tx);
             ++it->second.num_templates;
-            result.emplace_back(it);
+            track.emplace_back(it);
         }
-        return result;
     }
 };
 
