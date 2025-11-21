@@ -107,14 +107,9 @@ public:
         }
     }
 
-    const MyTemplate* GetMyBestTemplate(uint64_t inv_seq)
+    const MyTemplate* GetMyBestTemplate()
     {
-        for (const auto& mytmp : my_templates) {
-            if (inv_seq >= mytmp.inv_sequence) {
-                return &mytmp;
-            }
-        }
-        return nullptr;
+        return my_templates.empty() ? nullptr : &my_templates.front();
     }
 
     const MyTemplatePart* GetMyTemplatePart(const uint256& hash, uint64_t inv_seq)

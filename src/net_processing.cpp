@@ -417,6 +417,9 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
+    /** Requested a template */
+    std::atomic<uint64_t> m_wants_template_after_inv_seq{0};
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -1082,6 +1085,7 @@ private:
     mutable Mutex m_templatestats_mutex;
     TemplateStats m_templatestats GUARDED_BY(m_templatestats_mutex);
 
+    void MaybeSendTemplate(CNode& pfrom, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
     void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templatestats_mutex);
     void SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplatePart& mytmp, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 };
@@ -4367,13 +4371,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     }
 
     if (msg_type == NetMsgType::GETTEMPLATE) {
-        auto tx_relay = peer->GetTxRelay();
-        if (tx_relay == nullptr) return;
-
-        LOCK(tx_relay->m_tx_inventory_mutex);
-        if (const MyTemplate* mytmp = m_templateman.GetMyBestTemplate(tx_relay->m_last_inv_sequence); mytmp != nullptr) {
-            m_connman.PushMessage(&pfrom, mytmp->MakeHeaderAndIdNetMsg(NetMsgType::TEMPLATE));
-        }
+        if (m_opts.share_template_count <= 0) return;
+        peer->m_wants_template_after_inv_seq = WITH_LOCK(m_mempool.cs, return m_mempool.GetSequence());
         return;
     }
 
@@ -5052,6 +5051,25 @@ TemplateStats PeerManagerImpl::GetTemplateStats() const
 {
     LOCK(m_templatestats_mutex);
     return m_templatestats;
+}
+
+void PeerManagerImpl::MaybeSendTemplate(CNode& pfrom, Peer& peer)
+{
+    uint64_t inv_seq = peer.m_wants_template_after_inv_seq.load();
+    if (inv_seq == 0) return;
+
+    const auto* mytmp = m_templateman.GetMyBestTemplate();
+    if (mytmp == nullptr || inv_seq > mytmp->inv_sequence) return;
+
+    m_connman.PushMessage(&pfrom, mytmp->MakeHeaderAndIdNetMsg(NetMsgType::TEMPLATE));
+    peer.m_wants_template_after_inv_seq = 0;
+
+    if (auto tx_relay = peer.GetTxRelay(); tx_relay != nullptr) {
+        LOCK(tx_relay->m_tx_inventory_mutex);
+        if (tx_relay->m_last_inv_sequence < mytmp->inv_sequence) {
+            tx_relay->m_last_inv_sequence = mytmp->inv_sequence;
+        }
+    }
 }
 
 void PeerManagerImpl::MaybeGenerateNewTemplate()
@@ -5838,6 +5856,8 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
             }
             peer->m_blocks_for_inv_relay.clear();
         }
+
+        MaybeSendTemplate(*pto, *peer);
 
         if (auto tx_relay = peer->GetTxRelay(); tx_relay != nullptr) {
                 LOCK(tx_relay->m_tx_inventory_mutex);
