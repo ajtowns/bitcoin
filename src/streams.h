@@ -298,6 +298,11 @@ public:
         }
         return data;
     }
+
+    bool Flush()
+    {
+        return (Read(8 - m_offset) == 0);
+    }
 };
 
 template <typename OStream>
