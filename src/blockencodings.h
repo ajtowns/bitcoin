@@ -174,7 +174,7 @@ public:
     explicit PartiallyDownloadedBlock() = default;
 
     /** Reset to initial state */
-    void reset()
+    void Reset()
     {
         txn_available.clear();
         prefilled_count = mempool_count = extra_count = 0;

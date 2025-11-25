@@ -423,6 +423,9 @@ struct Peer {
     /** Requested a template */
     std::atomic<uint64_t> m_wants_template_after_inv_seq{0};
 
+    /** We're trying to fill out a template they sent us */
+    PartiallyDownloadedTemplate m_partial_template;
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -1091,6 +1094,7 @@ private:
     void MaybeSendTemplate(CNode& pfrom, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
     void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_templatestats_mutex);
     void SendTemplateTransactions(CNode& pfrom, Peer& peer, const MyTemplatePart& mytmp, const BlockTransactionsRequest& req) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+    void ProcessPartialTemplate(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const
@@ -4389,12 +4393,52 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             return; // don't know how to parse
         }
 
+        size_t n_elems;
         if (peer->m_sendtemplate_version == 1) {
-            XXX
+            n_elems = 1;
         } else {
-            XXX
+            n_elems = ReadCompactSize(vRecv);
         }
-        return; // ignore these for now
+        if (n_elems == 0) return;
+        const auto n_take = std::min<size_t>(n_elems, 2);
+        bool first_is_complete = false;
+        peer->m_partial_template.Setup();
+        for (size_t i = 0; i < n_elems; ++i) {
+            CBlockHeaderAndShortTxIDs cmpctblock;
+            vRecv >> cmpctblock;
+            if (i >= n_take) continue;
+            auto& ptmp = peer->m_partial_template.partial_templates[i];
+            switch(ptmp.InitData(cmpctblock, m_mempool, vExtraTxnForCompact)) {
+            case READ_STATUS_INVALID:
+                LogDebug(BCLog::SHARETMPL, "Bad template, will ignore future templates from peer=%d", pfrom.GetId());
+                peer->m_sendtemplate_version = 0;
+                return;
+            case READ_STATUS_FAILED:
+                LogDebug(BCLog::SHARETMPL, "Could not resolve template for peer=%d", pfrom.GetId());
+                return;
+            case READ_STATUS_OK:
+                BlockTransactionsRequest req;
+                for (size_t i = 0; i < cmpctblock.BlockTxCount(); ++i) {
+                    if (!ptmp.IsTxAvailable(i)) {
+                        req.indexes.push_back(i);
+                    }
+                }
+                if (!req.indexes.empty()) {
+                    MakeAndPushMessage(pfrom, NetMsgType::GETBLOCKTXN, req);
+                } else {
+                    if (i == 0) first_is_complete = true;
+                }
+                break;
+            }
+        }
+        if (first_is_complete) {
+            // deal with any fully reconstructed blocks
+            BlockTransactions blktxn;
+            blktxn.blockhash = peer->m_partial_template.partial_templates[0].header.GetHash();
+            ProcessPartialTemplate(pfrom, *peer, blktxn);
+        }
+        // otherwise, processing will continue when we receive BLOCKTX?N data
+        return;
     }
 
     if (msg_type == NetMsgType::CMPCTBLOCK)
@@ -5129,6 +5173,11 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     m_templatestats.latest_template_weight = new_template.weight;
     m_templatestats.latest_template_tx = new_template.Txs();
     m_templatestats.next_update = m_next_template_update;
+}
+
+void PeerManagerImpl::ProcessPartialTemplate(CNode& pfrom, Peer& peer, const BlockTransactions& block_transactions)
+{
+    XXX
 }
 
 bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interruptMsgProc)

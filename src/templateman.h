@@ -16,10 +16,76 @@
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <variant>
 #include <vector>
 
 /** Template weight limit */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{MAX_BLOCK_WEIGHT};
+
+struct PartiallyDownloadedTemplate
+{
+    constexpr size_t N_TEMPLATES = 2;
+// XXX needs to be PartiallyDownloadedTemplate to avoid control block stuff
+    std::array<PartiallyDownloadedBlock, N_TEMPLATES> partial_templates;
+    uint8_t processed{0};
+    std::bitset<N_TEMPLATES> has_all_txns;
+
+    void Setup()
+    {
+        for (auto& pdb : partial_templates) {
+            pdb.Reset();
+        }
+        processed = 0;
+        has_all_txns.reset();
+    }
+
+private:
+    template<typename Fn>
+    bool Handle(const std::vector<CTransactionRef>& blktxns, Fn& handle_template_vtx)
+    {
+        CBlock block;
+        auto& partialBlock = partial_templates[processed];
+        ReadStatus status = partialBlock.FillBlock(block, blktxns, false);
+    }
+
+public:
+    template<typename Fn>
+    void HandleNoTxs(Fn& handle_template_vtx)
+    {
+        while (processed < N_TEMPLATES && !has_all_txns[processed]) {
+            Handle({}, handle_template_vtx);
+            ++processed;
+        }
+        if (processed < N_TEMPLATES && partial_template[processed].header.IsNull()) {
+            processed = N_TEMPLATES;
+        }
+    }
+
+    template<typename Fn>
+    bool HandleWithTxs(const BlockTransactions& blktxns, Fn& handle_template_vtx)
+    {
+        if (processed < N_TEMPLATES && partial_templates[processed].header.GetHash() == blktxns.blockhash) {
+            if (!Handle(blktxns.txn, handle_template_vtx)) return false;
+            ++processed;
+            HandleNoTxs(handle_template_vtx);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    PartiallyDownloadedBlock* Next()
+    {
+        if (n_filled < partial_templates.size()) {
+            if (partial_templates[n_filled].header.IsNull()) {
+                n_filled = partial_templates.size();
+            } else {
+                return &partial_templates[n_filled++];
+            }
+        }
+        return nullptr;
+    }
+};
 
 struct TemplateTx
 {
@@ -45,7 +111,8 @@ struct MyTemplate {
     uint64_t inv_sequence;
     uint32_t weight;
 
-    uint32_t Parts() const {
+    uint32_t Parts() const
+    {
         uint32_t n = 0;
         for (const auto& part : parts) {
             if (part.txs.empty()) break;
@@ -54,7 +121,8 @@ struct MyTemplate {
         return n;
     }
 
-    uint32_t Txs() const {
+    uint32_t Txs() const
+    {
         uint32_t txs = 0;
         for (const auto& part : parts) {
             if (part.txs.empty()) break;
@@ -194,7 +262,7 @@ public:
                 map_peer_to_template.erase(it);
             }
         }
-        DiscardTxs(peertmpit.txs);
+        DiscardTxs(peertmpit->txs);
     }
 
     void AddTxs(TemplateTxRefVec& track, const std::vector<CTransactionRef>& txs)
