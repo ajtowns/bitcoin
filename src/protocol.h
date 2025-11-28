@@ -14,10 +14,12 @@
 #include <uint256.h>
 #include <util/time.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -287,6 +289,8 @@ private:
     using type = std::underlying_type_t<NetMsgType>;
     type msg_type{NUM_NETMSGTYPE};
 
+    static const std::array<std::pair<std::string_view, NetMsgType>, NUM_NETMSGTYPE> g_sorted_msgs;
+
     std::string_view sv() const
     {
         return valid() ? ALL_NET_MESSAGE_TYPES[msg_type] : NET_MESSAGE_TYPE_OTHER;
@@ -297,6 +301,16 @@ public:
 
     constexpr NetMsgTypeConv() = default;
     constexpr NetMsgTypeConv(NetMsgType m) : msg_type{static_cast<type>(m)} { }
+
+    explicit NetMsgTypeConv(std::string_view msv)
+    {
+        auto fst = [](auto& x) { return x.first; };
+        if (auto eqr = std::ranges::equal_range(g_sorted_msgs, msv, std::less{}, fst); !eqr.empty()) {
+            msg_type = static_cast<type>(eqr.front().second);
+        } else {
+            msg_type = NUM_NETMSGTYPE;
+        }
+    }
 
     constexpr bool valid() const { return 0 <= msg_type && msg_type < NUM_NETMSGTYPE; }
 
@@ -316,7 +330,17 @@ public:
     {
         return msg_type.sv() == sv;
     }
+
+    friend std::optional<NetMsgType> GetNetMsgTypeFromString(std::string_view sv);
 };
+
+inline std::optional<NetMsgType> GetNetMsgTypeFromString(std::string_view sv)
+{
+    std::optional<NetMsgType> r{std::nullopt};
+    NetMsgTypeConv nmt{sv};
+    if (nmt.valid()) r = static_cast<NetMsgType>(nmt.msg_type);
+    return r;
+}
 
 template<typename Stream>
 inline Stream& operator<<(Stream& s, NetMsgType msg_type)
@@ -328,11 +352,6 @@ inline Stream& operator<<(Stream& s, NetMsgType msg_type)
 inline std::string_view GetNetMsgTypeString(NetMsgTypeConv msg_type)
 {
     return msg_type;
-}
-
-inline bool operator==(NetMsgType msgtype, std::string_view sv)
-{
-    return NetMsgTypeConv(msgtype) == sv;
 }
 
 /** nServices flags */

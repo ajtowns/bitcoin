@@ -236,7 +236,7 @@ public:
     std::chrono::microseconds m_time{0}; //!< time of message receipt
     uint32_t m_message_size{0};          //!< size of the payload
     uint32_t m_raw_message_size{0};      //!< used wire size of the message (including header/checksum)
-    std::string m_type;
+    NetMsgTypeConv m_type;
 
     explicit CNetMessage(DataStream&& recv_in) : m_recv(std::move(recv_in)) {}
     // Only one CNetMessage object will exist for the same message on either

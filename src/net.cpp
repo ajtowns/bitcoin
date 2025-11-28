@@ -124,7 +124,7 @@ size_t CSerializedNetMsg::GetMemoryUsage() const noexcept
 
 size_t CNetMessage::GetMemoryUsage() const noexcept
 {
-    return sizeof(*this) + memusage::DynamicUsage(m_type) + m_recv.GetMemoryUsage();
+    return sizeof(*this) + m_recv.GetMemoryUsage();
 }
 
 void CConnman::AddAddrFetch(const std::string& strDest)
@@ -808,7 +808,7 @@ CNetMessage V1Transport::GetReceivedMessage(const std::chrono::microseconds time
     CNetMessage msg(std::move(vRecv));
 
     // store message type string, time, and sizes
-    msg.m_type = hdr.GetMessageType();
+    msg.m_type = NetMsgTypeConv(hdr.GetMessageType());
     msg.m_time = time;
     msg.m_message_size = hdr.nMessageSize;
     msg.m_raw_message_size = hdr.nMessageSize + CMessageHeader::HEADER_SIZE;
@@ -1480,7 +1480,7 @@ CNetMessage V2Transport::GetReceivedMessage(std::chrono::microseconds time, bool
     if (msg_type) {
         try { capfn(*msg_type, contents); } catch (const std::exception&) { }
         reject_message = false;
-        msg.m_type = std::move(*msg_type);
+        msg.m_type = NetMsgTypeConv(*msg_type);
         msg.m_time = time;
         msg.m_message_size = contents.size();
         msg.m_recv.resize(contents.size());

@@ -7,6 +7,8 @@
 
 #include <common/system.h>
 
+static_assert(sizeof(NetMsgType) == sizeof(NetMsgTypeConv));
+
 static consteval std::string_view GetNetMsgTypeString_internal(NetMsgType msg_type)
 {
     using enum NetMsgType;
@@ -60,6 +62,19 @@ static consteval auto GetAllNetMsgTypes() {
     return r;
 };
 const std::array<std::string_view, NUM_NETMSGTYPE> ALL_NET_MESSAGE_TYPES = GetAllNetMsgTypes();
+
+static consteval auto GetSortedNetMsgTypes()
+{
+    std::array<std::pair<std::string_view, NetMsgType>, NUM_NETMSGTYPE> result;
+    for (size_t i = 0; i < result.size(); ++i) {
+        NetMsgType msg_type = static_cast<NetMsgType>(i);
+        result[i].first = GetNetMsgTypeString_internal(msg_type);
+        result[i].second = msg_type;
+    }
+    std::sort(result.begin(), result.end(), std::less{});
+    return result;
+}
+const std::array<std::pair<std::string_view, NetMsgType>, NUM_NETMSGTYPE> NetMsgTypeConv::g_sorted_msgs = GetSortedNetMsgTypes();
 
 CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* msg_type, unsigned int nMessageSizeIn)
     : pchMessageStart{pchMessageStartIn}

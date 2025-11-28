@@ -853,14 +853,14 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     DataStream msg_version_stream{msg_version.data};
 
     m_node.peerman->ProcessMessage(
-        peer, NetMsgTypeConv{NetMsgType::VERSION}, msg_version_stream, time_received_dummy, interrupt_dummy);
+        peer, NetMsgType::VERSION, msg_version_stream, time_received_dummy, interrupt_dummy);
 
     const auto msg_verack = NetMsg::Make(NetMsgType::VERACK);
     DataStream msg_verack_stream{msg_verack.data};
 
     // Will set peer.fSuccessfullyConnected to true (necessary in SendMessages()).
     m_node.peerman->ProcessMessage(
-        peer, NetMsgTypeConv{NetMsgType::VERACK}, msg_verack_stream, time_received_dummy, interrupt_dummy);
+        peer, NetMsgType::VERACK, msg_verack_stream, time_received_dummy, interrupt_dummy);
 
     // Ensure that peer_us_addr:bind_port is sent to the peer.
     const CService expected{peer_us_addr, bind_port};
@@ -1469,7 +1469,7 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
         BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == "addrv2" && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
         BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == "headers" && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_2)));
         BOOST_CHECK(!(*ret)[2]);
-        BOOST_CHECK((*ret)[3] && (*ret)[3]->m_type == "foobar" && (*ret)[3]->m_recv.empty());
+        BOOST_CHECK((*ret)[3] && !(*ret)[3]->m_type.valid() && (*ret)[3]->m_recv.empty());
         tester.ReceiveMessage("barfoo", {});
     }
 
