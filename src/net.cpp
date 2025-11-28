@@ -907,47 +907,53 @@ size_t V1Transport::GetSendMemoryUsage() const noexcept
 
 namespace {
 
+static constexpr const char* empty = "";
+consteval auto GetV2MessageIds(std::initializer_list<std::pair<uint8_t, const char*>> inp)
+{
+    std::array<const char*, 33> r;
+    r.fill(empty);
+    for (auto&& [id, msg_type] : inp) {
+        if (id <= 0 || id >= r.size()) throw;
+        r[id] = msg_type;
+    }
+    return r;
+}
+
 /** List of short messages as defined in BIP324, in order.
  *
  * Only message types that are actually implemented in this codebase need to be listed, as other
  * messages get ignored anyway - whether we know how to decode them or not.
  */
-const std::array<std::string, 33> V2_MESSAGE_IDS = {
-    "", // 12 bytes follow encoding the message type like in V1
-    NetMsgType::ADDR,
-    NetMsgType::BLOCK,
-    NetMsgType::BLOCKTXN,
-    NetMsgType::CMPCTBLOCK,
-    NetMsgType::FEEFILTER,
-    NetMsgType::FILTERADD,
-    NetMsgType::FILTERCLEAR,
-    NetMsgType::FILTERLOAD,
-    NetMsgType::GETBLOCKS,
-    NetMsgType::GETBLOCKTXN,
-    NetMsgType::GETDATA,
-    NetMsgType::GETHEADERS,
-    NetMsgType::HEADERS,
-    NetMsgType::INV,
-    NetMsgType::MEMPOOL,
-    NetMsgType::MERKLEBLOCK,
-    NetMsgType::NOTFOUND,
-    NetMsgType::PING,
-    NetMsgType::PONG,
-    NetMsgType::SENDCMPCT,
-    NetMsgType::TX,
-    NetMsgType::GETCFILTERS,
-    NetMsgType::CFILTER,
-    NetMsgType::GETCFHEADERS,
-    NetMsgType::CFHEADERS,
-    NetMsgType::GETCFCHECKPT,
-    NetMsgType::CFCHECKPT,
-    NetMsgType::ADDRV2,
-    // Unimplemented message types that are assigned in BIP324:
-    "",
-    "",
-    "",
-    ""
-};
+constexpr auto V2_MESSAGE_IDS{GetV2MessageIds({
+    {1, NetMsgType::ADDR},
+    {2, NetMsgType::BLOCK},
+    {3, NetMsgType::BLOCKTXN},
+    {4, NetMsgType::CMPCTBLOCK},
+    {5, NetMsgType::FEEFILTER},
+    {6, NetMsgType::FILTERADD},
+    {7, NetMsgType::FILTERCLEAR},
+    {8, NetMsgType::FILTERLOAD},
+    {9, NetMsgType::GETBLOCKS},
+    {10, NetMsgType::GETBLOCKTXN},
+    {11, NetMsgType::GETDATA},
+    {12, NetMsgType::GETHEADERS},
+    {13, NetMsgType::HEADERS},
+    {14, NetMsgType::INV},
+    {15, NetMsgType::MEMPOOL},
+    {16, NetMsgType::MERKLEBLOCK},
+    {17, NetMsgType::NOTFOUND},
+    {18, NetMsgType::PING},
+    {19, NetMsgType::PONG},
+    {20, NetMsgType::SENDCMPCT},
+    {21, NetMsgType::TX},
+    {22, NetMsgType::GETCFILTERS},
+    {23, NetMsgType::CFILTER},
+    {24, NetMsgType::GETCFHEADERS},
+    {25, NetMsgType::CFHEADERS},
+    {26, NetMsgType::GETCFCHECKPT},
+    {27, NetMsgType::CFCHECKPT},
+    {28, NetMsgType::ADDRV2},
+})};
 
 class V2MessageMap
 {
