@@ -17,7 +17,10 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <type_traits>
 
 /** Message header.
  * (4) message start.
@@ -57,258 +60,280 @@ public:
  * Bitcoin protocol message types. When adding new message types, don't forget
  * to update ALL_NET_MESSAGE_TYPES below.
  */
-namespace NetMsgType {
-/**
- * The version message provides information about the transmitting node to the
- * receiving node at the beginning of a connection.
- */
-inline constexpr const char* VERSION{"version"};
-/**
- * The verack message acknowledges a previously-received version message,
- * informing the connecting node that it can begin to send other messages.
- */
-inline constexpr const char* VERACK{"verack"};
-/**
- * The addr (IP address) message relays connection information for peers on the
- * network.
- */
-inline constexpr const char* ADDR{"addr"};
-/**
- * The addrv2 message relays connection information for peers on the network just
- * like the addr message, but is extended to allow gossiping of longer node
- * addresses (see BIP155).
- */
-inline constexpr const char* ADDRV2{"addrv2"};
-/**
- * The sendaddrv2 message signals support for receiving ADDRV2 messages (BIP155).
- * It also implies that its sender can encode as ADDRV2 and would send ADDRV2
- * instead of ADDR to a peer that has signaled ADDRV2 support by sending SENDADDRV2.
- */
-inline constexpr const char* SENDADDRV2{"sendaddrv2"};
-/**
- * The inv message (inventory message) transmits one or more inventories of
- * objects known to the transmitting peer.
- */
-inline constexpr const char* INV{"inv"};
-/**
- * The getdata message requests one or more data objects from another node.
- */
-inline constexpr const char* GETDATA{"getdata"};
-/**
- * The merkleblock message is a reply to a getdata message which requested a
- * block using the inventory type MSG_MERKLEBLOCK.
- * @since protocol version 70001 as described by BIP37.
- */
-inline constexpr const char* MERKLEBLOCK{"merkleblock"};
-/**
- * The getblocks message requests an inv message that provides block header
- * hashes starting from a particular point in the block chain.
- */
-inline constexpr const char* GETBLOCKS{"getblocks"};
-/**
- * The getheaders message requests a headers message that provides block
- * headers starting from a particular point in the block chain.
- * @since protocol version 31800.
- */
-inline constexpr const char* GETHEADERS{"getheaders"};
-/**
- * The tx message transmits a single transaction.
- */
-inline constexpr const char* TX{"tx"};
-/**
- * The headers message sends one or more block headers to a node which
- * previously requested certain headers with a getheaders message.
- * @since protocol version 31800.
- */
-inline constexpr const char* HEADERS{"headers"};
-/**
- * The block message transmits a single serialized block.
- */
-inline constexpr const char* BLOCK{"block"};
-/**
- * The getaddr message requests an addr message from the receiving node,
- * preferably one with lots of IP addresses of other receiving nodes.
- */
-inline constexpr const char* GETADDR{"getaddr"};
-/**
- * The mempool message requests the TXIDs of transactions that the receiving
- * node has verified as valid but which have not yet appeared in a block.
- * @since protocol version 60002 as described by BIP35.
- *   Only available with service bit NODE_BLOOM, see also BIP111.
- */
-inline constexpr const char* MEMPOOL{"mempool"};
-/**
- * The ping message is sent periodically to help confirm that the receiving
- * peer is still connected.
- */
-inline constexpr const char* PING{"ping"};
-/**
- * The pong message replies to a ping message, proving to the pinging node that
- * the ponging node is still alive.
- * @since protocol version 60001 as described by BIP31.
- */
-inline constexpr const char* PONG{"pong"};
-/**
- * The notfound message is a reply to a getdata message which requested an
- * object the receiving node does not have available for relay.
- * @since protocol version 70001.
- */
-inline constexpr const char* NOTFOUND{"notfound"};
-/**
- * The filterload message tells the receiving peer to filter all relayed
- * transactions and requested merkle blocks through the provided filter.
- * @since protocol version 70001 as described by BIP37.
- *   Only available with service bit NODE_BLOOM since protocol version
- *   70011 as described by BIP111.
- */
-inline constexpr const char* FILTERLOAD{"filterload"};
-/**
- * The filteradd message tells the receiving peer to add a single element to a
- * previously-set bloom filter, such as a new public key.
- * @since protocol version 70001 as described by BIP37.
- *   Only available with service bit NODE_BLOOM since protocol version
- *   70011 as described by BIP111.
- */
-inline constexpr const char* FILTERADD{"filteradd"};
-/**
- * The filterclear message tells the receiving peer to remove a previously-set
- * bloom filter.
- * @since protocol version 70001 as described by BIP37.
- *   Only available with service bit NODE_BLOOM since protocol version
- *   70011 as described by BIP111.
- */
-inline constexpr const char* FILTERCLEAR{"filterclear"};
-/**
- * Indicates that a node prefers to receive new block announcements via a
- * "headers" message rather than an "inv".
- * @since protocol version 70012 as described by BIP130.
- */
-inline constexpr const char* SENDHEADERS{"sendheaders"};
-/**
- * The feefilter message tells the receiving peer not to inv us any txs
- * which do not meet the specified min fee rate.
- * @since protocol version 70013 as described by BIP133
- */
-inline constexpr const char* FEEFILTER{"feefilter"};
-/**
- * Contains a 1-byte bool and 8-byte LE version number.
- * Indicates that a node is willing to provide blocks via "cmpctblock" messages.
- * May indicate that a node prefers to receive new block announcements via a
- * "cmpctblock" message rather than an "inv", depending on message contents.
- * @since protocol version 70014 as described by BIP 152
- */
-inline constexpr const char* SENDCMPCT{"sendcmpct"};
-/**
- * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
- * list of "short txids".
- * @since protocol version 70014 as described by BIP 152
- */
-inline constexpr const char* CMPCTBLOCK{"cmpctblock"};
-/**
- * Contains a BlockTransactionsRequest
- * Peer should respond with "blocktxn" message.
- * @since protocol version 70014 as described by BIP 152
- */
-inline constexpr const char* GETBLOCKTXN{"getblocktxn"};
-/**
- * Contains a BlockTransactions.
- * Sent in response to a "getblocktxn" message.
- * @since protocol version 70014 as described by BIP 152
- */
-inline constexpr const char* BLOCKTXN{"blocktxn"};
-/**
- * getcfilters requests compact filters for a range of blocks.
- * Only available with service bit NODE_COMPACT_FILTERS as described by
- * BIP 157 & 158.
- */
-inline constexpr const char* GETCFILTERS{"getcfilters"};
-/**
- * cfilter is a response to a getcfilters request containing a single compact
- * filter.
- */
-inline constexpr const char* CFILTER{"cfilter"};
-/**
- * getcfheaders requests a compact filter header and the filter hashes for a
- * range of blocks, which can then be used to reconstruct the filter headers
- * for those blocks.
- * Only available with service bit NODE_COMPACT_FILTERS as described by
- * BIP 157 & 158.
- */
-inline constexpr const char* GETCFHEADERS{"getcfheaders"};
-/**
- * cfheaders is a response to a getcfheaders request containing a filter header
- * and a vector of filter hashes for each subsequent block in the requested range.
- */
-inline constexpr const char* CFHEADERS{"cfheaders"};
-/**
- * getcfcheckpt requests evenly spaced compact filter headers, enabling
- * parallelized download and validation of the headers between them.
- * Only available with service bit NODE_COMPACT_FILTERS as described by
- * BIP 157 & 158.
- */
-inline constexpr const char* GETCFCHECKPT{"getcfcheckpt"};
-/**
- * cfcheckpt is a response to a getcfcheckpt request containing a vector of
- * evenly spaced filter headers for blocks on the requested chain.
- */
-inline constexpr const char* CFCHECKPT{"cfcheckpt"};
-/**
- * Indicates that a node prefers to relay transactions via wtxid, rather than
- * txid.
- * @since protocol version 70016 as described by BIP 339.
- */
-inline constexpr const char* WTXIDRELAY{"wtxidrelay"};
-/**
- * Contains a 4-byte version number and an 8-byte salt.
- * The salt is used to compute short txids needed for efficient
- * txreconciliation, as described by BIP 330.
- */
-inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
-/**
- * The alert message. Obsolete, but still sent to old peers.
- */
-inline constexpr const char* ALERT{"alert"};
-}; // namespace NetMsgType
+enum class NetMsgType : uint8_t {
+    /**
+     * The version message provides information about the transmitting node to the
+     * receiving node at the beginning of a connection.
+     */
+    VERSION,
+    /**
+     * The verack message acknowledges a previously-received version message,
+     * informing the connecting node that it can begin to send other messages.
+     */
+    VERACK,
+    /**
+     * The addr (IP address) message relays connection information for peers on the
+     * network.
+     */
+    ADDR,
+    /**
+     * The addrv2 message relays connection information for peers on the network just
+     * like the addr message, but is extended to allow gossiping of longer node
+     * addresses (see BIP155).
+     */
+    ADDRV2,
+    /**
+     * The sendaddrv2 message signals support for receiving ADDRV2 messages (BIP155).
+     * It also implies that its sender can encode as ADDRV2 and would send ADDRV2
+     * instead of ADDR to a peer that has signaled ADDRV2 support by sending SENDADDRV2.
+     */
+    SENDADDRV2,
+    /**
+     * The inv message (inventory message) transmits one or more inventories of
+     * objects known to the transmitting peer.
+     */
+    INV,
+    /**
+     * The getdata message requests one or more data objects from another node.
+     */
+    GETDATA,
+    /**
+     * The merkleblock message is a reply to a getdata message which requested a
+     * block using the inventory type MSG_MERKLEBLOCK.
+     * @since protocol version 70001 as described by BIP37.
+     */
+    MERKLEBLOCK,
+    /**
+     * The getblocks message requests an inv message that provides block header
+     * hashes starting from a particular point in the block chain.
+     */
+    GETBLOCKS,
+    /**
+     * The getheaders message requests a headers message that provides block
+     * headers starting from a particular point in the block chain.
+     * @since protocol version 31800.
+     */
+    GETHEADERS,
+    /**
+     * The tx message transmits a single transaction.
+     */
+    TX,
+    /**
+     * The headers message sends one or more block headers to a node which
+     * previously requested certain headers with a getheaders message.
+     * @since protocol version 31800.
+     */
+    HEADERS,
+    /**
+     * The block message transmits a single serialized block.
+     */
+    BLOCK,
+    /**
+     * The getaddr message requests an addr message from the receiving node,
+     * preferably one with lots of IP addresses of other receiving nodes.
+     */
+    GETADDR,
+    /**
+     * The mempool message requests the TXIDs of transactions that the receiving
+     * node has verified as valid but which have not yet appeared in a block.
+     * @since protocol version 60002 as described by BIP35.
+     *   Only available with service bit NODE_BLOOM, see also BIP111.
+     */
+    MEMPOOL,
+    /**
+     * The ping message is sent periodically to help confirm that the receiving
+     * peer is still connected.
+     */
+    PING,
+    /**
+     * The pong message replies to a ping message, proving to the pinging node that
+     * the ponging node is still alive.
+     * @since protocol version 60001 as described by BIP31.
+     */
+    PONG,
+    /**
+     * The notfound message is a reply to a getdata message which requested an
+     * object the receiving node does not have available for relay.
+     * @since protocol version 70001.
+     */
+    NOTFOUND,
+    /**
+     * The filterload message tells the receiving peer to filter all relayed
+     * transactions and requested merkle blocks through the provided filter.
+     * @since protocol version 70001 as described by BIP37.
+     *   Only available with service bit NODE_BLOOM since protocol version
+     *   70011 as described by BIP111.
+     */
+    FILTERLOAD,
+    /**
+     * The filteradd message tells the receiving peer to add a single element to a
+     * previously-set bloom filter, such as a new public key.
+     * @since protocol version 70001 as described by BIP37.
+     *   Only available with service bit NODE_BLOOM since protocol version
+     *   70011 as described by BIP111.
+     */
+    FILTERADD,
+    /**
+     * The filterclear message tells the receiving peer to remove a previously-set
+     * bloom filter.
+     * @since protocol version 70001 as described by BIP37.
+     *   Only available with service bit NODE_BLOOM since protocol version
+     *   70011 as described by BIP111.
+     */
+    FILTERCLEAR,
+    /**
+     * Indicates that a node prefers to receive new block announcements via a
+     * "headers" message rather than an "inv".
+     * @since protocol version 70012 as described by BIP130.
+     */
+    SENDHEADERS,
+    /**
+     * The feefilter message tells the receiving peer not to inv us any txs
+     * which do not meet the specified min fee rate.
+     * @since protocol version 70013 as described by BIP133
+     */
+    FEEFILTER,
+    /**
+     * Contains a 1-byte bool and 8-byte LE version number.
+     * Indicates that a node is willing to provide blocks via "cmpctblock" messages.
+     * May indicate that a node prefers to receive new block announcements via a
+     * "cmpctblock" message rather than an "inv", depending on message contents.
+     * @since protocol version 70014 as described by BIP 152
+     */
+    SENDCMPCT,
+    /**
+     * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
+     * list of "short txids".
+     * @since protocol version 70014 as described by BIP 152
+     */
+    CMPCTBLOCK,
+    /**
+     * Contains a BlockTransactionsRequest
+     * Peer should respond with "blocktxn" message.
+     * @since protocol version 70014 as described by BIP 152
+     */
+    GETBLOCKTXN,
+    /**
+     * Contains a BlockTransactions.
+     * Sent in response to a "getblocktxn" message.
+     * @since protocol version 70014 as described by BIP 152
+     */
+    BLOCKTXN,
+    /**
+     * getcfilters requests compact filters for a range of blocks.
+     * Only available with service bit NODE_COMPACT_FILTERS as described by
+     * BIP 157 & 158.
+     */
+    GETCFILTERS,
+    /**
+     * cfilter is a response to a getcfilters request containing a single compact
+     * filter.
+     */
+    CFILTER,
+    /**
+     * getcfheaders requests a compact filter header and the filter hashes for a
+     * range of blocks, which can then be used to reconstruct the filter headers
+     * for those blocks.
+     * Only available with service bit NODE_COMPACT_FILTERS as described by
+     * BIP 157 & 158.
+     */
+    GETCFHEADERS,
+    /**
+     * cfheaders is a response to a getcfheaders request containing a filter header
+     * and a vector of filter hashes for each subsequent block in the requested range.
+     */
+    CFHEADERS,
+    /**
+     * getcfcheckpt requests evenly spaced compact filter headers, enabling
+     * parallelized download and validation of the headers between them.
+     * Only available with service bit NODE_COMPACT_FILTERS as described by
+     * BIP 157 & 158.
+     */
+    GETCFCHECKPT,
+    /**
+     * cfcheckpt is a response to a getcfcheckpt request containing a vector of
+     * evenly spaced filter headers for blocks on the requested chain.
+     */
+    CFCHECKPT,
+    /**
+     * Indicates that a node prefers to relay transactions via wtxid, rather than
+     * txid.
+     * @since protocol version 70016 as described by BIP 339.
+     */
+    WTXIDRELAY,
+    /**
+     * Contains a 4-byte version number and an 8-byte salt.
+     * The salt is used to compute short txids needed for efficient
+     * txreconciliation, as described by BIP 330.
+     */
+    SENDTXRCNCL,
+    /**
+     * The alert message. Obsolete, but still sent to old peers.
+     */
+    ALERT,
+}; // enum class NetMsgType
 
-/** All known message types (see above). Keep this in the same order as the list of messages above. */
-inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
-    NetMsgType::VERSION,
-    NetMsgType::VERACK,
-    NetMsgType::ADDR,
-    NetMsgType::ADDRV2,
-    NetMsgType::SENDADDRV2,
-    NetMsgType::INV,
-    NetMsgType::GETDATA,
-    NetMsgType::MERKLEBLOCK,
-    NetMsgType::GETBLOCKS,
-    NetMsgType::GETHEADERS,
-    NetMsgType::TX,
-    NetMsgType::HEADERS,
-    NetMsgType::BLOCK,
-    NetMsgType::GETADDR,
-    NetMsgType::MEMPOOL,
-    NetMsgType::PING,
-    NetMsgType::PONG,
-    NetMsgType::NOTFOUND,
-    NetMsgType::FILTERLOAD,
-    NetMsgType::FILTERADD,
-    NetMsgType::FILTERCLEAR,
-    NetMsgType::SENDHEADERS,
-    NetMsgType::FEEFILTER,
-    NetMsgType::SENDCMPCT,
-    NetMsgType::CMPCTBLOCK,
-    NetMsgType::GETBLOCKTXN,
-    NetMsgType::BLOCKTXN,
-    NetMsgType::GETCFILTERS,
-    NetMsgType::CFILTER,
-    NetMsgType::GETCFHEADERS,
-    NetMsgType::CFHEADERS,
-    NetMsgType::GETCFCHECKPT,
-    NetMsgType::CFCHECKPT,
-    NetMsgType::WTXIDRELAY,
-    NetMsgType::SENDTXRCNCL,
-    NetMsgType::ALERT,
-})};
+static constexpr size_t NUM_NETMSGTYPE{36};
+
+/** All known message types (see above). Keep this in enum order. */
+extern const std::array<std::string_view, NUM_NETMSGTYPE> ALL_NET_MESSAGE_TYPES;
+
+constexpr std::string NET_MESSAGE_TYPE_OTHER = "*other*";
+
+/* Helper class that implicitly converts NetMsgType */
+class NetMsgTypeConv
+{
+private:
+    using type = std::underlying_type_t<NetMsgType>;
+    type msg_type{NUM_NETMSGTYPE};
+
+    std::string_view sv() const
+    {
+        return valid() ? ALL_NET_MESSAGE_TYPES[msg_type] : NET_MESSAGE_TYPE_OTHER;
+    }
+
+public:
+    // implicit conversions
+
+    constexpr NetMsgTypeConv() = default;
+    constexpr NetMsgTypeConv(NetMsgType m) : msg_type{static_cast<type>(m)} { }
+
+    constexpr bool valid() const { return 0 <= msg_type && msg_type < NUM_NETMSGTYPE; }
+
+    friend bool operator==(NetMsgTypeConv a, NetMsgTypeConv b) = default;
+
+    operator std::string() const { return std::string{sv()}; }
+    operator std::string_view() const { return sv(); }
+
+    template<typename Stream>
+    friend inline Stream& operator<<(Stream& s, NetMsgTypeConv msg_type)
+    {
+        s << msg_type.sv();
+        return s;
+    }
+
+    friend inline bool operator==(NetMsgTypeConv msg_type, std::string_view sv)
+    {
+        return msg_type.sv() == sv;
+    }
+};
+
+template<typename Stream>
+inline Stream& operator<<(Stream& s, NetMsgType msg_type)
+{
+    s << NetMsgTypeConv{msg_type};
+    return s;
+}
+
+inline std::string_view GetNetMsgTypeString(NetMsgTypeConv msg_type)
+{
+    return msg_type;
+}
+
+inline bool operator==(NetMsgType msgtype, std::string_view sv)
+{
+    return NetMsgTypeConv(msgtype) == sv;
+}
 
 /** nServices flags */
 enum ServiceFlags : uint64_t {

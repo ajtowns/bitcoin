@@ -289,14 +289,14 @@ static RPCHelpMan getpeerinfo()
         UniValue sendPerMsgType(UniValue::VOBJ);
         for (const auto& i : stats.mapSendBytesPerMsgType) {
             if (i.second > 0)
-                sendPerMsgType.pushKV(i.first, i.second);
+                sendPerMsgType.pushKV(std::string(i.first), i.second);
         }
         obj.pushKV("bytessent_per_msg", std::move(sendPerMsgType));
 
         UniValue recvPerMsgType(UniValue::VOBJ);
         for (const auto& i : stats.mapRecvBytesPerMsgType) {
             if (i.second > 0)
-                recvPerMsgType.pushKV(i.first, i.second);
+                recvPerMsgType.pushKV(std::string(i.first), i.second);
         }
         obj.pushKV("bytesrecv_per_msg", std::move(recvPerMsgType));
         obj.pushKV("connection_type", ConnectionTypeAsString(stats.m_conn_type));

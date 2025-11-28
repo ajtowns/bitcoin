@@ -105,8 +105,6 @@ enum BindFlags {
 // The sleep time needs to be small to avoid new sockets stalling
 static const uint64_t SELECT_TIMEOUT_MILLISECONDS = 50;
 
-const std::string NET_MESSAGE_TYPE_OTHER = "*other*";
-
 static const uint64_t RANDOMIZER_ID_NETGROUP = 0x6c0edd8036ef4036ULL; // SHA256("netgroup")[0:8]
 static const uint64_t RANDOMIZER_ID_LOCALHOSTNONCE = 0xd93e69e2bbfa5735ULL; // SHA256("localhostnonce")[0:8]
 static const uint64_t RANDOMIZER_ID_NETWORKKEY = 0x0e8a2b136c592a7dULL; // SHA256("networkkey")[0:8]
@@ -907,13 +905,13 @@ size_t V1Transport::GetSendMemoryUsage() const noexcept
 
 namespace {
 
-static constexpr const char* empty = "";
-consteval auto GetV2MessageIds(std::initializer_list<std::pair<uint8_t, const char*>> inp)
+consteval auto GetV2MessageIds(std::initializer_list<std::pair<uint8_t, NetMsgTypeConv>> inp)
 {
-    std::array<const char*, 33> r;
-    r.fill(empty);
+    std::array<NetMsgTypeConv, 33> r{};
     for (auto&& [id, msg_type] : inp) {
+        if (r[id].valid()) throw;
         if (id <= 0 || id >= r.size()) throw;
+        if (!msg_type.valid()) throw;
         r[id] = msg_type;
     }
     return r;
@@ -963,6 +961,7 @@ public:
     V2MessageMap() noexcept
     {
         for (size_t i = 1; i < std::size(V2_MESSAGE_IDS); ++i) {
+            if (!V2_MESSAGE_IDS[i].valid()) continue;
             m_map.emplace(V2_MESSAGE_IDS[i], i);
         }
     }
@@ -1424,7 +1423,12 @@ std::optional<std::string> V2Transport::GetMessageType(std::span<const uint8_t>&
         // Short (1 byte) encoding.
         if (first_byte < std::size(V2_MESSAGE_IDS)) {
             // Valid short message id.
-            return V2_MESSAGE_IDS[first_byte];
+            auto m = V2_MESSAGE_IDS[first_byte];
+            if (m.valid()) {
+                return std::string(V2_MESSAGE_IDS[first_byte]);
+            } else {
+                return std::string();
+            }
         } else {
             // Unknown short message id.
             return std::nullopt;
@@ -3851,7 +3855,7 @@ CNode::CNode(NodeId idIn,
     if (inbound_onion) assert(conn_type_in == ConnectionType::INBOUND);
 
     for (const auto& msg : ALL_NET_MESSAGE_TYPES) {
-        mapRecvBytesPerMsgType[msg] = 0;
+        mapRecvBytesPerMsgType[std::string(msg)] = 0;
     }
     mapRecvBytesPerMsgType[NET_MESSAGE_TYPE_OTHER] = 0;
 

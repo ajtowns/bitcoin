@@ -710,9 +710,9 @@ private:
     /** Send a message to a peer */
     void PushMessage(CNode& node, CSerializedNetMsg&& msg) const { m_connman.PushMessage(&node, std::move(msg)); }
     template <typename... Args>
-    void MakeAndPushMessage(CNode& node, std::string msg_type, Args&&... args) const
+    void MakeAndPushMessage(CNode& node, NetMsgType msg_type, Args&&... args) const
     {
-        m_connman.PushMessage(&node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
+        m_connman.PushMessage(&node, NetMsg::Make(msg_type, std::forward<Args>(args)...));
     }
 
     /** Send a version message to a peer */

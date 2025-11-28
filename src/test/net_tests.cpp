@@ -853,14 +853,14 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     DataStream msg_version_stream{msg_version.data};
 
     m_node.peerman->ProcessMessage(
-        peer, NetMsgType::VERSION, msg_version_stream, time_received_dummy, interrupt_dummy);
+        peer, NetMsgTypeConv{NetMsgType::VERSION}, msg_version_stream, time_received_dummy, interrupt_dummy);
 
     const auto msg_verack = NetMsg::Make(NetMsgType::VERACK);
     DataStream msg_verack_stream{msg_verack.data};
 
     // Will set peer.fSuccessfullyConnected to true (necessary in SendMessages()).
     m_node.peerman->ProcessMessage(
-        peer, NetMsgType::VERACK, msg_verack_stream, time_received_dummy, interrupt_dummy);
+        peer, NetMsgTypeConv{NetMsgType::VERACK}, msg_verack_stream, time_received_dummy, interrupt_dummy);
 
     // Ensure that peer_us_addr:bind_port is sent to the peer.
     const CService expected{peer_us_addr, bind_port};

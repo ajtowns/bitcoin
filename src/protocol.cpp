@@ -7,6 +7,60 @@
 
 #include <common/system.h>
 
+static consteval std::string_view GetNetMsgTypeString_internal(NetMsgType msg_type)
+{
+    using enum NetMsgType;
+
+    switch (msg_type) {
+    case VERSION: return "version";
+    case VERACK: return "verack";
+    case ADDR: return "addr";
+    case ADDRV2: return "addrv2";
+    case SENDADDRV2: return "sendaddrv2";
+    case INV: return "inv";
+    case GETDATA: return "getdata";
+    case MERKLEBLOCK: return "merkleblock";
+    case GETBLOCKS: return "getblocks";
+    case GETHEADERS: return "getheaders";
+    case TX: return "tx";
+    case HEADERS: return "headers";
+    case BLOCK: return "block";
+    case GETADDR: return "getaddr";
+    case MEMPOOL: return "mempool";
+    case PING: return "ping";
+    case PONG: return "pong";
+    case NOTFOUND: return "notfound";
+    case FILTERLOAD: return "filterload";
+    case FILTERADD: return "filteradd";
+    case FILTERCLEAR: return "filterclear";
+    case SENDHEADERS: return "sendheaders";
+    case FEEFILTER: return "feefilter";
+    case SENDCMPCT: return "sendcmpct";
+    case CMPCTBLOCK: return "cmpctblock";
+    case GETBLOCKTXN: return "getblocktxn";
+    case BLOCKTXN: return "blocktxn";
+    case GETCFILTERS: return "getcfilters";
+    case CFILTER: return "cfilter";
+    case GETCFHEADERS: return "getcfheaders";
+    case CFHEADERS: return "cfheaders";
+    case GETCFCHECKPT: return "getcfcheckpt";
+    case CFCHECKPT: return "cfcheckpt";
+    case WTXIDRELAY: return "wtxidrelay";
+    case SENDTXRCNCL: return "sendtxrcncl";
+    case ALERT: return "alert";
+    }
+    throw;
+}
+
+static consteval auto GetAllNetMsgTypes() {
+    std::array<std::string_view, NUM_NETMSGTYPE> r;
+    for (size_t i = 0; i < r.size(); ++i) {
+        r[i] = GetNetMsgTypeString_internal(static_cast<NetMsgType>(i));
+    }
+    return r;
+};
+const std::array<std::string_view, NUM_NETMSGTYPE> ALL_NET_MESSAGE_TYPES = GetAllNetMsgTypes();
+
 CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* msg_type, unsigned int nMessageSizeIn)
     : pchMessageStart{pchMessageStartIn}
 {
@@ -63,12 +117,12 @@ std::string CInv::GetMessageType() const
     int masked = type & MSG_TYPE_MASK;
     switch (masked)
     {
-    case MSG_TX:             return cmd.append(NetMsgType::TX);
+    case MSG_TX:             return cmd.append("tx");
     // WTX is not a message type, just an inv type
     case MSG_WTX:            return cmd.append("wtx");
-    case MSG_BLOCK:          return cmd.append(NetMsgType::BLOCK);
-    case MSG_FILTERED_BLOCK: return cmd.append(NetMsgType::MERKLEBLOCK);
-    case MSG_CMPCT_BLOCK:    return cmd.append(NetMsgType::CMPCTBLOCK);
+    case MSG_BLOCK:          return cmd.append("block");
+    case MSG_FILTERED_BLOCK: return cmd.append("merkleblock");
+    case MSG_CMPCT_BLOCK:    return cmd.append("cmpctblock");
     default:
         throw std::out_of_range(strprintf("CInv::GetMessageType(): type=%d unknown type", type));
     }

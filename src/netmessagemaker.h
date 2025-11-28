@@ -7,6 +7,7 @@
 #define BITCOIN_NETMESSAGEMAKER_H
 
 #include <net.h>
+#include <protocol.h>
 #include <serialize.h>
 
 namespace NetMsg {
@@ -17,6 +18,12 @@ namespace NetMsg {
         msg.m_type = std::move(msg_type);
         VectorWriter{msg.data, 0, std::forward<Args>(args)...};
         return msg;
+    }
+
+    template <typename... Args>
+    CSerializedNetMsg Make(NetMsgType msg_type, Args&&... args)
+    {
+        return Make(std::string(GetNetMsgTypeString(msg_type)), std::forward<Args>(args)...);
     }
 } // namespace NetMsg
 

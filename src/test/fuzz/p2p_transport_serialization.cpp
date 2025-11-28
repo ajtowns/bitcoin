@@ -21,12 +21,15 @@
 
 namespace {
 
-auto g_all_messages = ALL_NET_MESSAGE_TYPES;
+std::array<std::string, NUM_NETMSGTYPE> g_all_messages;
 
 void initialize_p2p_transport_serialization()
 {
     static ECC_Context ecc_context{};
     SelectParams(ChainType::REGTEST);
+    for (size_t i = 0; i < NUM_NETMSGTYPE; ++i) {
+        g_all_messages[i] = GetNetMsgTypeString(static_cast<NetMsgType>(i));
+    }
     std::sort(g_all_messages.begin(), g_all_messages.end());
 }
 
