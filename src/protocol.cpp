@@ -5,7 +5,97 @@
 
 #include <protocol.h>
 
+#include <bip324.h>
 #include <common/system.h>
+
+namespace BIP324 {
+static consteval RecvMsgMap LiteralRecvMsgMap(std::initializer_list<std::pair<uint8_t, const char*>> inp)
+{
+    RecvMsgMap r;
+    uint8_t sentinel{ALL_NET_MESSAGE_TYPES.size()};
+    r.fill(sentinel); // invalid value, in case some entries are blank
+    for (auto&& [id, msg_type] : inp) {
+        if (id <= 0 || id > r.size()) throw "Bad inputs (id out of range)";
+        bool found = false;
+        for (size_t i = 0; i < ALL_NET_MESSAGE_TYPES.size(); ++i) {
+            if (std::string_view{ALL_NET_MESSAGE_TYPES[i]} == msg_type) {
+                if (r[id-1] != sentinel) throw "Bad inputs (duplicates)";
+                r[id-1] = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) throw "Bad inputs (unknown msg)";
+    }
+    return r;
+}
+
+static consteval auto CheckDefaultRecvMsgMap(RecvMsgMap m)
+{
+    static_assert(MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED >= 1);
+    for (size_t i = 0; i < m.size(); ++i) {
+        if (i + 1 == MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED) {
+            if (m[i] >= ALL_NET_MESSAGE_TYPES.size()) throw "BIP324::MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED isn't actually implemented";
+        }
+        if (i + 1 > MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED) {
+            if (m[i] < ALL_NET_MESSAGE_TYPES.size()) throw "MsgType greater than BIP324::MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED is implemented";
+        }
+    }
+
+    return m;
+}
+
+/** List of short messages as defined in BIP324, in order.
+ *
+ * Only message types that are actually implemented in this codebase need to be listed, as other
+ * messages get ignored anyway - whether we know how to decode them or not.
+ */
+const RecvMsgMap DEFAULT_RECVMSGMAP = CheckDefaultRecvMsgMap(LiteralRecvMsgMap({
+    {1, NetMsgType::ADDR},
+    {2, NetMsgType::BLOCK},
+    {3, NetMsgType::BLOCKTXN},
+    {4, NetMsgType::CMPCTBLOCK},
+    {5, NetMsgType::FEEFILTER},
+    {6, NetMsgType::FILTERADD},
+    {7, NetMsgType::FILTERCLEAR},
+    {8, NetMsgType::FILTERLOAD},
+    {9, NetMsgType::GETBLOCKS},
+    {10, NetMsgType::GETBLOCKTXN},
+    {11, NetMsgType::GETDATA},
+    {12, NetMsgType::GETHEADERS},
+    {13, NetMsgType::HEADERS},
+    {14, NetMsgType::INV},
+    {15, NetMsgType::MEMPOOL},
+    {16, NetMsgType::MERKLEBLOCK},
+    {17, NetMsgType::NOTFOUND},
+    {18, NetMsgType::PING},
+    {19, NetMsgType::PONG},
+    {20, NetMsgType::SENDCMPCT},
+    {21, NetMsgType::TX},
+    {22, NetMsgType::GETCFILTERS},
+    {23, NetMsgType::CFILTER},
+    {24, NetMsgType::GETCFHEADERS},
+    {25, NetMsgType::CFHEADERS},
+    {26, NetMsgType::GETCFCHECKPT},
+    {27, NetMsgType::CFCHECKPT},
+    {28, NetMsgType::ADDRV2},
+    {37, NetMsgType::FEATURE},
+}));
+
+SendMsgMap RecvMsgMap::ToSendMsgMap() const
+{
+    SendMsgMap r{};
+    size_t i = 0;
+    for (uint8_t v : *this) {
+        ++i;
+        if (v >= ALL_NET_MESSAGE_TYPES.size()) continue;
+        r.emplace(ALL_NET_MESSAGE_TYPES[v], i);
+    }
+    return r;
+}
+
+const SendMsgMap V2_MESSAGE_MAP{DEFAULT_RECVMSGMAP.ToSendMsgMap()};
+} // namespace BIP324
 
 CInv::CInv()
 {

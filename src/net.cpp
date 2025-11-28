@@ -944,69 +944,6 @@ size_t V1Transport::GetSendMemoryUsage() const noexcept
 
 namespace {
 
-/** List of short messages as defined in BIP324, in order.
- *
- * Only message types that are actually implemented in this codebase need to be listed, as other
- * messages get ignored anyway - whether we know how to decode them or not.
- */
-const std::array<std::string, BIP324_SHORTIDS_IMPLEMENTED> V2_MESSAGE_IDS = {
-    "", // 12 bytes follow encoding the message type like in V1
-    NetMsgType::ADDR,
-    NetMsgType::BLOCK,
-    NetMsgType::BLOCKTXN,
-    NetMsgType::CMPCTBLOCK,
-    NetMsgType::FEEFILTER,
-    NetMsgType::FILTERADD,
-    NetMsgType::FILTERCLEAR,
-    NetMsgType::FILTERLOAD,
-    NetMsgType::GETBLOCKS,
-    NetMsgType::GETBLOCKTXN,
-    NetMsgType::GETDATA,
-    NetMsgType::GETHEADERS,
-    NetMsgType::HEADERS,
-    NetMsgType::INV,
-    NetMsgType::MEMPOOL,
-    NetMsgType::MERKLEBLOCK,
-    NetMsgType::NOTFOUND,
-    NetMsgType::PING,
-    NetMsgType::PONG,
-    NetMsgType::SENDCMPCT,
-    NetMsgType::TX,
-    NetMsgType::GETCFILTERS,
-    NetMsgType::CFILTER,
-    NetMsgType::GETCFHEADERS,
-    NetMsgType::CFHEADERS,
-    NetMsgType::GETCFCHECKPT,
-    NetMsgType::CFCHECKPT,
-    NetMsgType::ADDRV2,
-    "", "", "", // Unimplemented message types 29-31
-    "", "", "", "", // Unimplemented message types 32-35
-    "",  // Unimplemented message type 36
-    NetMsgType::FEATURE,
-};
-
-class V2MessageMap
-{
-    std::unordered_map<std::string, uint8_t> m_map;
-
-public:
-    V2MessageMap() noexcept
-    {
-        for (size_t i = 1; i < std::size(V2_MESSAGE_IDS); ++i) {
-            m_map.emplace(V2_MESSAGE_IDS[i], i);
-        }
-    }
-
-    std::optional<uint8_t> operator()(const std::string& message_name) const noexcept
-    {
-        auto it = m_map.find(message_name);
-        if (it == m_map.end()) return std::nullopt;
-        return it->second;
-    }
-};
-
-const V2MessageMap V2_MESSAGE_MAP;
-
 std::vector<uint8_t> GenerateRandomGarbage() noexcept
 {
     std::vector<uint8_t> ret;
@@ -1452,13 +1389,7 @@ std::optional<std::string> V2Transport::GetMessageType(std::span<const uint8_t>&
 
     if (first_byte != 0) {
         // Short (1 byte) encoding.
-        if (first_byte < std::size(V2_MESSAGE_IDS)) {
-            // Valid short message id.
-            return V2_MESSAGE_IDS[first_byte];
-        } else {
-            // Unknown short message id.
-            return std::nullopt;
-        }
+        return BIP324::DEFAULT_RECVMSGMAP.GetNetMsgTypeFromId(first_byte);
     }
 
     if (contents.size() < CMessageHeader::MESSAGE_TYPE_SIZE) {
@@ -1514,6 +1445,7 @@ CNetMessage V2Transport::GetReceivedMessage(NodeClock::time_point time, bool& re
     return msg;
 }
 
+
 bool V2Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
 {
     AssertLockNotHeld(m_send_mutex);
@@ -1525,10 +1457,10 @@ bool V2Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
     if (!(m_send_state == SendState::READY && m_send_buffer.empty())) return false;
     // Construct contents (encoding message type + payload).
     std::vector<uint8_t> contents;
-    auto short_message_id = V2_MESSAGE_MAP(msg.m_type);
-    if (short_message_id) {
+    uint8_t short_message_id = BIP324::V2_MESSAGE_MAP.GetId(msg.m_type);
+    if (short_message_id != 0) {
         contents.resize(1 + msg.data.size());
-        contents[0] = *short_message_id;
+        contents[0] = short_message_id;
         std::copy(msg.data.begin(), msg.data.end(), contents.begin() + 1);
     } else {
         // Initialize with zeroes, and then write the message type string starting at offset 1.
@@ -4131,8 +4063,8 @@ CNode::CNode(NodeId idIn,
 {
     if (inbound_onion) assert(conn_type_in == ConnectionType::INBOUND);
 
-    for (const auto& msg : ALL_NET_MESSAGE_TYPES) {
-        mapRecvBytesPerMsgType[msg] = 0;
+    for (std::string_view msg : ALL_NET_MESSAGE_TYPES) {
+        mapRecvBytesPerMsgType[std::string(msg)] = 0;
     }
     mapRecvBytesPerMsgType[NET_MESSAGE_TYPE_OTHER] = 0;
 
