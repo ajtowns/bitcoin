@@ -149,7 +149,7 @@ void SimulationTest(Transport& initiator, Transport& responder, R& rng, FuzzedDa
             return ret;
         } else {
             // Otherwise, use it as index into the list of known messages.
-            return g_all_messages[v % g_all_messages.size()];
+            return std::string{g_all_messages[v % g_all_messages.size()]};
         }
     };
 
