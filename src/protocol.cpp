@@ -5,7 +5,91 @@
 
 #include <protocol.h>
 
+#include <bip324.h>
 #include <common/system.h>
+
+namespace BIP324 {
+template<typename STRING>
+static constexpr bool GetMsgById(MsgByShortId& r, std::span<const std::pair<uint8_t, STRING>> inp)
+{
+    uint8_t sentinel{ALL_NET_MESSAGE_TYPES.size()};
+    r.fill(sentinel); // invalid value, in case some entries are blank
+    bool duplicates = false;
+    for (auto&& [id, msg_type] : inp) {
+        if (id <= 0 || id > r.size()) return false;
+        bool found = false;
+        for (size_t i = 0; i < ALL_NET_MESSAGE_TYPES.size(); ++i) {
+            if (std::string_view{ALL_NET_MESSAGE_TYPES[i]} == msg_type) {
+                if (r[id-1] != sentinel) duplicates = true;
+                r[id-1] = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return !duplicates;
+}
+
+static consteval auto LiteralGetMsgById(std::initializer_list<std::pair<uint8_t, const char*>> inp)
+{
+    MsgByShortId r;
+    if (!GetMsgById(r, std::span{inp})) throw "Bad inputs (unknown msg, duplicates or entry with id == 0)";
+    return r;
+}
+
+MsgByShortId GetMsgById(std::span<const std::pair<uint8_t, std::string>> inp)
+{
+    MsgByShortId r;
+    (void)GetMsgById(r, inp);
+    return r;
+}
+
+static consteval auto CheckDefaultShortIds(MsgByShortId m)
+{
+    for (size_t i = BIP324_SHORTIDS_IMPLEMENTED; i < m.size(); ++i) {
+        if (m[i] < ALL_NET_MESSAGE_TYPES.size()) throw "ShortId greater than BIP325_SHORTIDS_IMPLEMENTED";
+    }
+    return m;
+}
+
+/** List of short messages as defined in BIP324, in order.
+ *
+ * Only message types that are actually implemented in this codebase need to be listed, as other
+ * messages get ignored anyway - whether we know how to decode them or not.
+ */
+const MsgByShortId DEFAULT_MSG_BY_ID = CheckDefaultShortIds(LiteralGetMsgById({
+    {1, NetMsgType::ADDR},
+    {2, NetMsgType::BLOCK},
+    {3, NetMsgType::BLOCKTXN},
+    {4, NetMsgType::CMPCTBLOCK},
+    {5, NetMsgType::FEEFILTER},
+    {6, NetMsgType::FILTERADD},
+    {7, NetMsgType::FILTERCLEAR},
+    {8, NetMsgType::FILTERLOAD},
+    {9, NetMsgType::GETBLOCKS},
+    {10, NetMsgType::GETBLOCKTXN},
+    {11, NetMsgType::GETDATA},
+    {12, NetMsgType::GETHEADERS},
+    {13, NetMsgType::HEADERS},
+    {14, NetMsgType::INV},
+    {15, NetMsgType::MEMPOOL},
+    {16, NetMsgType::MERKLEBLOCK},
+    {17, NetMsgType::NOTFOUND},
+    {18, NetMsgType::PING},
+    {19, NetMsgType::PONG},
+    {20, NetMsgType::SENDCMPCT},
+    {21, NetMsgType::TX},
+    {22, NetMsgType::GETCFILTERS},
+    {23, NetMsgType::CFILTER},
+    {24, NetMsgType::GETCFHEADERS},
+    {25, NetMsgType::CFHEADERS},
+    {26, NetMsgType::GETCFCHECKPT},
+    {27, NetMsgType::CFCHECKPT},
+    {28, NetMsgType::ADDRV2},
+    {37, NetMsgType::FEATURE},
+}));
+} // namespace BIP324
 
 CInv::CInv()
 {

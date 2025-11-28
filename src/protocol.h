@@ -16,7 +16,9 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
+#include <unordered_map>
 
 /**
  * Bitcoin protocol message types. When adding new message types, don't forget
@@ -236,7 +238,7 @@ inline constexpr const char* FEATURE{"feature"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
-inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
+inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<const char*>({
     NetMsgType::VERSION,
     NetMsgType::VERACK,
     NetMsgType::ADDR,
@@ -281,6 +283,45 @@ static constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 namespace NetMsgFeature {
 //inline constexpr std::string_view FOO{"BIP-FOO"};
 }
+
+namespace BIP324 {
+using MsgByShortId = std::array<uint8_t, 255>;
+
+MsgByShortId GetMsgById(std::span<const std::pair<uint8_t, std::string>> inp);
+
+extern const MsgByShortId DEFAULT_MSG_BY_ID;
+
+inline std::optional<std::string> GetNetMsgTypeFromId(uint8_t id, std::span<const uint8_t> msg_by_id)
+{
+    if (id > 0 && id <= msg_by_id.size()) {
+        uint8_t v = msg_by_id[id - 1];
+        if (v < ALL_NET_MESSAGE_TYPES.size()) {
+            return std::string{ALL_NET_MESSAGE_TYPES[v]};
+        }
+    }
+    return std::nullopt;
+}
+
+using ShortMsgMap = std::unordered_map<std::string, uint8_t>;
+inline ShortMsgMap GetMapMsgToId(std::span<const uint8_t> msg_by_id)
+{
+    ShortMsgMap r{};
+    for (size_t i = 0; i < msg_by_id.size(); ++i) {
+        if (i >= 256) break;
+        uint8_t v = msg_by_id[i];
+        if (v >= ALL_NET_MESSAGE_TYPES.size()) continue;
+        r.emplace(ALL_NET_MESSAGE_TYPES[v], i+1);
+    }
+    return r;
+}
+
+inline uint8_t GetId(const std::string& msg_type, const ShortMsgMap& shortmsgmap)
+{
+    auto it = shortmsgmap.find(msg_type);
+    if (it == shortmsgmap.end()) return 0;
+    return it->second;
+}
+} // BIP324 namespace
 
 /** nServices flags */
 enum ServiceFlags : uint64_t {
