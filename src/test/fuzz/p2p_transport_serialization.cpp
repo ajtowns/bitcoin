@@ -280,7 +280,8 @@ void SimulationTest(Transport& initiator, Transport& responder, R& rng, FuzzedDa
                 // The m_message_size field must be correct.
                 assert(received.m_message_size == received.m_recv.size());
                 // The m_type must match what is expected.
-                assert(received.m_type == expected[side].front().m_type);
+                NetMsgTypeConv exp_m_type{expected[side].front().m_type};
+                assert(received.m_type == exp_m_type);
                 // The data must match what is expected.
                 assert(std::ranges::equal(received.m_recv, MakeByteSpan(expected[side].front().data)));
                 expected[side].pop_front();

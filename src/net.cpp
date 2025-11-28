@@ -687,7 +687,7 @@ bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, 
 
             // Store received bytes per message type.
             // To prevent a memory DOS, only allow known message types.
-            auto i = node.mapRecvBytesPerMsgType.find(msg.m_type);
+            auto i = node.mapRecvBytesPerMsgType.find(std::string(msg.m_type));
             if (i == node.mapRecvBytesPerMsgType.end()) {
                 i = node.mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
             }

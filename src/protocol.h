@@ -326,11 +326,6 @@ public:
         return s;
     }
 
-    friend inline bool operator==(NetMsgTypeConv msg_type, std::string_view sv)
-    {
-        return msg_type.sv() == sv;
-    }
-
     friend std::optional<NetMsgType> GetNetMsgTypeFromString(std::string_view sv);
 };
 
@@ -351,7 +346,7 @@ inline Stream& operator<<(Stream& s, NetMsgType msg_type)
 
 inline std::string_view GetNetMsgTypeString(NetMsgTypeConv msg_type)
 {
-    return msg_type;
+    return std::string_view(msg_type);
 }
 
 /** nServices flags */

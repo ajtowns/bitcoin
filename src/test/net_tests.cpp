@@ -1360,9 +1360,9 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
         tester.SendMessage("tx", msg_data_2); // 12-character encoded message type
         ret = tester.Interact();
         BOOST_REQUIRE(ret && ret->size() == 3);
-        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == "cmpctblock" && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
+        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == NetMsgType::CMPCTBLOCK && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
         BOOST_CHECK(!(*ret)[1]);
-        BOOST_CHECK((*ret)[2] && (*ret)[2]->m_type == "tx" && std::ranges::equal((*ret)[2]->m_recv, MakeByteSpan(msg_data_2)));
+        BOOST_CHECK((*ret)[2] && (*ret)[2]->m_type == NetMsgType::TX && std::ranges::equal((*ret)[2]->m_recv, MakeByteSpan(msg_data_2)));
 
         // Then send a message with a bit error, expecting failure. It's possible this failure does
         // not occur immediately (when the length descriptor was modified), but it should come
@@ -1400,8 +1400,8 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
         tester.SendMessage(uint8_t(19), msg_data_2); // pong short id
         ret = tester.Interact();
         BOOST_REQUIRE(ret && ret->size() == 2);
-        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == "inv" && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
-        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == "pong" && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_2)));
+        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == NetMsgType::INV && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
+        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == NetMsgType::PONG && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_2)));
 
         // Then send a too-large message.
         auto msg_data_3 = m_rng.randbytes<uint8_t>(4005000);
@@ -1466,8 +1466,8 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
         tester.AddMessage("barfoo", {}); // test sending unknown message type
         ret = tester.Interact();
         BOOST_REQUIRE(ret && ret->size() == 4);
-        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == "addrv2" && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
-        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == "headers" && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_2)));
+        BOOST_CHECK((*ret)[0] && (*ret)[0]->m_type == NetMsgType::ADDRV2 && std::ranges::equal((*ret)[0]->m_recv, MakeByteSpan(msg_data_1)));
+        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == NetMsgType::HEADERS && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_2)));
         BOOST_CHECK(!(*ret)[2]);
         BOOST_CHECK((*ret)[3] && !(*ret)[3]->m_type.valid() && (*ret)[3]->m_recv.empty());
         tester.ReceiveMessage("barfoo", {});
@@ -1534,7 +1534,7 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
         ret = tester.Interact();
         BOOST_REQUIRE(ret && ret->size() == 2);
         BOOST_CHECK(!(*ret)[0]);
-        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == "block" && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_1)));
+        BOOST_CHECK((*ret)[1] && (*ret)[1]->m_type == NetMsgType::BLOCK && std::ranges::equal((*ret)[1]->m_recv, MakeByteSpan(msg_data_1)));
         tester.ReceiveMessage(uint8_t(3), msg_data_2); // "blocktxn" short id
     }
 

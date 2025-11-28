@@ -3423,7 +3423,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, NetMsgTypeConv msg_type, Data
 {
     AssertLockHeld(g_msgproc_mutex);
 
-    LogDebug(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(msg_type), vRecv.size(), pfrom.GetId());
+    LogDebug(BCLog::NET, "received: %s (%u bytes) peer=%d\n", msg_type, vRecv.size(), pfrom.GetId());
 
     PeerRef peer = GetPeerRef(pfrom.GetId());
     if (peer == nullptr) return;
@@ -3649,7 +3649,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, NetMsgTypeConv msg_type, Data
 
     if (pfrom.nVersion == 0) {
         // Must have a version message before anything else
-        LogDebug(BCLog::NET, "non-version message before version handshake. Message \"%s\" from peer=%d\n", SanitizeString(msg_type), pfrom.GetId());
+        LogDebug(BCLog::NET, "non-version message before version handshake. Message \"%s\" from peer=%d\n", msg_type, pfrom.GetId());
         return;
     }
 
@@ -3832,7 +3832,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, NetMsgTypeConv msg_type, Data
     }
 
     if (!pfrom.fSuccessfullyConnected) {
-        LogDebug(BCLog::NET, "Unsupported message \"%s\" prior to verack from peer=%d\n", SanitizeString(msg_type), pfrom.GetId());
+        LogDebug(BCLog::NET, "Unsupported message \"%s\" prior to verack from peer=%d\n", msg_type, pfrom.GetId());
         return;
     }
 
@@ -4932,7 +4932,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, NetMsgTypeConv msg_type, Data
     }
 
     // Ignore unknown commands for extensibility
-    LogDebug(BCLog::NET, "Unknown command \"%s\" from peer=%d\n", SanitizeString(msg_type), pfrom.GetId());
+    LogDebug(BCLog::NET, "Unknown command \"%s\" from peer=%d\n", msg_type, pfrom.GetId());
     return;
 }
 
@@ -5044,9 +5044,9 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
         LOCK(m_tx_download_mutex);
         if (m_txdownloadman.HaveMoreWork(peer->m_id)) fMoreWork = true;
     } catch (const std::exception& e) {
-        LogDebug(BCLog::NET, "%s(%s, %u bytes): Exception '%s' (%s) caught\n", __func__, SanitizeString(msg.m_type), msg.m_message_size, e.what(), typeid(e).name());
+        LogDebug(BCLog::NET, "%s(%s, %u bytes): Exception '%s' (%s) caught\n", __func__, msg.m_type, msg.m_message_size, e.what(), typeid(e).name());
     } catch (...) {
-        LogDebug(BCLog::NET, "%s(%s, %u bytes): Unknown exception caught\n", __func__, SanitizeString(msg.m_type), msg.m_message_size);
+        LogDebug(BCLog::NET, "%s(%s, %u bytes): Unknown exception caught\n", __func__, msg.m_type, msg.m_message_size);
     }
 
     return fMoreWork;
