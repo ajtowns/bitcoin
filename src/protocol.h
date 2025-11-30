@@ -314,6 +314,13 @@ public:
 
     constexpr bool valid() const { return 0 <= msg_type && msg_type < NUM_NETMSGTYPE; }
 
+    inline std::optional<NetMsgType> opt_enum() const
+    {
+        std::optional<NetMsgType> r{std::nullopt};
+        if (valid()) r = static_cast<NetMsgType>(msg_type);
+        return r;
+    }
+
     friend bool operator==(NetMsgTypeConv a, NetMsgTypeConv b) = default;
 
     operator std::string() const { return std::string{sv()}; }
@@ -325,16 +332,11 @@ public:
         s << msg_type.sv();
         return s;
     }
-
-    friend std::optional<NetMsgType> GetNetMsgTypeFromString(std::string_view sv);
 };
 
 inline std::optional<NetMsgType> GetNetMsgTypeFromString(std::string_view sv)
 {
-    std::optional<NetMsgType> r{std::nullopt};
-    NetMsgTypeConv nmt{sv};
-    if (nmt.valid()) r = static_cast<NetMsgType>(nmt.msg_type);
-    return r;
+    return NetMsgTypeConv{sv}.opt_enum();
 }
 
 template<typename Stream>
