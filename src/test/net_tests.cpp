@@ -868,7 +868,7 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
 
     const auto CaptureMessageOrig = CaptureMessage;
     CaptureMessage = [&sent, &expected](const CAddress& addr,
-                                        const std::string& msg_type,
+                                        std::string_view msg_type,
                                         std::span<const unsigned char> data,
                                         bool is_incoming) -> void {
         if (!is_incoming && msg_type == "addr") {
