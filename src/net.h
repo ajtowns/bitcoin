@@ -181,7 +181,7 @@ struct LocalServiceInfo {
 extern GlobalMutex g_maplocalhost_mutex;
 extern std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalhost_mutex);
 
-using mapMsgTypeSize = std::map</* message type */ std::string, /* total bytes */ uint64_t>;
+using MsgTypeSize = std::array</* total bytes */ uint64_t, NUM_NETMSGTYPE + 1 /* message type, plus unknown */>;
 
 class CNodeStats
 {
@@ -202,9 +202,9 @@ public:
     bool m_bip152_highbandwidth_from;
     int m_starting_height;
     uint64_t nSendBytes;
-    mapMsgTypeSize mapSendBytesPerMsgType;
+    MsgTypeSize SendBytesPerMsgType{};
     uint64_t nRecvBytes;
-    mapMsgTypeSize mapRecvBytesPerMsgType;
+    MsgTypeSize RecvBytesPerMsgType{};
     NetPermissionFlags m_permission_flags;
     std::chrono::microseconds m_last_ping_time;
     std::chrono::microseconds m_min_ping_time;
@@ -762,10 +762,10 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_msg_process_queue_mutex);
 
     /** Account for the total size of a sent message in the per msg type connection stats. */
-    void AccountForSentBytes(const std::string& msg_type, size_t sent_bytes)
+    void AccountForSentBytes(NetMsgTypeConv msg_type, size_t sent_bytes)
         EXCLUSIVE_LOCKS_REQUIRED(cs_vSend)
     {
-        mapSendBytesPerMsgType[msg_type] += sent_bytes;
+        SendBytesPerMsgType[msg_type.get_int()] += sent_bytes;
     }
 
     bool IsOutboundOrBlockRelayConn() const {
@@ -988,8 +988,8 @@ private:
     CService m_addr_local GUARDED_BY(m_addr_local_mutex);
     mutable Mutex m_addr_local_mutex;
 
-    mapMsgTypeSize mapSendBytesPerMsgType GUARDED_BY(cs_vSend);
-    mapMsgTypeSize mapRecvBytesPerMsgType GUARDED_BY(cs_vRecv);
+    MsgTypeSize SendBytesPerMsgType GUARDED_BY(cs_vSend){};
+    MsgTypeSize RecvBytesPerMsgType GUARDED_BY(cs_vRecv){};
 
     /**
      * If an I2P session is created per connection (for outbound transient I2P

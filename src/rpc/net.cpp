@@ -286,19 +286,20 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("permissions", std::move(permissions));
         obj.pushKV("minfeefilter", ValueFromAmount(statestats.m_fee_filter_received));
 
-        UniValue sendPerMsgType(UniValue::VOBJ);
-        for (const auto& i : stats.mapSendBytesPerMsgType) {
-            if (i.second > 0)
-                sendPerMsgType.pushKV(std::string(i.first), i.second);
-        }
-        obj.pushKV("bytessent_per_msg", std::move(sendPerMsgType));
+        auto msgtypesize2uv = [](const auto& mts) {
+            UniValue r(UniValue::VOBJ);
+            for (size_t i = 0; i < mts.size(); ++i) {
+                if (mts[i] > 0) {
+                    NetMsgTypeConv msg_type{static_cast<NetMsgType>(i)};
+                    r.pushKV(std::string(msg_type), mts[i]);
+                }
+            }
+            return r;
+        };
 
-        UniValue recvPerMsgType(UniValue::VOBJ);
-        for (const auto& i : stats.mapRecvBytesPerMsgType) {
-            if (i.second > 0)
-                recvPerMsgType.pushKV(std::string(i.first), i.second);
-        }
-        obj.pushKV("bytesrecv_per_msg", std::move(recvPerMsgType));
+        obj.pushKV("bytessent_per_msg", msgtypesize2uv(stats.SendBytesPerMsgType));
+        obj.pushKV("bytesrecv_per_msg", msgtypesize2uv(stats.RecvBytesPerMsgType));
+
         obj.pushKV("connection_type", ConnectionTypeAsString(stats.m_conn_type));
         obj.pushKV("transport_protocol_type", TransportTypeAsString(stats.m_transport_type));
         obj.pushKV("session_id", stats.m_session_id);

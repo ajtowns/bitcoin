@@ -632,12 +632,12 @@ void CNode::CopyStats(CNodeStats& stats)
     X(m_bip152_highbandwidth_from);
     {
         LOCK(cs_vSend);
-        X(mapSendBytesPerMsgType);
+        X(SendBytesPerMsgType);
         X(nSendBytes);
     }
     {
         LOCK(cs_vRecv);
-        X(mapRecvBytesPerMsgType);
+        X(RecvBytesPerMsgType);
         X(nRecvBytes);
         Transport::Info info = m_transport->GetInfo();
         stats.m_transport_type = info.transport_type;
@@ -681,18 +681,13 @@ bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, 
             if (reject_message) {
                 // Message deserialization failed. Drop the message but don't disconnect the peer.
                 // store the size of the corrupt message
-                node.mapRecvBytesPerMsgType.at(NET_MESSAGE_TYPE_OTHER) += msg.m_raw_message_size;
+                node.RecvBytesPerMsgType[NUM_NETMSGTYPE] += msg.m_raw_message_size;
                 continue;
             }
 
             // Store received bytes per message type.
             // To prevent a memory DOS, only allow known message types.
-            auto i = node.mapRecvBytesPerMsgType.find(std::string(msg.m_type));
-            if (i == node.mapRecvBytesPerMsgType.end()) {
-                i = node.mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
-            }
-            assert(i != node.mapRecvBytesPerMsgType.end());
-            i->second += msg.m_raw_message_size;
+            node.RecvBytesPerMsgType[msg.m_type.get_int()] += msg.m_raw_message_size;
 
             // push the message to the process queue,
             node.vRecvMsg.push_back(std::move(msg));
@@ -1663,7 +1658,7 @@ std::pair<size_t, bool> CConnman::SocketSendData(CNode& node) const
             node.m_transport->MarkBytesSent(nBytes);
             // Update statistics per message type.
             if (!msg_type.empty()) { // don't report v2 handshake bytes for now
-                node.AccountForSentBytes(msg_type, nBytes);
+                node.AccountForSentBytes(NetMsgTypeConv{msg_type}, nBytes);
             }
             nSentSize += nBytes;
             if ((size_t)nBytes != data.size()) {
@@ -3862,10 +3857,7 @@ CNode::CNode(NodeId idIn,
 {
     if (inbound_onion) assert(conn_type_in == ConnectionType::INBOUND);
 
-    for (const auto& msg : ALL_NET_MESSAGE_TYPES) {
-        mapRecvBytesPerMsgType[std::string(msg)] = 0;
-    }
-    mapRecvBytesPerMsgType[NET_MESSAGE_TYPE_OTHER] = 0;
+    RecvBytesPerMsgType.fill(0);
 
     if (fLogIPs) {
         LogDebug(BCLog::NET, "Added connection to %s peer=%d\n", m_addr_name, id);

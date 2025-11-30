@@ -321,6 +321,8 @@ public:
         return r;
     }
 
+    constexpr type get_int() const { return valid() ? msg_type : NUM_NETMSGTYPE; }
+
     friend bool operator==(NetMsgTypeConv a, NetMsgTypeConv b) = default;
 
     operator std::string() const { return std::string{sv()}; }
