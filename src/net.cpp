@@ -660,7 +660,7 @@ void CNode::CopyStats(CNodeStats& stats)
 
 bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const
 {
-    auto capfn = [&](const std::string& msg_type, std::span<const unsigned char> data) {
+    auto capfn = [&](std::string_view msg_type, std::span<const unsigned char> data) {
         if (capture_messages) CaptureMessage(node.addr, msg_type, data, /*is_incoming=*/true);
     };
 
@@ -4018,7 +4018,7 @@ void CConnman::ASMapHealthCheck()
 
 // Dump binary message to file, with timestamp.
 static void CaptureMessageToFile(const CAddress& addr,
-                                 const std::string& msg_type,
+                                 std::string_view msg_type,
                                  std::span<const unsigned char> data,
                                  bool is_incoming)
 {
@@ -4054,7 +4054,7 @@ static void CaptureMessageToFile(const CAddress& addr,
 }
 
 std::function<void(const CAddress& addr,
-                   const std::string& msg_type,
+                   std::string_view msg_type,
                    std::span<const unsigned char> data,
                    bool is_incoming)>
     CaptureMessage = CaptureMessageToFile;

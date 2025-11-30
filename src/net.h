@@ -265,9 +265,9 @@ public:
     };
 
     /** Defaults to `CaptureMessageToFile()`, but can be overridden by unit tests. */
-    using CaptureMessageFn = std::function<void(const std::string& msg_type, std::span<const unsigned char> data)>;
+    using CaptureMessageFn = std::function<void(std::string_view msg_type, std::span<const unsigned char> data)>;
 
-    static void DummyCaptureMessage(const std::string& msg_type, std::span<const unsigned char> data) { };
+    static void DummyCaptureMessage(std::string_view msg_type, std::span<const unsigned char> data) { };
 
     /** Retrieve information about this transport. */
     virtual Info GetInfo() const noexcept = 0;
@@ -1767,7 +1767,7 @@ private:
 
 /** Defaults to `CaptureMessageToFile()`, but can be overridden by unit tests. */
 extern std::function<void(const CAddress& addr,
-                          const std::string& msg_type,
+                          std::string_view msg_type,
                           std::span<const unsigned char> data,
                           bool is_incoming)>
     CaptureMessage;
