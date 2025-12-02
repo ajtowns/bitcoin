@@ -913,17 +913,6 @@ public:
         return nRefCount;
     }
 
-    /**
-     * Receive bytes from the buffer and deserialize them into messages.
-     *
-     * @param[in]   msg_bytes   The raw data
-     * @param[out]  complete    Set True if at least one message has been
-     *                          deserialized and is ready to be processed
-     * @return  True if the peer should stay connected,
-     *          False if the peer should be disconnected from.
-     */
-    bool ReceiveMsgBytes(std::span<const uint8_t> msg_bytes, bool& complete) EXCLUSIVE_LOCKS_REQUIRED(!cs_vRecv);
-
     void SetCommonVersion(int greatest_common_version)
     {
         Assume(m_greatest_common_version == INIT_PROTO_VERSION);
@@ -978,6 +967,8 @@ public:
     }
 
 private:
+    friend class CConnman;
+
     const NodeId id;
     const uint64_t nLocalHostNonce;
     std::atomic<int> m_greatest_common_version{INIT_PROTO_VERSION};
@@ -1317,6 +1308,18 @@ public:
     bool ShouldRunInactivityChecks(const CNode& node, std::chrono::microseconds now) const;
 
     bool MultipleManualOrFullOutboundConns(Network net) const EXCLUSIVE_LOCKS_REQUIRED(m_nodes_mutex);
+
+    /**
+     * Receive bytes from the buffer and deserialize them into messages.
+     *
+     * @param[in]   node        The node doing the receiving
+     * @param[in]   msg_bytes   The raw data
+     * @param[out]  complete    Set True if at least one message has been
+     *                          deserialized and is ready to be processed
+     * @return  True if the peer should stay connected,
+     *          False if the peer should be disconnected from.
+     */
+    bool ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const EXCLUSIVE_LOCKS_REQUIRED(!node.cs_vRecv);
 
 private:
     struct ListenSocket {

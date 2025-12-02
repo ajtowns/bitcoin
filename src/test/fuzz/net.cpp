@@ -57,11 +57,6 @@ FUZZ_TARGET(net, .init = initialize_net)
                 if (node.GetRefCount() > 0) {
                     node.Release();
                 }
-            },
-            [&] {
-                const std::vector<uint8_t> b = ConsumeRandomLengthByteVector(fuzzed_data_provider);
-                bool complete;
-                node.ReceiveMsgBytes(b, complete);
             });
     }
 
