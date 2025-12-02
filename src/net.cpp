@@ -679,18 +679,10 @@ bool CNode::ReceiveMsgBytes(std::span<const uint8_t> msg_bytes, bool& complete)
             if (reject_message) {
                 // Message deserialization failed. Drop the message but don't disconnect the peer.
                 // store the size of the corrupt message
-                mapRecvBytesPerMsgType.at(NET_MESSAGE_TYPE_OTHER) += msg.m_raw_message_size;
+                AccountForRecvBytes(NET_MESSAGE_TYPE_OTHER, msg.m_raw_message_size);
                 continue;
             }
-
-            // Store received bytes per message type.
-            // To prevent a memory DOS, only allow known message types.
-            auto i = mapRecvBytesPerMsgType.find(msg.m_type);
-            if (i == mapRecvBytesPerMsgType.end()) {
-                i = mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
-            }
-            assert(i != mapRecvBytesPerMsgType.end());
-            i->second += msg.m_raw_message_size;
+            AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
 
             // push the message to the process queue,
             vRecvMsg.push_back(std::move(msg));
