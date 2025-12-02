@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -163,6 +164,11 @@ public:
      * we do not have a confirmed set of service flags.
     */
     virtual ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const = 0;
+
+    /**
+     * Send an out of band message to a peer
+     */
+    virtual std::future<bool> SendMessageToPeer(NodeId node, CSerializedNetMsg&& msg) = 0;
 };
 
 #endif // BITCOIN_NET_PROCESSING_H
