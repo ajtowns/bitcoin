@@ -656,42 +656,42 @@ void CNode::CopyStats(CNodeStats& stats)
 }
 #undef X
 
-bool CNode::ReceiveMsgBytes(std::span<const uint8_t> msg_bytes, bool& complete)
+bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const
 {
     complete = false;
     const auto time = GetTime<std::chrono::microseconds>();
-    LOCK(cs_vRecv);
-    m_last_recv = std::chrono::duration_cast<std::chrono::seconds>(time);
-    nRecvBytes += msg_bytes.size();
+    LOCK(node.cs_vRecv);
+    node.m_last_recv = std::chrono::duration_cast<std::chrono::seconds>(time);
+    node.nRecvBytes += msg_bytes.size();
     while (msg_bytes.size() > 0) {
         // absorb network data
-        if (!m_transport->ReceivedBytes(msg_bytes)) {
+        if (!node.m_transport->ReceivedBytes(msg_bytes)) {
             // Serious transport problem, disconnect from the peer.
             return false;
         }
 
-        if (m_transport->ReceivedMessageComplete()) {
+        if (node.m_transport->ReceivedMessageComplete()) {
             // decompose a transport agnostic CNetMessage from the deserializer
             bool reject_message{false};
-            CNetMessage msg = m_transport->GetReceivedMessage(time, reject_message);
+            CNetMessage msg = node.m_transport->GetReceivedMessage(time, reject_message);
             if (reject_message) {
                 // Message deserialization failed. Drop the message but don't disconnect the peer.
                 // store the size of the corrupt message
-                mapRecvBytesPerMsgType.at(NET_MESSAGE_TYPE_OTHER) += msg.m_raw_message_size;
+                node.mapRecvBytesPerMsgType.at(NET_MESSAGE_TYPE_OTHER) += msg.m_raw_message_size;
                 continue;
             }
 
             // Store received bytes per message type.
             // To prevent a memory DOS, only allow known message types.
-            auto i = mapRecvBytesPerMsgType.find(msg.m_type);
-            if (i == mapRecvBytesPerMsgType.end()) {
-                i = mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
+            auto i = node.mapRecvBytesPerMsgType.find(msg.m_type);
+            if (i == node.mapRecvBytesPerMsgType.end()) {
+                i = node.mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
             }
-            assert(i != mapRecvBytesPerMsgType.end());
+            assert(i != node.mapRecvBytesPerMsgType.end());
             i->second += msg.m_raw_message_size;
 
             // push the message to the process queue,
-            vRecvMsg.push_back(std::move(msg));
+            node.vRecvMsg.push_back(std::move(msg));
 
             complete = true;
         }
@@ -2189,7 +2189,7 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
             if (nBytes > 0)
             {
                 bool notify = false;
-                if (!pnode->ReceiveMsgBytes({pchBuf, (size_t)nBytes}, notify)) {
+                if (!ReceiveMsgBytes(*pnode, {pchBuf, (size_t)nBytes}, notify)) {
                     LogDebug(BCLog::NET,
                         "receiving message bytes failed, %s\n",
                         pnode->DisconnectMsg(fLogIPs)

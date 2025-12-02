@@ -211,6 +211,11 @@ FUZZ_TARGET(connman, .init = initialize_connman)
             },
             [&] {
                 connman.SocketHandlerPublic();
+            },
+            [&] {
+                const std::vector<uint8_t> b = ConsumeRandomLengthByteVector(fuzzed_data_provider);
+                bool complete;
+                connman.ReceiveMsgBytes(random_node, b, complete);
             });
     }
     (void)connman.GetAddedNodeInfo(fuzzed_data_provider.ConsumeBool());
