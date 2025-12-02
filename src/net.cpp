@@ -714,6 +714,41 @@ std::string CNode::DisconnectMsg(bool log_ip) const
                      LogIP(log_ip));
 }
 
+CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* msg_type, unsigned int nMessageSizeIn)
+    : pchMessageStart{pchMessageStartIn}
+{
+    // Copy the message type name
+    size_t i = 0;
+    for (; i < MESSAGE_TYPE_SIZE && msg_type[i] != 0; ++i) m_msg_type[i] = msg_type[i];
+    assert(msg_type[i] == 0); // Assert that the message type name passed in is not longer than MESSAGE_TYPE_SIZE
+
+    nMessageSize = nMessageSizeIn;
+}
+
+std::string CMessageHeader::GetMessageType() const
+{
+    return std::string(m_msg_type, m_msg_type + strnlen(m_msg_type, MESSAGE_TYPE_SIZE));
+}
+
+bool CMessageHeader::IsMessageTypeValid() const
+{
+    // Check the message type string for errors
+    for (const char* p1 = m_msg_type; p1 < m_msg_type + MESSAGE_TYPE_SIZE; ++p1) {
+        if (*p1 == 0) {
+            // Must be all zeros after the first zero
+            for (; p1 < m_msg_type + MESSAGE_TYPE_SIZE; ++p1) {
+                if (*p1 != 0) {
+                    return false;
+                }
+            }
+        } else if (*p1 < ' ' || *p1 > 0x7E) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 V1Transport::V1Transport(const NodeId node_id) noexcept
     : m_magic_bytes{Params().MessageStart()}, m_node_id{node_id}
 {
