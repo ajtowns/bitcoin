@@ -263,6 +263,11 @@ public:
         std::optional<uint256> session_id;
     };
 
+    /** Defaults to `CaptureMessageToFile()`, but can be overridden by unit tests. */
+    using CaptureMessageFn = std::function<void(const std::string& msg_type, std::span<const unsigned char> data)>;
+
+    static void DummyCaptureMessage(const std::string& msg_type, std::span<const unsigned char> data) { };
+
     /** Retrieve information about this transport. */
     virtual Info GetInfo() const noexcept = 0;
 
@@ -287,7 +292,7 @@ public:
      * If reject_message=true is returned the message itself is invalid, but (other than false
      * returned by ReceivedBytes) the transport is not in an inconsistent state.
      */
-    virtual CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message) = 0;
+    virtual CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message, const CaptureMessageFn& capfn = DummyCaptureMessage) = 0;
 
     // 2. Sending side functions, for converting messages into bytes to be sent over the wire.
 
@@ -439,7 +444,7 @@ public:
         return ret >= 0;
     }
 
-    CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message) override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
+    CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message, const CaptureMessageFn& capfn = DummyCaptureMessage) override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
 
     bool SetMessageToSend(CSerializedNetMsg& msg) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_send_mutex);
     BytesToSend GetBytesToSend(bool have_next_message) const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_send_mutex);
@@ -648,7 +653,7 @@ public:
     // Receive side functions.
     bool ReceivedMessageComplete() const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
     bool ReceivedBytes(std::span<const uint8_t>& msg_bytes) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex, !m_send_mutex);
-    CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
+    CNetMessage GetReceivedMessage(std::chrono::microseconds time, bool& reject_message, const CaptureMessageFn& capfn = DummyCaptureMessage) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
 
     // Send side functions.
     bool SetMessageToSend(CSerializedNetMsg& msg) noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_send_mutex);
@@ -1076,6 +1081,7 @@ public:
         bool m_i2p_accept_incoming;
         bool whitelist_forcerelay = DEFAULT_WHITELISTFORCERELAY;
         bool whitelist_relay = DEFAULT_WHITELISTRELAY;
+        bool capture_messages = false;
     };
 
     void Init(const Options& connOptions) EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex, !m_total_bytes_sent_mutex)
@@ -1113,6 +1119,7 @@ public:
         m_onion_binds = connOptions.onion_binds;
         whitelist_forcerelay = connOptions.whitelist_forcerelay;
         whitelist_relay = connOptions.whitelist_relay;
+        capture_messages = connOptions.capture_messages;
     }
 
     CConnman(uint64_t seed0,
@@ -1310,7 +1317,6 @@ public:
     /**
      * Receive bytes from the buffer and deserialize them into messages.
      *
-     * @param[in]   node        The node doing the receiving
      * @param[in]   msg_bytes   The raw data
      * @param[out]  complete    Set True if at least one message has been
      *                          deserialized and is ready to be processed
@@ -1666,6 +1672,11 @@ private:
      * and manual peers with default permissions.
      */
     bool whitelist_relay;
+
+    /**
+     * flag for whether messages are captured
+     */
+    bool capture_messages{false};
 
     /**
      * Mutex protecting m_i2p_sam_sessions.

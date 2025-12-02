@@ -658,6 +658,10 @@ void CNode::CopyStats(CNodeStats& stats)
 
 bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const
 {
+    auto capfn = [&](const std::string& msg_type, std::span<const unsigned char> data) {
+        if (capture_messages) CaptureMessage(node.addr, msg_type, data, /*is_incoming=*/true);
+    };
+
     complete = false;
     const auto time = GetTime<std::chrono::microseconds>();
     LOCK(node.cs_vRecv);
@@ -673,7 +677,7 @@ bool CConnman::ReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, 
         if (node.m_transport->ReceivedMessageComplete()) {
             // decompose a transport agnostic CNetMessage from the deserializer
             bool reject_message{false};
-            CNetMessage msg = node.m_transport->GetReceivedMessage(time, reject_message);
+            CNetMessage msg = node.m_transport->GetReceivedMessage(time, reject_message, capfn);
             if (reject_message) {
                 // Message deserialization failed. Drop the message but don't disconnect the peer.
                 // store the size of the corrupt message
@@ -794,7 +798,7 @@ const uint256& V1Transport::GetMessageHash() const
     return data_hash;
 }
 
-CNetMessage V1Transport::GetReceivedMessage(const std::chrono::microseconds time, bool& reject_message)
+CNetMessage V1Transport::GetReceivedMessage(const std::chrono::microseconds time, bool& reject_message, const CaptureMessageFn& capfn)
 {
     AssertLockNotHeld(m_recv_mutex);
     // Initialize out parameter
@@ -817,7 +821,7 @@ CNetMessage V1Transport::GetReceivedMessage(const std::chrono::microseconds time
     // Check checksum and header message type string
     if (memcmp(hash.begin(), hdr.pchChecksum, CMessageHeader::CHECKSUM_SIZE) != 0) {
         LogDebug(BCLog::NET, "Header error: Wrong checksum (%s, %u bytes), expected %s was %s, peer=%d\n",
-                 SanitizeString(msg.m_type), msg.m_message_size,
+                 SanitizeString(hdr.GetMessageType()), msg.m_message_size,
                  HexStr(std::span{hash}.first(CMessageHeader::CHECKSUM_SIZE)),
                  HexStr(hdr.pchChecksum),
                  m_node_id);
@@ -826,6 +830,9 @@ CNetMessage V1Transport::GetReceivedMessage(const std::chrono::microseconds time
         LogDebug(BCLog::NET, "Header error: Invalid message type (%s, %u bytes), peer=%d\n",
                  SanitizeString(hdr.GetMessageType()), msg.m_message_size, m_node_id);
         reject_message = true;
+    } else {
+        // capture message (even if msg.m_type is unknown)
+        try { capfn(hdr.GetMessageType(), MakeUCharSpan(msg.m_recv)); } catch (const std::exception&) { }
     }
 
     // Always reset the network deserializer (prepare for the next message)
@@ -1458,11 +1465,11 @@ std::optional<std::string> V2Transport::GetMessageType(std::span<const uint8_t>&
     return ret;
 }
 
-CNetMessage V2Transport::GetReceivedMessage(std::chrono::microseconds time, bool& reject_message) noexcept
+CNetMessage V2Transport::GetReceivedMessage(std::chrono::microseconds time, bool& reject_message, const CaptureMessageFn& capfn) noexcept
 {
     AssertLockNotHeld(m_recv_mutex);
     LOCK(m_recv_mutex);
-    if (m_recv_state == RecvState::V1) return m_v1_fallback.GetReceivedMessage(time, reject_message);
+    if (m_recv_state == RecvState::V1) return m_v1_fallback.GetReceivedMessage(time, reject_message, capfn);
 
     Assume(m_recv_state == RecvState::APP_READY);
     std::span<const uint8_t> contents{m_recv_decode_buffer};
@@ -1471,6 +1478,7 @@ CNetMessage V2Transport::GetReceivedMessage(std::chrono::microseconds time, bool
     // Note that BIP324Cipher::EXPANSION also includes the length descriptor size.
     msg.m_raw_message_size = m_recv_decode_buffer.size() + BIP324Cipher::EXPANSION;
     if (msg_type) {
+        try { capfn(*msg_type, contents); } catch (const std::exception&) { }
         reject_message = false;
         msg.m_type = std::move(*msg_type);
         msg.m_time = time;
