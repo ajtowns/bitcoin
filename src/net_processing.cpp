@@ -71,6 +71,7 @@
 #include <cstddef>
 #include <deque>
 #include <exception>
+#include <forward_list>
 #include <functional>
 #include <future>
 #include <initializer_list>
@@ -419,6 +420,10 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
+    /** Keep track of external attempts to push messages */
+    Mutex m_sendmsg_mutex;
+    std::forward_list<std::pair<CSerializedNetMsg, std::promise<bool>>> m_sendmsg;
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -619,6 +624,8 @@ public:
     void UnitTestMisbehaving(NodeId peer_id) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex) { Misbehaving(*Assert(GetPeerRef(peer_id)), ""); };
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
+
+    std::future<bool> SendMessageToPeer(NodeId node, CSerializedNetMsg&& msg) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 
 private:
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received,
@@ -5415,6 +5422,20 @@ bool PeerManagerImpl::MaybeDisconnectForTxRelayCapacity(CNode& node, const std::
     return true;
 }
 
+std::future<bool> PeerManagerImpl::SendMessageToPeer(NodeId nodeid, CSerializedNetMsg&& msg)
+{
+    std::promise<bool> result;
+    auto fut = result.get_future();
+    PeerRef peer = GetPeerRef(nodeid);
+    if (peer == nullptr) {
+        result.set_value(false);
+    } else {
+        LOCK(peer->m_sendmsg_mutex);
+        peer->m_sendmsg.emplace_front(std::move(msg), std::move(result));
+    }
+    return fut;
+}
+
 bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptMsgProc)
 {
     AssertLockNotHeld(m_tx_download_mutex);
@@ -6098,6 +6119,21 @@ bool PeerManagerImpl::SendMessages(CNode& node)
         LogDebug(BCLog::NET, "addrfetch connection timeout, %s", node.DisconnectMsg());
         node.fDisconnect = true;
         return true;
+    }
+
+    {
+        decltype(peer.m_sendmsg) steal;
+        {
+            LOCK(peer.m_sendmsg_mutex);
+            steal.swap(peer.m_sendmsg);
+        }
+        steal.reverse();
+        while (!steal.empty()) {
+            auto [msg, result] = std::move(steal.front());
+            steal.pop_front();
+            PushMessage(node, std::move(msg));
+            result.set_value(true);
+        }
     }
 
     MaybeSendPing(node, peer, now);
