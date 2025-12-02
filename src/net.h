@@ -798,6 +798,20 @@ public:
         mapSendBytesPerMsgType[msg_type] += sent_bytes;
     }
 
+    /** Account for the total size of a received message in the per msg type connection stats. */
+    void AccountForRecvBytes(const std::string& msg_type, size_t recv_bytes)
+        EXCLUSIVE_LOCKS_REQUIRED(cs_vRecv)
+    {
+        // Store received bytes per message type.
+        // To prevent a memory DOS, only allow known message types.
+        auto i = mapRecvBytesPerMsgType.find(msg_type);
+        if (i == mapRecvBytesPerMsgType.end()) {
+            i = mapRecvBytesPerMsgType.find(NET_MESSAGE_TYPE_OTHER);
+        }
+        assert(i != mapRecvBytesPerMsgType.end());
+        i->second += recv_bytes;
+    }
+
     bool IsOutboundOrBlockRelayConn() const {
         switch (m_conn_type) {
             case ConnectionType::OUTBOUND_FULL_RELAY:
