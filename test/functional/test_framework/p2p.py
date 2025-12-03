@@ -67,6 +67,7 @@ from test_framework.messages import (
     msg_sendcmpct,
     msg_sendheaders,
     msg_sendtxrcncl,
+    msg_set324id,
     msg_tx,
     MSG_TX,
     MSG_TYPE_MASK,
@@ -150,6 +151,7 @@ MESSAGEMAP = {
     b"sendcmpct": msg_sendcmpct,
     b"sendheaders": msg_sendheaders,
     b"sendtxrcncl": msg_sendtxrcncl,
+    b"set324id": msg_set324id,
     b"tx": msg_tx,
     b"verack": msg_verack,
     b"version": msg_version,
@@ -538,6 +540,7 @@ class P2PInterface(P2PConnection):
     def on_close(self):
         pass
 
+    def on_accept324id(self, message): pass
     def on_addr(self, message): pass
     def on_addrv2(self, message): pass
     def on_block(self, message): pass
@@ -565,6 +568,7 @@ class P2PInterface(P2PConnection):
     def on_sendcmpct(self, message): pass
     def on_sendheaders(self, message): pass
     def on_sendtxrcncl(self, message): pass
+    def on_set324id(self, message): pass
     def on_tx(self, message): pass
     def on_wtxidrelay(self, message): pass
 

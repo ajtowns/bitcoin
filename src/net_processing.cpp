@@ -420,6 +420,9 @@ struct Peer {
     Mutex m_sendmsg_mutex;
     std::forward_list<std::pair<CSerializedNetMsg, std::promise<bool>>> m_sendmsg;
 
+    BIP324::MsgByShortId m_v2_shortid_map GUARDED_BY(NetEventsInterface::g_msgproc_mutex){BIP324::DEFAULT_MSG_BY_ID};
+    bool m_is_v2_transport GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -3745,6 +3748,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             MakeAndPushMessage(pfrom, NetMsgType::SENDADDRV2);
         }
 
+        auto transport_info = pfrom.m_transport->GetInfo();
+        if (transport_info.transport_type == TransportProtocolType::V2) {
+            peer.m_is_v2_transport = true;
+        }
+
         if (greatest_common_version >= WTXID_RELAY_VERSION && m_txreconciliation) {
             // Per BIP-330, we announce txreconciliation support if:
             // - protocol version per the peer's VERSION message supports WTXID_RELAY;
@@ -3763,7 +3771,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (greatest_common_version >= FEATURE_VERSION) {
             // announce supported features
-            //MakeAndPushFeature(pfrom, NetMsgFeature::FOO, uint32_t{1});
+            if (peer.m_is_v2_transport) MakeAndPushFeature(pfrom, NetMsgFeature::SET324ID);
         }
 
         MakeAndPushMessage(pfrom, NetMsgType::VERACK);
@@ -4005,10 +4013,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             return;
         }
 
-        // if (feature_id == NetMsgFeature::FOO) {
-        //     ...
-        //     return;
-        // }
+        if (feature_id == NetMsgFeature::SET324ID) {
+            if (!peer.m_is_v2_transport) return; // ignore msg from non-v2 peers
+            // we don't send set324id messages yet, so just ignore anyway
+            return;
+        }
 
         // ignore unknown feature_id
         LogDebug(BCLog::NET, "unknown feature advertised: %s", SanitizeString(feature_id));
@@ -5120,6 +5129,21 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
     if (msg_type == NetMsgType::GETCFCHECKPT) {
         ProcessGetCFCheckPt(pfrom, peer, vRecv);
+        return;
+    }
+
+    if (msg_type == NetMsgType::SET324ID) {
+        if (!peer.m_is_v2_transport) return;
+
+        std::vector<std::pair<uint8_t, std::string>> ids;
+        try {
+            vRecv >> LIMITED_VECTOR(ids, 255);
+            peer.m_v2_shortid_map = BIP324::GetMsgById(ids);
+            LogDebug(BCLog::NET, "updated short id map for peer=%d", pfrom.GetId());
+        } catch (const std::exception&) {
+            LogDebug(BCLog::NET, "received oversized set324id message, %s", pfrom.DisconnectMsg());
+            pfrom.fDisconnect = true;
+        }
         return;
     }
 

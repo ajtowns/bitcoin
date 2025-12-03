@@ -234,6 +234,12 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  * BIP 434 Peer feature negotiation
  */
 inline constexpr const char* FEATURE{"feature"};
+/**
+ * Reassign the BIP324 short id assignments for future messages
+ * Contains a vector of one-byte assignment, and <= 12 byte messages.
+ * Assignments to unknown messages will be ignored.
+ */
+inline constexpr const char* SET324ID{"set324id"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -274,13 +280,14 @@ inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<const char*>({
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
+    NetMsgType::SET324ID,
 })};
 
 static constexpr size_t MAX_FEATUREID_LENGTH{80};
 static constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
-//inline constexpr std::string_view FOO{"BIP-FOO"};
+inline constexpr std::string_view SET324ID{"https://github.com/ajtowns/bitcoin/tree/202605-bip324-id"};
 }
 
 class SerializedNetMsgType

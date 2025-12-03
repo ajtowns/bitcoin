@@ -1949,6 +1949,44 @@ class msg_feature:
         return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
 
 
+class BIP324IDDef:
+    __slots__ = ("id", "msgtype")
+    def __init__(self, id=0, msgtype=""):
+        self.id = id
+        self.msgtype = msgtype
+
+    def deserialize(self, f):
+        self.id = int.from_bytes(f.read(1))
+        self.msgtype = deser_string(f)
+
+    def serialize(self):
+        r = b''
+        r += self.id.to_bytes(1)
+        r += ser_string(self.msgtype)
+        return r
+
+    def __repr__(self):
+        return "324ID(id=%d msgtype=%s)" % (self.id, self.msgtype)
+
+    def __eq__(self, other):
+        return isinstance(other, BIP324IDDef) and self.id == other.id and self.msgtype == other.msgtype
+
+class msg_set324id:
+    __slots__ = ("vec", )
+    msgtype = b"set324id"
+
+    def __init__(self, vec=None):
+        self.vec = vec or []
+
+    def deserialize(self, f):
+        self.vec = deser_vector(f, BIP324IDDef)
+
+    def serialize(self):
+        return ser_vector(self.vec)
+
+    def __repr__(self):
+        return "msg_set324id(vec=%s)" % (repr(self.vec))
+
 class TestFrameworkScript(unittest.TestCase):
     def test_addrv2_encode_decode(self):
         def check_addrv2(ip, net):
