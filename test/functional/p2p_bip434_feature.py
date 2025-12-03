@@ -149,7 +149,10 @@ class P2PBIP434FeatureTest(BitcoinTestFramework):
     def test_features_announced_to_modern_peer(self):
         self.log.info("Test that node announces correct number of features to a 70017 peer")
         peer = self.nodes[0].add_p2p_connection(FeaturePeer())
-        assert_equal(peer.got_feature_count, 0)
+        if self.options.v2transport:
+            assert_equal(peer.got_feature_count, 1)
+        else:
+            assert_equal(peer.got_feature_count, 0)
         self.nodes[0].disconnect_p2ps()
 
     def test_feature_after_verack_disconnects(self):

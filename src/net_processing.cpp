@@ -424,6 +424,9 @@ struct Peer {
     Mutex m_sendmsg_mutex;
     std::forward_list<std::pair<CSerializedNetMsg, std::promise<bool>>> m_sendmsg;
 
+    BIP324::RecvMsgMap m_set324alias_recvmsgmap GUARDED_BY(NetEventsInterface::g_msgproc_mutex){BIP324::DEFAULT_RECVMSGMAP};
+    bool m_is_v2_transport GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -3991,6 +3994,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             MakeAndPushMessage(pfrom, NetMsgType::SENDADDRV2);
         }
 
+        auto transport_info = pfrom.m_transport->GetInfo();
+        if (transport_info.transport_type == TransportProtocolType::V2) {
+            peer.m_is_v2_transport = true;
+        }
+
         if (greatest_common_version >= WTXID_RELAY_VERSION && m_txreconciliation) {
             // Per BIP-330, we announce txreconciliation support if:
             // - protocol version per the peer's VERSION message supports WTXID_RELAY;
@@ -4009,7 +4017,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (greatest_common_version >= FEATURE_VERSION) {
             // announce supported features
-            // MakeAndPushFeature(pfrom, NetMsgFeature::FOO, uint32_t{1});
+            if (peer.m_is_v2_transport) MakeAndPushFeature(pfrom, NetMsgFeature::BIP324ALIAS);
         }
 
         // If we have too many tx-relaying inbound peers, attempt to evict an existing one.
@@ -4266,10 +4274,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             return;
         }
 
-        // if (feature_id == NetMsgFeature::FOO) {
-        //     ...
-        //     return;
-        // }
+        if (feature_id == NetMsgFeature::BIP324ALIAS) {
+            if (!peer.m_is_v2_transport) return; // ignore msg from non-v2 peers
+            // we don't send set324alias messages yet, so just ignore anyway
+            return;
+        }
 
         // ignore unknown feature_id
         LogDebug(BCLog::NET, "unknown feature advertised: %s", SanitizeString(feature_id));
@@ -5360,6 +5369,21 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         return;
     }
 
+    if (msg_type == NetMsgType::SET324ALIAS) {
+        if (!peer.m_is_v2_transport) return;
+
+        std::vector<BIP324::AliasPayloadEntry> ids;
+        try {
+            vRecv >> LIMITED_VECTOR(ids, 255);
+            peer.m_set324alias_recvmsgmap.Update(ids);
+            LogDebug(BCLog::NET, "updated v2 one-byte message type map for peer=%d", pfrom.GetId());
+        } catch (const std::exception&) {
+            LogDebug(BCLog::NET, "received invalid set324alias message, %s", pfrom.DisconnectMsg());
+            pfrom.fDisconnect = true;
+        }
+        return;
+    }
+
     if (msg_type == NetMsgType::NOTFOUND) {
         std::vector<CInv> vInv;
         vRecv >> vInv;
@@ -5490,7 +5514,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     CNetMessage& msg{poll_result->first};
     bool fMoreWork = poll_result->second;
 
-    msg.m_type.GetData(BIP324::DEFAULT_RECVMSGMAP);
+    msg.m_type.GetData(peer.m_set324alias_recvmsgmap);
     {
         LOCK(node.cs_vRecv);
         node.AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
