@@ -417,7 +417,7 @@ struct Peer {
     Mutex m_sendmsg_mutex;
     std::forward_list<std::pair<CSerializedNetMsg, std::promise<bool>>> m_sendmsg;
 
-    BIP324::MsgByShortId m_v2_shortid_map GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    BIP324::MsgByShortId m_v2_shortid_map GUARDED_BY(NetEventsInterface::g_msgproc_mutex){BIP324::DEFAULT_MSG_BY_ID};
     bool m_is_v2_transport GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
 
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
@@ -721,7 +721,11 @@ private:
     void PushMessage(CNode& node, CSerializedNetMsg&& msg) const
     {
         assert(msg.m_type.m_id == 0);
-        BIP324::GetId(msg.m_type, m_bip324_msg_by_id);
+        if (node.m_bip324_crazy_mode) {
+            BIP324::GetId(msg.m_type, m_crazy_msg_by_id);
+        } else {
+            BIP324::GetId(msg.m_type, m_bip324_msg_by_id);
+        }
         m_connman.PushMessage(&node, std::move(msg));
     }
     template <typename... Args>
@@ -796,6 +800,7 @@ private:
     const Options m_opts;
 
     const BIP324::ShortMsgMap m_bip324_msg_by_id;
+    const BIP324::ShortMsgMap m_crazy_msg_by_id;
 
     bool RejectIncomingTxs(const CNode& peer) const;
 
@@ -1918,7 +1923,8 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_txdownloadman(node::TxDownloadOptions{pool, m_rng, opts.deterministic_rng}),
       m_warnings{warnings},
       m_opts{opts},
-      m_bip324_msg_by_id{BIP324::GetMapMsgToId(BIP324::DEFAULT_MSG_BY_ID)}
+      m_bip324_msg_by_id{BIP324::GetMapMsgToId(BIP324::DEFAULT_MSG_BY_ID)},
+      m_crazy_msg_by_id{BIP324::GetMapMsgToId(BIP324::CRAZY_MSG_BY_ID)}
 {
     // While Erlay support is incomplete, it must be enabled explicitly via -txreconciliation.
     // This argument can go away after Erlay support is complete.
@@ -3549,7 +3555,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         auto transport_info = pfrom.m_transport->GetInfo();
         if (transport_info.transport_type == TransportProtocolType::V2) {
             peer->m_is_v2_transport = true;
-            peer->m_v2_shortid_map = BIP324::DEFAULT_MSG_BY_ID;
 
             if (greatest_common_version >= 70016) {
                 MakeAndPushMessage(pfrom, NetMsgType::ACCEPT324ID);
@@ -3866,7 +3871,17 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             return;
         }
         if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
-        // we don't send set324id messages yet, so just ignore anyway
+
+        std::vector<std::pair<uint8_t, std::string>> ids;
+        for (size_t i = 0; i < BIP324::CRAZY_MSG_BY_ID.size(); ++i) {
+            uint8_t x{BIP324::CRAZY_MSG_BY_ID[i]};
+            if (x < ALL_NET_MESSAGE_TYPES.size()) {
+                ids.emplace_back(i+1, ALL_NET_MESSAGE_TYPES[x]);
+            }
+        }
+        MakeAndPushMessage(pfrom, NetMsgType::SET324ID, ids);
+        pfrom.m_bip324_crazy_mode = true;
+        LogDebug(BCLog::NET, "set crazy mode for peer=%d", pfrom.GetId());
         return;
     }
 
@@ -4961,6 +4976,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         vRecv >> ids;
 
         peer->m_v2_shortid_map = BIP324::GetMsgById(ids);
+        LogDebug(BCLog::NET, "updated short id map for peer=%d", pfrom.GetId());
+        return;
     }
 
     if (msg_type == NetMsgType::NOTFOUND) {
@@ -5082,7 +5099,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
     CNetMessage& msg{poll_result->first};
     bool fMoreWork = poll_result->second;
 
-    BIP324::GetData(msg.m_type, BIP324::DEFAULT_MSG_BY_ID);
+    BIP324::GetData(msg.m_type, peer->m_v2_shortid_map);
     {
         LOCK(pfrom->cs_vRecv);
         pfrom->AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);

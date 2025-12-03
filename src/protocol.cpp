@@ -78,6 +78,47 @@ const MsgByShortId DEFAULT_MSG_BY_ID = LiteralGetMsgById({
     {27, NetMsgType::CFCHECKPT},
     {28, NetMsgType::ADDRV2},
 });
+
+const MsgByShortId CRAZY_MSG_BY_ID = LiteralGetMsgById({
+    {100, NetMsgType::VERSION},
+    {101, NetMsgType::VERACK},
+    {102, NetMsgType::ADDR},
+    {103, NetMsgType::ADDRV2},
+    {104, NetMsgType::SENDADDRV2},
+    {105, NetMsgType::INV},
+    {106, NetMsgType::GETDATA},
+    {107, NetMsgType::MERKLEBLOCK},
+    {108, NetMsgType::GETBLOCKS},
+    {109, NetMsgType::GETHEADERS},
+    {120, NetMsgType::TX},
+    {121, NetMsgType::HEADERS},
+    {122, NetMsgType::BLOCK},
+    {123, NetMsgType::GETADDR},
+    {124, NetMsgType::MEMPOOL},
+    {125, NetMsgType::PING},
+    {126, NetMsgType::PONG},
+    {127, NetMsgType::NOTFOUND},
+    {128, NetMsgType::FILTERLOAD},
+    {129, NetMsgType::FILTERADD},
+    {140, NetMsgType::FILTERCLEAR},
+    {141, NetMsgType::SENDHEADERS},
+    {142, NetMsgType::FEEFILTER},
+    {143, NetMsgType::SENDCMPCT},
+    {144, NetMsgType::CMPCTBLOCK},
+    {145, NetMsgType::GETBLOCKTXN},
+    {146, NetMsgType::BLOCKTXN},
+    {147, NetMsgType::GETCFILTERS},
+    {148, NetMsgType::CFILTER},
+    {149, NetMsgType::GETCFHEADERS},
+    {160, NetMsgType::CFHEADERS},
+    {161, NetMsgType::GETCFCHECKPT},
+    {162, NetMsgType::CFCHECKPT},
+    {163, NetMsgType::WTXIDRELAY},
+    {164, NetMsgType::SENDTXRCNCL},
+    {165, NetMsgType::ACCEPT324ID},
+    {166, NetMsgType::SET324ID},
+});
+
 } // namespace BIP324
 
 CInv::CInv()

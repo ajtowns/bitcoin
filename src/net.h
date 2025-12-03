@@ -716,6 +716,8 @@ public:
 
     const NetPermissionFlags m_permission_flags;
 
+    std::atomic<bool> m_bip324_crazy_mode{false}; // should be in Peer :(
+
     /**
      * Socket used for communication with the node.
      * May not own a Sock object (after `CloseSocketDisconnect()` or during tests).
