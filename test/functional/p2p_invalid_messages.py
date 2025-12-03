@@ -161,7 +161,7 @@ class InvalidMessagesTest(BitcoinTestFramework):
             msg = msg_unrecognized(str_data="d")
             contents = msgtype.to_bytes(1, 'big') + msg.serialize()
             tmsg = conn.v2_state.v2_enc_packet(contents, ignore=False)
-            with self.nodes[0].assert_debug_log(['V2 transport error: invalid message type']):
+            with self.nodes[0].assert_debug_log(['Unknown command "BIP324_SHORT_99"']):
                 conn.send_raw_message(tmsg)
                 conn.sync_with_ping(timeout=1)
             # Check that traffic is accounted for (20 bytes plus 3 bytes contents)
