@@ -61,6 +61,17 @@ enum class ByteUnit : uint64_t {
 * @return           A new string without unsafe chars
 */
 std::string SanitizeString(std::string_view str, int rule = SAFE_CHARS_DEFAULT);
+
+/**
+ * SanitizeString for things that convert to string but not string_view
+ */
+template <class T>
+    requires(!std::is_convertible_v<const T&, std::string_view> && std::is_convertible_v<const T&, std::string>)
+std::string SanitizeString(const T& obj, int rule = SAFE_CHARS_DEFAULT)
+{
+    return SanitizeString(std::string_view{std::string{obj}}, rule);
+}
+
 /** Parse the hex string into bytes (uint8_t or std::byte). Ignores whitespace. Returns nullopt on invalid input. */
 template <typename Byte = std::byte>
 std::optional<std::vector<Byte>> TryParseHex(std::string_view str);
