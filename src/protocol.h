@@ -235,6 +235,13 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  * BIP 434 Peer feature negotiation
  */
 inline constexpr const char* FEATURE{"feature"};
+/**
+ * BIP 333: Add/update BIP324 one-byte message type IDs for future
+ * messages. Contains a vector of one-byte assignment and 12 byte
+ * messages. Assignments to unknown messages are ignored by the
+ * receiver.
+ */
+inline constexpr const char* SET324ALIAS{"set324alias"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -275,16 +282,34 @@ inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string_view
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
+    NetMsgType::SET324ALIAS,
 })};
 
 inline constexpr size_t MAX_FEATUREID_LENGTH{80};
 inline constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
-//inline constexpr std::string_view FOO{"BIP-FOO"};
+inline constexpr std::string_view BIP333{"BIP333"}; // Support for set324alias messages
 }
 
 namespace BIP324 {
+
+/** Wire format for BIP333 SET324ALIAS overrides */
+struct AliasPayloadEntry {
+    static constexpr size_t MESSAGE_TYPE_SIZE{12};
+    uint8_t id;
+    std::string msg;
+
+    void SetMsgFromSpan(std::span<const char, MESSAGE_TYPE_SIZE> msg_type);
+
+    SERIALIZE_METHODS(AliasPayloadEntry, obj)
+    {
+        std::array<char, MESSAGE_TYPE_SIZE> msg_type{};
+        SER_WRITE(obj, std::copy_n(obj.msg.data(), std::min(obj.msg.size(), MESSAGE_TYPE_SIZE), msg_type.data()));
+        READWRITE(obj.id, msg_type);
+        SER_READ(obj, obj.SetMsgFromSpan(msg_type));
+    }
+};
 
 /** Maps from a message string to a 1-byte message type */
 class SendMsgMap : public std::unordered_map<std::string, uint8_t>
@@ -315,6 +340,8 @@ public:
         }
         return std::nullopt;
     }
+
+    void Update(std::span<const AliasPayloadEntry> ids);
 
     SendMsgMap ToSendMsgMap() const;
 };

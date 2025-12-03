@@ -1960,6 +1960,45 @@ class msg_feature:
         return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
 
 
+class BIP324Alias:
+    __slots__ = ("id", "msgtype")
+    def __init__(self, alias=0, msgtype=b""):
+        self.id = alias
+        self.msgtype = msgtype
+
+    def deserialize(self, f):
+        self.id = int.from_bytes(f.read(1), "little")
+        self.msgtype = f.read(12).rstrip(b'\x00')
+
+    def serialize(self):
+        assert len(self.msgtype) <= 12
+        r = b''
+        r += self.id.to_bytes(1, "little")
+        r += self.msgtype + b'\x00' * (12 - len(self.msgtype))
+        return r
+
+    def __repr__(self):
+        return "BIP324Alias(id=%d msgtype=%s)" % (self.id, self.msgtype)
+
+    def __eq__(self, other):
+        return isinstance(other, BIP324Alias) and self.id == other.id and self.msgtype == other.msgtype
+
+class msg_set324alias:
+    __slots__ = ("vec", )
+    msgtype = b"set324alias"
+
+    def __init__(self, vec=None):
+        self.vec = vec or []
+
+    def deserialize(self, f):
+        self.vec = deser_vector(f, BIP324Alias)
+
+    def serialize(self):
+        return ser_vector(self.vec)
+
+    def __repr__(self):
+        return "msg_set324alias(vec=%s)" % (repr(self.vec))
+
 class TestFrameworkScript(unittest.TestCase):
     def test_addrv2_encode_decode(self):
         def check_addrv2(ip, net):

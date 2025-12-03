@@ -9,7 +9,7 @@
 #include <common/system.h>
 
 namespace BIP324 {
-static consteval RecvMsgMap LiteralRecvMsgMap(std::initializer_list<std::pair<uint8_t, const char*>> inp)
+static consteval RecvMsgMap LiteralRecvMsgMap(std::span<const std::pair<uint8_t, std::string_view>> inp)
 {
     RecvMsgMap r;
     uint8_t sentinel{ALL_NET_MESSAGE_TYPES.size()};
@@ -50,7 +50,7 @@ static consteval auto CheckDefaultRecvMsgMap(RecvMsgMap m)
  * Only message types that are actually implemented in this codebase need to be listed, as other
  * messages get ignored anyway - whether we know how to decode them or not.
  */
-const RecvMsgMap DEFAULT_RECVMSGMAP = CheckDefaultRecvMsgMap(LiteralRecvMsgMap({
+static constexpr std::array BIP324Defaults{std::to_array<std::pair<uint8_t, std::string_view>>({
     {1, NetMsgType::ADDR},
     {2, NetMsgType::BLOCK},
     {3, NetMsgType::BLOCKTXN},
@@ -80,7 +80,47 @@ const RecvMsgMap DEFAULT_RECVMSGMAP = CheckDefaultRecvMsgMap(LiteralRecvMsgMap({
     {27, NetMsgType::CFCHECKPT},
     {28, NetMsgType::ADDRV2},
     {37, NetMsgType::FEATURE},
-}));
+})};
+
+void AliasPayloadEntry::SetMsgFromSpan(std::span<const char, MESSAGE_TYPE_SIZE> msg_type)
+{
+    // Matching V2Transport::GetMessageType
+    size_t msg_type_len = 0;
+    while (msg_type_len < MESSAGE_TYPE_SIZE && msg_type[msg_type_len] != 0) {
+        // Verify that message type bytes before the first 0x00 are in range. BIP324 specifies the
+        // long message type encoding as "an ASCII message type (as in the v1 P2P protocol)".
+        if (msg_type[msg_type_len] < ' ' || msg_type[msg_type_len] > 0x7E) {
+            msg.clear();
+            return;
+        }
+        ++msg_type_len;
+    }
+    msg.assign(msg_type.data(), msg_type_len);
+    while (msg_type_len < MESSAGE_TYPE_SIZE) {
+        if (msg_type[msg_type_len] != 0) {
+            msg.clear();
+            return;
+        }
+        ++msg_type_len;
+    }
+}
+
+const RecvMsgMap DEFAULT_RECVMSGMAP{CheckDefaultRecvMsgMap(LiteralRecvMsgMap(BIP324Defaults))};
+
+void RecvMsgMap::Update(std::span<const AliasPayloadEntry> ids)
+{
+    uint8_t sentinel{ALL_NET_MESSAGE_TYPES.size()};
+    for (auto& sio : ids) {
+        if (sio.id == 0 || sio.id > size()) continue;
+        (*this)[sio.id-1] = sentinel; // if msg is unknown, leave it as dummy
+        for (size_t pos = 0; pos < ALL_NET_MESSAGE_TYPES.size(); ++pos) {
+            if (sio.msg == ALL_NET_MESSAGE_TYPES[pos]) {
+                (*this)[sio.id-1] = pos; // if msg is known, track it
+                break;
+            }
+        }
+    }
+}
 
 SendMsgMap RecvMsgMap::ToSendMsgMap() const
 {
