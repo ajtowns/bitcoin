@@ -16,7 +16,6 @@
 #include <array>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <string>
 
 /**
@@ -271,6 +270,47 @@ inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::SENDTXRCNCL,
 })};
 
+class SerializedNetMsgType
+{
+public:
+    SerializedNetMsgType() = default;
+    //explicit SerializedNetMsgType(uint8_t id) : m_id{id}, m_data{} { }
+    //explicit SerializedNetMsgType(std::string&& s) : m_id{0}, m_data{std::move(s)} { }
+    //explicit SerializedNetMsgType(const std::string_view& sv) : m_id{0}, m_data{std::string{sv}} { }
+
+    SerializedNetMsgType& operator=(uint8_t short_id) { m_id = short_id; m_data.clear(); return *this; }
+    SerializedNetMsgType& operator=(std::string s) & { m_id = 0; m_data = std::move(s); return *this; }
+    SerializedNetMsgType& operator=(std::string_view sv) & { m_id = 0; m_data = std::string{sv}; return *this; }
+    SerializedNetMsgType& operator=(const char* s) & { m_id = 0; m_data = std::string{s}; return *this; }
+
+
+    friend bool operator==(const SerializedNetMsgType& a, const SerializedNetMsgType& b)
+    {
+        return a.m_id == b.m_id && a.m_data == b.m_data;
+    }
+
+    friend bool operator==(const SerializedNetMsgType& a, std::string_view sv)
+    {
+        return a.m_data == sv;
+    }
+
+    operator std::string() const
+    {
+        if (m_id == 0 || !m_data.empty()) return m_data;
+        return strprintf("BIP324_SHORT_%d", m_id);
+    }
+
+    template<typename Stream>
+    friend Stream& operator<<(Stream &s, const SerializedNetMsgType& msg_type)
+    {
+        s << std::string(msg_type);
+        return s;
+    }
+
+    uint8_t m_id{0};
+    std::string m_data;
+};
+
 namespace BIP324 {
 using MsgByShortId = std::array<uint8_t, 255>;
 
@@ -278,15 +318,14 @@ MsgByShortId GetMsgById(std::span<const std::pair<uint8_t, std::string>> inp);
 
 extern const MsgByShortId DEFAULT_MSG_BY_ID;
 
-inline std::optional<std::string> GetNetMsgTypeFromId(uint8_t id, std::span<const uint8_t> msg_by_id)
+inline void GetData(SerializedNetMsgType& msg_type, std::span<const uint8_t> msg_by_id)
 {
-    if (id > 0 && id <= msg_by_id.size()) {
-        uint8_t v = msg_by_id[id - 1];
+    if (msg_type.m_id > 0 && msg_type.m_id <= msg_by_id.size()) {
+        uint8_t v = msg_by_id[msg_type.m_id - 1];
         if (v < ALL_NET_MESSAGE_TYPES.size()) {
-            return ALL_NET_MESSAGE_TYPES[v];
+            msg_type.m_data = ALL_NET_MESSAGE_TYPES[v];
         }
     }
-    return std::nullopt;
 }
 
 using ShortMsgMap = std::unordered_map<std::string, uint8_t>;
@@ -302,11 +341,13 @@ inline ShortMsgMap GetMapMsgToId(std::span<const uint8_t> msg_by_id)
     return r;
 }
 
-inline uint8_t GetId(const std::string& msg_type, const ShortMsgMap& shortmsgmap)
+inline void GetId(SerializedNetMsgType& msg_type, const ShortMsgMap& shortmsgmap)
 {
-    auto it = shortmsgmap.find(msg_type);
-    if (it == shortmsgmap.end()) return 0;
-    return it->second;
+    if (msg_type.m_id == 0) {
+        auto it = shortmsgmap.find(msg_type.m_data);
+        if (it == shortmsgmap.end()) return;
+        msg_type.m_id = it->second;
+    }
 }
 } // BIP324 namespace
 

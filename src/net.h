@@ -46,6 +46,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 class AddrMan;
@@ -130,7 +131,7 @@ struct CSerializedNetMsg {
     }
 
     std::vector<unsigned char> data;
-    std::string m_type;
+    SerializedNetMsgType m_type;
 
     /** Compute total memory usage of this object (own memory + any dynamic memory). */
     size_t GetMemoryUsage() const noexcept;
@@ -237,7 +238,7 @@ public:
     std::chrono::microseconds m_time{0}; //!< time of message receipt
     uint32_t m_message_size{0};          //!< size of the payload
     uint32_t m_raw_message_size{0};      //!< used wire size of the message (including header/checksum)
-    std::string m_type;
+    SerializedNetMsgType m_type;
 
     explicit CNetMessage(DataStream&& recv_in) : m_recv(std::move(recv_in)) {}
     // Only one CNetMessage object will exist for the same message on either
@@ -653,7 +654,7 @@ private:
     /** Change the send state. */
     void SetSendState(SendState send_state) noexcept EXCLUSIVE_LOCKS_REQUIRED(m_send_mutex);
     /** Given a packet's contents, find the message type (if valid), and strip it from contents. */
-    static std::optional<std::string> GetMessageType(std::span<const uint8_t>& contents) noexcept;
+    static std::variant<std::monostate, uint8_t, std::string> GetMessageType(std::span<const uint8_t>& contents) noexcept;
     /** Determine how many received bytes can be processed in one go (not allowed in V1 state). */
     size_t GetMaxBytesToProcess() noexcept EXCLUSIVE_LOCKS_REQUIRED(m_recv_mutex);
     /** Put our public key + garbage in the send buffer. */

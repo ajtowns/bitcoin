@@ -715,11 +715,16 @@ private:
     void SendBlockTransactions(CNode& pfrom, Peer& peer, const CBlock& block, const BlockTransactionsRequest& req);
 
     /** Send a message to a peer */
-    void PushMessage(CNode& node, CSerializedNetMsg&& msg) const { m_connman.PushMessage(&node, std::move(msg)); }
+    void PushMessage(CNode& node, CSerializedNetMsg&& msg) const
+    {
+        assert(msg.m_type.m_id == 0);
+        BIP324::GetId(msg.m_type, m_bip324_msg_by_id);
+        m_connman.PushMessage(&node, std::move(msg));
+    }
     template <typename... Args>
     void MakeAndPushMessage(CNode& node, std::string msg_type, Args&&... args) const
     {
-        m_connman.PushMessage(&node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
+        PushMessage(node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
     }
 
     /** Send a version message to a peer */
@@ -786,6 +791,8 @@ private:
     TimeOffsets m_outbound_time_offsets{m_warnings};
 
     const Options m_opts;
+
+    const BIP324::ShortMsgMap m_bip324_msg_by_id;
 
     bool RejectIncomingTxs(const CNode& peer) const;
 
@@ -1907,7 +1914,8 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_mempool(pool),
       m_txdownloadman(node::TxDownloadOptions{pool, m_rng, opts.deterministic_rng}),
       m_warnings{warnings},
-      m_opts{opts}
+      m_opts{opts},
+      m_bip324_msg_by_id{BIP324::GetMapMsgToId(BIP324::DEFAULT_MSG_BY_ID)}
 {
     // While Erlay support is incomplete, it must be enabled explicitly via -txreconciliation.
     // This argument can go away after Erlay support is complete.
@@ -5040,6 +5048,12 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
 
     CNetMessage& msg{poll_result->first};
     bool fMoreWork = poll_result->second;
+
+    BIP324::GetData(msg.m_type, BIP324::DEFAULT_MSG_BY_ID);
+    {
+        LOCK(pfrom->cs_vRecv);
+        pfrom->AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
+    }
 
     TRACEPOINT(net, inbound_message,
         pfrom->GetId(),
