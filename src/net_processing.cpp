@@ -810,11 +810,16 @@ private:
     void SendBlockTransactions(CNode& pfrom, Peer& peer, const CBlock& block, const BlockTransactionsRequest& req);
 
     /** Send a message to a peer */
-    void PushMessage(CNode& node, CSerializedNetMsg&& msg) const { m_connman.PushMessage(&node, std::move(msg)); }
+    void PushMessage(CNode& node, CSerializedNetMsg&& msg) const
+    {
+        assert(msg.m_type.m_id == 0);
+        msg.m_type.GetId(m_bip324_sendmsgmap);
+        m_connman.PushMessage(&node, std::move(msg));
+    }
     template <typename... Args>
     void MakeAndPushMessage(CNode& node, std::string msg_type, Args&&... args) const
     {
-        m_connman.PushMessage(&node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
+        PushMessage(node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
     }
     template <typename... Args>
     [[maybe_unused]] void MakeAndPushFeature(CNode& node, std::string_view feature_id, Args&&... args) const
@@ -892,6 +897,8 @@ private:
     TimeOffsets m_outbound_time_offsets{m_warnings};
 
     const Options m_opts;
+
+    const BIP324::SendMsgMap m_bip324_sendmsgmap;
 
     bool RejectIncomingTxs(const CNode& peer) const;
 
@@ -2151,6 +2158,7 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_txdownloadman{node::TxDownloadOptions{pool, opts.deterministic_rng}},
       m_warnings{warnings},
       m_opts{opts},
+      m_bip324_sendmsgmap{BIP324::DEFAULT_RECVMSGMAP.ToSendMsgMap()},
       m_inbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/1.0),
       m_outbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/OUTBOUND_INVENTORY_BUCKET_MULTIPLIER)
 {
@@ -5482,11 +5490,17 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     CNetMessage& msg{poll_result->first};
     bool fMoreWork = poll_result->second;
 
+    msg.m_type.GetData(BIP324::DEFAULT_RECVMSGMAP);
+    {
+        LOCK(node.cs_vRecv);
+        node.AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
+    }
+
     TRACEPOINT(net, inbound_message,
         node.GetId(),
         node.m_addr_name.c_str(),
         node.ConnectionTypeAsString().c_str(),
-        msg.m_type.c_str(),
+        msg.m_type.m_data.c_str(),
         msg.m_recv.size(),
         msg.m_recv.data()
     );

@@ -16,7 +16,6 @@
 #include <array>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -322,10 +321,60 @@ public:
 
 /** One-byte message type mappings from BIP 324 */
 extern const RecvMsgMap DEFAULT_RECVMSGMAP;
-extern const SendMsgMap V2_MESSAGE_MAP;
 inline constexpr unsigned MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED{37};
 
 } // BIP324 namespace
+
+class SerializedNetMsgType
+{
+public:
+    SerializedNetMsgType() = default;
+
+    SerializedNetMsgType& operator=(uint8_t id) { m_id = id; m_data.clear(); return *this; }
+    SerializedNetMsgType& operator=(std::string s) & { m_id = 0; m_data = std::move(s); return *this; }
+    SerializedNetMsgType& operator=(std::string_view sv) & { m_id = 0; m_data = std::string{sv}; return *this; }
+    SerializedNetMsgType& operator=(const char* s) & { m_id = 0; m_data = std::string{s}; return *this; }
+
+    friend bool operator==(const SerializedNetMsgType& a, const SerializedNetMsgType& b)
+    {
+        return a.m_id == b.m_id && a.m_data == b.m_data;
+    }
+
+    friend bool operator==(const SerializedNetMsgType& a, std::string_view sv)
+    {
+        return a.m_data == sv;
+    }
+
+    operator std::string() const
+    {
+        if (m_id == 0 || !m_data.empty()) return m_data;
+        return strprintf("BIP324_SHORT_%d", m_id);
+    }
+
+    template<typename Stream>
+    friend Stream& operator<<(Stream &s, const SerializedNetMsgType& msg_type)
+    {
+        s << std::string(msg_type);
+        return s;
+    }
+
+    uint8_t m_id{0};
+    std::string m_data;
+
+    inline void GetData(const BIP324::RecvMsgMap& recvmsgmap)
+    {
+        if (auto r = recvmsgmap.GetNetMsgTypeFromId(m_id); r.has_value()) {
+            m_data = std::move(*r);
+        }
+    }
+
+    inline void GetId(const BIP324::SendMsgMap& sendmsgmap)
+    {
+        if (m_id == 0) {
+            m_id = sendmsgmap.GetId(m_data);
+        }
+    }
+};
 
 /** nServices flags */
 enum ServiceFlags : uint64_t {

@@ -1074,6 +1074,8 @@ class V2TransportTester
     std::deque<CSerializedNetMsg> m_msg_to_send; //!< Messages to be sent *by* m_transport to us.
     bool m_sent_aad{false};
 
+    const BIP324::SendMsgMap m_bip324_sendmsgmap{BIP324::DEFAULT_RECVMSGMAP.ToSendMsgMap()};
+
 public:
     /** Construct a tester object. test_initiator: whether the tested transport is initiator. */
     explicit V2TransportTester(FastRandomContext& rng, bool test_initiator)
@@ -1120,13 +1122,20 @@ public:
                 if (reject) {
                     ret.emplace_back(std::nullopt);
                 } else {
-                    ret.emplace_back(std::move(msg));
+                    msg.m_type.GetData(BIP324::DEFAULT_RECVMSGMAP);
+                    if (msg.m_type.m_data.empty()) {
+                        ret.emplace_back(std::nullopt);
+                    } else {
+                        ret.emplace_back(std::move(msg));
+                    }
                 }
                 progress = true;
             }
             // Enqueue a message to be sent by the transport to us.
             if (!m_msg_to_send.empty() && (!progress || m_rng.randbool())) {
-                if (m_transport.SetMessageToSend(m_msg_to_send.front())) {
+                auto& msg = m_msg_to_send.front();
+                msg.m_type.GetId(m_bip324_sendmsgmap);
+                if (m_transport.SetMessageToSend(msg)) {
                     m_msg_to_send.pop_front();
                     progress = true;
                 }

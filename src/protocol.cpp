@@ -94,7 +94,6 @@ SendMsgMap RecvMsgMap::ToSendMsgMap() const
     return r;
 }
 
-const SendMsgMap V2_MESSAGE_MAP{DEFAULT_RECVMSGMAP.ToSendMsgMap()};
 } // namespace BIP324
 
 CInv::CInv()

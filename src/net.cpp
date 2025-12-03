@@ -122,12 +122,12 @@ std::string strSubVersion;
 
 size_t CSerializedNetMsg::GetMemoryUsage() const noexcept
 {
-    return sizeof(*this) + memusage::DynamicUsage(m_type) + memusage::DynamicUsage(data);
+    return sizeof(*this) + memusage::DynamicUsage(m_type.m_data) + memusage::DynamicUsage(data);
 }
 
 size_t CNetMessage::GetMemoryUsage() const noexcept
 {
-    return sizeof(*this) + memusage::DynamicUsage(m_type) + m_recv.GetMemoryUsage();
+    return sizeof(*this) + memusage::DynamicUsage(m_type.m_data) + m_recv.GetMemoryUsage();
 }
 
 void CConnman::AddAddrFetch(const std::string& strDest)
@@ -689,7 +689,6 @@ bool CNode::ReceiveMsgBytes(std::span<const uint8_t> msg_bytes, bool& complete)
                 AccountForRecvBytes(NET_MESSAGE_TYPE_OTHER, msg.m_raw_message_size);
                 continue;
             }
-            AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
 
             // push the message to the process queue,
             vRecvMsg.push_back(std::move(msg));
@@ -875,6 +874,7 @@ CNetMessage V1Transport::GetReceivedMessage(NodeClock::time_point time, bool& re
 bool V1Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
 {
     AssertLockNotHeld(m_send_mutex);
+
     // Determine whether a new message can be set.
     LOCK(m_send_mutex);
     if (m_sending_header || m_bytes_sent < m_message_to_send.data.size()) return false;
@@ -883,7 +883,7 @@ bool V1Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
     uint256 hash = Hash(msg.data);
 
     // create header
-    CMessageHeader hdr(m_magic_bytes, msg.m_type.c_str(), msg.data.size());
+    CMessageHeader hdr(m_magic_bytes, msg.m_type.m_data.c_str(), msg.data.size());
     memcpy(hdr.pchChecksum, hash.begin(), CMessageHeader::CHECKSUM_SIZE);
 
     // serialize header
@@ -906,14 +906,14 @@ Transport::BytesToSend V1Transport::GetBytesToSend(bool have_next_message) const
                 // We have more to send after the header if the message has payload, or if there
                 // is a next message after that.
                 have_next_message || !m_message_to_send.data.empty(),
-                m_message_to_send.m_type
+                m_message_to_send.m_type.m_data
                };
     } else {
         return {std::span{m_message_to_send.data}.subspan(m_bytes_sent),
                 // We only have more to send after this message's payload if there is another
                 // message.
                 have_next_message,
-                m_message_to_send.m_type
+                m_message_to_send.m_type.m_data
                };
     }
 }
@@ -1381,19 +1381,18 @@ bool V2Transport::ReceivedBytes(std::span<const uint8_t>& msg_bytes) noexcept
     return true;
 }
 
-std::optional<std::string> V2Transport::GetMessageType(std::span<const uint8_t>& contents) noexcept
+std::variant<std::monostate, uint8_t, std::string> V2Transport::GetMessageType(std::span<const uint8_t>& contents) noexcept
 {
-    if (contents.size() == 0) return std::nullopt; // Empty contents
+    if (contents.size() == 0) return std::monostate{}; // Empty contents
     uint8_t first_byte = contents[0];
     contents = contents.subspan(1); // Strip first byte.
 
     if (first_byte != 0) {
-        // Short (1 byte) encoding.
-        return BIP324::DEFAULT_RECVMSGMAP.GetNetMsgTypeFromId(first_byte);
+        return first_byte;
     }
 
     if (contents.size() < CMessageHeader::MESSAGE_TYPE_SIZE) {
-        return std::nullopt; // Long encoding needs 12 message type bytes.
+        return std::monostate{}; // Long encoding needs 12 message type bytes.
     }
 
     size_t msg_type_len{0};
@@ -1401,7 +1400,7 @@ std::optional<std::string> V2Transport::GetMessageType(std::span<const uint8_t>&
         // Verify that message type bytes before the first 0x00 are in range. BIP324 specifies the
         // long message type encoding as "an ASCII message type (as in the v1 P2P protocol)".
         if (contents[msg_type_len] < ' ' || contents[msg_type_len] > 0x7E) {
-            return {};
+            return std::monostate{};
         }
         ++msg_type_len;
     }
@@ -1428,9 +1427,13 @@ CNetMessage V2Transport::GetReceivedMessage(NodeClock::time_point time, bool& re
     CNetMessage msg{DataStream{}};
     // Note that BIP324Cipher::EXPANSION also includes the length descriptor size.
     msg.m_raw_message_size = m_recv_decode_buffer.size() + BIP324Cipher::EXPANSION;
-    if (msg_type) {
+    if (!std::holds_alternative<std::monostate>(msg_type)) {
         reject_message = false;
-        msg.m_type = std::move(*msg_type);
+        if (std::holds_alternative<std::string>(msg_type)) {
+            msg.m_type = std::move(std::get<std::string>(msg_type));
+        } else {
+            msg.m_type = std::get<uint8_t>(msg_type);
+        }
         msg.m_time = time;
         msg.m_message_size = contents.size();
         msg.m_recv.resize(contents.size());
@@ -1445,7 +1448,6 @@ CNetMessage V2Transport::GetReceivedMessage(NodeClock::time_point time, bool& re
     return msg;
 }
 
-
 bool V2Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
 {
     AssertLockNotHeld(m_send_mutex);
@@ -1457,16 +1459,15 @@ bool V2Transport::SetMessageToSend(CSerializedNetMsg& msg) noexcept
     if (!(m_send_state == SendState::READY && m_send_buffer.empty())) return false;
     // Construct contents (encoding message type + payload).
     std::vector<uint8_t> contents;
-    uint8_t short_message_id = BIP324::V2_MESSAGE_MAP.GetId(msg.m_type);
-    if (short_message_id != 0) {
+    if (msg.m_type.m_id != 0) {
         contents.resize(1 + msg.data.size());
-        contents[0] = short_message_id;
+        contents[0] = msg.m_type.m_id;
         std::copy(msg.data.begin(), msg.data.end(), contents.begin() + 1);
     } else {
         // Initialize with zeroes, and then write the message type string starting at offset 1.
         // This means contents[0] and the unused positions in contents[1..13] remain 0x00.
         contents.resize(1 + CMessageHeader::MESSAGE_TYPE_SIZE + msg.data.size(), 0);
-        std::copy(msg.m_type.begin(), msg.m_type.end(), contents.data() + 1);
+        std::copy(msg.m_type.m_data.begin(), msg.m_type.m_data.end(), contents.data() + 1);
         std::copy(msg.data.begin(), msg.data.end(), contents.begin() + 1 + CMessageHeader::MESSAGE_TYPE_SIZE);
     }
     // Construct ciphertext in send buffer.
@@ -4126,7 +4127,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
 {
     AssertLockNotHeld(m_total_bytes_sent_mutex);
 
-    if (pnode->IsPrivateBroadcastConn() && !IsOutboundMessageAllowedInPrivateBroadcast(msg.m_type)) {
+    if (pnode->IsPrivateBroadcastConn() && !IsOutboundMessageAllowedInPrivateBroadcast(msg.m_type.m_data)) {
         LogDebug(BCLog::PRIVBROADCAST, "Omitting send of message '%s', %s", msg.m_type, pnode->LogPeer());
         return;
     }
@@ -4148,7 +4149,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
         pnode->GetId(),
         pnode->m_addr_name.c_str(),
         pnode->ConnectionTypeAsString().c_str(),
-        msg.m_type.c_str(),
+        msg.m_type.m_data.c_str(),
         msg.data.size(),
         msg.data.data()
     );
