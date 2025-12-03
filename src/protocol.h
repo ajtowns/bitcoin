@@ -229,6 +229,16 @@ inline constexpr const char* WTXIDRELAY{"wtxidrelay"};
  * txreconciliation, as described by BIP 330.
  */
 inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
+/**
+ * We'll accept SET324ID messages
+ */
+inline constexpr const char* ACCEPT324ID{"accept324id"};
+/**
+ * Reassign the BIP324 short id assignments for future messages
+ * Contains a vector of one-byte assignment, and <= 12 byte messages.
+ * Assignments to unknown messages will be ignored.
+ */
+inline constexpr const char* SET324ID{"set324id"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -268,6 +278,8 @@ inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::CFCHECKPT,
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
+    NetMsgType::ACCEPT324ID,
+    NetMsgType::SET324ID,
 })};
 
 class SerializedNetMsgType

@@ -417,6 +417,9 @@ struct Peer {
     Mutex m_sendmsg_mutex;
     std::forward_list<std::pair<CSerializedNetMsg, std::promise<bool>>> m_sendmsg;
 
+    BIP324::MsgByShortId m_v2_shortid_map GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    bool m_is_v2_transport GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -3543,6 +3546,16 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             MakeAndPushMessage(pfrom, NetMsgType::SENDADDRV2);
         }
 
+        auto transport_info = pfrom.m_transport->GetInfo();
+        if (transport_info.transport_type == TransportProtocolType::V2) {
+            peer->m_is_v2_transport = true;
+            peer->m_v2_shortid_map = BIP324::DEFAULT_MSG_BY_ID;
+
+            if (greatest_common_version >= 70016) {
+                MakeAndPushMessage(pfrom, NetMsgType::ACCEPT324ID);
+            }
+        }
+
         pfrom.m_has_all_wanted_services = HasAllDesirableServiceFlags(nServices);
         peer->m_their_services = nServices;
         pfrom.SetAddrLocal(addrMe);
@@ -3843,6 +3856,17 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             pfrom.fDisconnect = true;
             return;
         }
+        return;
+    }
+
+    if (msg_type == NetMsgType::ACCEPT324ID) {
+        if (pfrom.fSuccessfullyConnected) {
+            LogDebug(BCLog::NET, "accept324id received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        }
+        if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
+        // we don't send set324id messages yet, so just ignore anyway
         return;
     }
 
@@ -4928,6 +4952,15 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
     if (msg_type == NetMsgType::GETCFCHECKPT) {
         ProcessGetCFCheckPt(pfrom, *peer, vRecv);
         return;
+    }
+
+    if (msg_type == NetMsgType::SET324ID) {
+        if (!peer->m_is_v2_transport) return;
+
+        std::vector<std::pair<uint8_t, std::string>> ids;
+        vRecv >> ids;
+
+        peer->m_v2_shortid_map = BIP324::GetMsgById(ids);
     }
 
     if (msg_type == NetMsgType::NOTFOUND) {
