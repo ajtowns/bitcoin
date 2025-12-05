@@ -3557,7 +3557,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             peer->m_is_v2_transport = true;
 
             if (greatest_common_version >= 70016) {
-                MakeAndPushMessage(pfrom, NetMsgType::ACCEPT324ID);
+                MakeAndPushMessage(pfrom, NetMsgType::FEATURE, NetMsgFeature::SET324ID);
             }
         }
 
@@ -3864,25 +3864,32 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         return;
     }
 
-    if (msg_type == NetMsgType::ACCEPT324ID) {
+    if (msg_type == NetMsgType::FEATURE) {
         if (pfrom.fSuccessfullyConnected) {
-            LogDebug(BCLog::NET, "accept324id received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
+            LogDebug(BCLog::NET, "feature received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
         }
-        if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
 
-        std::vector<std::pair<uint8_t, std::string>> ids;
-        for (size_t i = 0; i < BIP324::CRAZY_MSG_BY_ID.size(); ++i) {
-            uint8_t x{BIP324::CRAZY_MSG_BY_ID[i]};
-            if (x < ALL_NET_MESSAGE_TYPES.size()) {
-                ids.emplace_back(i+1, ALL_NET_MESSAGE_TYPES[x]);
+        std::string feature;
+        vRecv >> LIMITED_STRING(feature, MAX_FEATURE_LENGTH);
+
+        if (feature == NetMsgFeature::SET324ID) {
+            if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
+
+            std::vector<std::pair<uint8_t, std::string>> ids;
+            for (size_t i = 0; i < BIP324::CRAZY_MSG_BY_ID.size(); ++i) {
+                uint8_t x{BIP324::CRAZY_MSG_BY_ID[i]};
+                if (x < ALL_NET_MESSAGE_TYPES.size()) {
+                    ids.emplace_back(i+1, ALL_NET_MESSAGE_TYPES[x]);
+                }
             }
+            MakeAndPushMessage(pfrom, NetMsgType::SET324ID, ids);
+            pfrom.m_bip324_crazy_mode = true;
+            LogDebug(BCLog::NET, "set crazy mode for peer=%d", pfrom.GetId());
+            return;
         }
-        MakeAndPushMessage(pfrom, NetMsgType::SET324ID, ids);
-        pfrom.m_bip324_crazy_mode = true;
-        LogDebug(BCLog::NET, "set crazy mode for peer=%d", pfrom.GetId());
-        return;
+        LogDebug(BCLog::NET, "Unknown feature advertised: %s", SanitizeString(feature));
     }
 
     if (!pfrom.fSuccessfullyConnected) {

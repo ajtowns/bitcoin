@@ -115,7 +115,7 @@ const MsgByShortId CRAZY_MSG_BY_ID = LiteralGetMsgById({
     {162, NetMsgType::CFCHECKPT},
     {163, NetMsgType::WTXIDRELAY},
     {164, NetMsgType::SENDTXRCNCL},
-    {165, NetMsgType::ACCEPT324ID},
+    {165, NetMsgType::FEATURE},
     {166, NetMsgType::SET324ID},
 });
 

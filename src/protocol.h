@@ -230,9 +230,10 @@ inline constexpr const char* WTXIDRELAY{"wtxidrelay"};
  */
 inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
 /**
- * We'll accept SET324ID messages
+ * Feature negotiation. Payload is a feature id, possibly followed by feature
+ * specific data.
  */
-inline constexpr const char* ACCEPT324ID{"accept324id"};
+inline constexpr const char* FEATURE{"feature"};
 /**
  * Reassign the BIP324 short id assignments for future messages
  * Contains a vector of one-byte assignment, and <= 12 byte messages.
@@ -240,6 +241,11 @@ inline constexpr const char* ACCEPT324ID{"accept324id"};
  */
 inline constexpr const char* SET324ID{"set324id"};
 }; // namespace NetMsgType
+
+static constexpr size_t MAX_FEATURE_LENGTH{80};
+namespace NetMsgFeature {
+inline constexpr std::string_view SET324ID{"https://github.com/ajtowns/bitcoin/tree/202511-bip324-id"};
+};
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
 inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
@@ -278,7 +284,7 @@ inline constexpr std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::CFCHECKPT,
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
-    NetMsgType::ACCEPT324ID,
+    NetMsgType::FEATURE,
     NetMsgType::SET324ID,
 })};
 
