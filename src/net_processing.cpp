@@ -550,6 +550,11 @@ public:
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
 
 private:
+    /** Actual ProcessMessage() implementation */
+    void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
+                        const std::chrono::microseconds time_received, const std::atomic<bool>& interruptMsgProc)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex);
+
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
 
@@ -3424,17 +3429,27 @@ void PeerManagerImpl::LogBlockHeader(const CBlockIndex& index, const CNode& peer
     }
 }
 
+
 void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
+                                     const std::chrono::microseconds time_received,
+                                     const std::atomic<bool>& interruptMsgProc)
+{
+    // Note: This function is only called from tests
+
+    AssertLockHeld(g_msgproc_mutex);
+
+    PeerRef peerref = GetPeerRef(pfrom.GetId());
+    if (peerref == nullptr) return;
+    ProcessMessage(*peerref, pfrom, msg_type, vRecv, time_received, interruptMsgProc);
+}
+
+void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
                                      const std::chrono::microseconds time_received,
                                      const std::atomic<bool>& interruptMsgProc)
 {
     AssertLockHeld(g_msgproc_mutex);
 
     LogDebug(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(msg_type), vRecv.size(), pfrom.GetId());
-
-    PeerRef peerref = GetPeerRef(pfrom.GetId());
-    if (peerref == nullptr) return;
-    Peer& peer = *peerref;
 
     if (msg_type == NetMsgType::VERSION) {
         if (pfrom.nVersion != 0) {
@@ -5048,7 +5063,7 @@ bool PeerManagerImpl::ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt
     }
 
     try {
-        ProcessMessage(*pfrom, msg.m_type, msg.m_recv, msg.m_time, interruptMsgProc);
+        ProcessMessage(*peer, *pfrom, msg.m_type, msg.m_recv, msg.m_time, interruptMsgProc);
         if (interruptMsgProc) return false;
         {
             LOCK(peer->m_getdata_requests_mutex);
