@@ -18,6 +18,7 @@
 #include <interfaces/handler.h>
 #include <interfaces/node.h>
 #include <net.h>
+#include <net_processing.h>
 #include <netbase.h>
 #include <util/threadnames.h>
 #include <util/time.h>

@@ -37,6 +37,9 @@ namespace node {
 class Warnings;
 } // namespace node
 
+/** Subversion as sent to the P2P network in `version` messages */
+extern std::string strSubVersion;
+
 /** Whether transaction reconciliation protocol should be enabled by default. */
 inline constexpr bool DEFAULT_TXRECONCILIATION_ENABLE{false};
 /** Default number of non-mempool transactions to keep around for block reconstruction. Includes
