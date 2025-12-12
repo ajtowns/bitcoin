@@ -163,6 +163,10 @@ public:
      * we do not have a confirmed set of service flags.
     */
     virtual ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const = 0;
+
+    virtual void Start() = 0;
+    virtual void Interrupt() = 0;
+    virtual void Stop() = 0;
 };
 
 #endif // BITCOIN_NET_PROCESSING_H

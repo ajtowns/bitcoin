@@ -144,7 +144,7 @@ class FuzzedNetEvents : public NetEventsInterface
 public:
     FuzzedNetEvents(FuzzedDataProvider& fdp) : m_fdp(fdp) {}
 
-    virtual void InitializeNode(const CNode&, ServiceFlags) override {}
+    virtual void InitializeNode(CNode&, ServiceFlags) override {}
 
     virtual void FinalizeNode(const CNode&) override {}
 

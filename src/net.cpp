@@ -3049,47 +3049,6 @@ bool CConnman::OpenNetworkConnection(const CAddress& addrConnect,
     return true;
 }
 
-Mutex NetEventsInterface::g_msgproc_mutex;
-
-void CConnman::ThreadMessageHandler()
-{
-    LOCK(NetEventsInterface::g_msgproc_mutex);
-
-    while (!flagInterruptMsgProc)
-    {
-        bool fMoreWork = false;
-
-        {
-            // Randomize the order in which we process messages from/to our peers.
-            // This prevents attacks in which an attacker exploits having multiple
-            // consecutive connections in the m_nodes list.
-            const NodesSnapshot snap{*this, /*shuffle=*/true};
-
-            for (CNode* pnode : snap.Nodes()) {
-                if (pnode->fDisconnect)
-                    continue;
-
-                // Receive messages
-                bool fMoreNodeWork = m_msgproc->ProcessMessages(pnode, flagInterruptMsgProc);
-                fMoreWork |= (fMoreNodeWork && !pnode->fPauseSend);
-                if (flagInterruptMsgProc)
-                    return;
-                // Send messages
-                m_msgproc->SendMessages(pnode);
-
-                if (flagInterruptMsgProc)
-                    return;
-            }
-        }
-
-        WAIT_LOCK(mutexMsgProc, lock);
-        if (!fMoreWork) {
-            condMsgProc.wait_until(lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(100), [this]() EXCLUSIVE_LOCKS_REQUIRED(mutexMsgProc) { return fMsgProcWake; });
-        }
-        fMsgProcWake = false;
-    }
-}
-
 void CConnman::ThreadI2PAcceptIncoming()
 {
     static constexpr auto err_wait_begin = 1s;
@@ -3373,12 +3332,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     //
     assert(m_msgproc);
     m_interrupt_net->reset();
-    flagInterruptMsgProc = false;
-
-    {
-        LOCK(mutexMsgProc);
-        fMsgProcWake = false;
-    }
 
     // Send and receive from sockets, accept connections
     threadSocketHandler = std::thread(&util::TraceThread, "net", [this] { ThreadSocketHandler(); });
@@ -3404,9 +3357,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
             &util::TraceThread, "opencon",
             [this, connect = connOptions.m_specified_outgoing, seed_nodes = std::move(seed_nodes)] { ThreadOpenConnections(connect, seed_nodes); });
     }
-
-    // Process messages
-    threadMessageHandler = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
 
     if (m_i2p_sam_session) {
         threadI2PAcceptIncoming =
@@ -3442,12 +3392,6 @@ static CNetCleanup instance_of_cnetcleanup;
 
 void CConnman::Interrupt()
 {
-    {
-        LOCK(mutexMsgProc);
-        flagInterruptMsgProc = true;
-    }
-    condMsgProc.notify_all();
-
     (*m_interrupt_net)();
     g_socks5_interrupt();
 
@@ -3469,8 +3413,6 @@ void CConnman::StopThreads()
     if (threadI2PAcceptIncoming.joinable()) {
         threadI2PAcceptIncoming.join();
     }
-    if (threadMessageHandler.joinable())
-        threadMessageHandler.join();
     if (threadOpenConnections.joinable())
         threadOpenConnections.join();
     if (threadOpenAddedConnections.joinable())

@@ -1019,7 +1019,7 @@ public:
     static Mutex g_msgproc_mutex;
 
     /** Initialize a peer (setup state) */
-    virtual void InitializeNode(const CNode& node, ServiceFlags our_services) = 0;
+    virtual void InitializeNode(CNode& node, ServiceFlags our_services) = 0;
 
     /** Handle removal of a peer (clear state) */
     virtual void FinalizeNode(const CNode& node) = 0;
@@ -1056,9 +1056,12 @@ protected:
     ~NetEventsInterface() = default;
 };
 
+namespace { class PeerManagerImpl; } // hack
+
 class CConnman
 {
 public:
+    friend class PeerManagerImpl; // hack visibility while moving responsibilities around
 
     struct Options
     {
@@ -1344,7 +1347,6 @@ private:
     void AddAddrFetch(const std::string& strDest) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
     void ProcessAddrFetch() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_unused_i2p_sessions_mutex);
     void ThreadOpenConnections(std::vector<std::string> connect, std::span<const std::string> seed_nodes) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_added_nodes_mutex, !m_nodes_mutex, !m_unused_i2p_sessions_mutex, !m_reconnections_mutex);
-    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
     void ThreadI2PAcceptIncoming();
     void AcceptConnection(const ListenSocket& hListenSocket);
 
@@ -1617,6 +1619,46 @@ private:
     Mutex mutexMsgProc;
     std::atomic<bool> flagInterruptMsgProc{false};
 
+    class NodeHandle
+    {
+    private:
+        CNode* m_node{nullptr};
+
+    public:
+        explicit NodeHandle() = default;
+        NodeHandle(const NodeHandle&) = delete;
+        NodeHandle(NodeHandle&&) = delete;
+        NodeHandle& operator=(const NodeHandle&) = delete;
+        NodeHandle& operator=(NodeHandle&&) = delete;
+
+        explicit NodeHandle(CNode* pnode) : m_node{pnode}
+        {
+            m_node->AddRef();
+        }
+
+        bool IsValid() const { return m_node != nullptr; }
+        bool Disconnected() const { return m_node == nullptr || m_node->fDisconnect; }
+        bool PauseSend() const { return m_node == nullptr || m_node->fPauseSend; }
+
+        CNode* ptr() { return m_node; }
+
+        ~NodeHandle()
+        {
+            if (m_node) m_node->Release();
+        }
+    };
+
+    NodeHandle SlowGetNodeHandle(NodeId nodeid)
+    {
+         LOCK(m_nodes_mutex);
+         for (CNode* node : m_nodes) {
+             if (node && node->GetId() == nodeid) {
+                 return NodeHandle(node);
+             }
+         }
+         return NodeHandle();
+    }
+
     /**
      * This is signaled when network activity should cease.
      * A copy of this is saved in `m_i2p_sam_session`.
@@ -1634,7 +1676,6 @@ private:
     std::thread threadSocketHandler;
     std::thread threadOpenAddedConnections;
     std::thread threadOpenConnections;
-    std::thread threadMessageHandler;
     std::thread threadI2PAcceptIncoming;
 
     /** flag for deciding to connect to an extra outbound peer,

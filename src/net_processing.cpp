@@ -58,6 +58,7 @@
 #include <util/check.h>
 #include <util/strencodings.h>
 #include <util/time.h>
+#include <util/thread.h>
 #include <util/trace.h>
 #include <validation.h>
 
@@ -82,6 +83,7 @@
 #include <ratio>
 #include <set>
 #include <span>
+#include <thread>
 #include <typeinfo>
 #include <utility>
 
@@ -504,6 +506,8 @@ public:
                     BanMan* banman, ChainstateManager& chainman,
                     CTxMemPool& pool, node::Warnings& warnings, Options opts);
 
+    virtual ~PeerManagerImpl();
+
     /** Overridden from CValidationInterface. */
     void ActiveTipChange(const CBlockIndex& new_tip, bool) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
@@ -519,7 +523,7 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex);
 
     /** Implement NetEventsInterface */
-    void InitializeNode(const CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
+    void InitializeNode(CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
     void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
     bool HasAllDesirableServiceFlags(ServiceFlags services) const override;
     bool ProcessMessages(CNode* pfrom, std::atomic<bool>& interrupt) override
@@ -549,7 +553,13 @@ public:
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
 
+    void Start() override;
+    void Interrupt() override;
+    void Stop() override;
+
 private:
+    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
+
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
 
@@ -1069,6 +1079,8 @@ private:
     void PushAddress(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     void LogBlockHeader(const CBlockIndex& index, const CNode& peer, bool via_compact_block);
+
+    std::thread threadMessageHandler;
 };
 
 const CNodeState* PeerManagerImpl::State(NodeId pnode) const
@@ -1550,7 +1562,7 @@ void PeerManagerImpl::UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_s
     if (state) state->m_last_block_announcement = time_in_seconds;
 }
 
-void PeerManagerImpl::InitializeNode(const CNode& node, ServiceFlags our_services)
+void PeerManagerImpl::InitializeNode(CNode& node, ServiceFlags our_services)
 {
     NodeId nodeid = node.GetId();
     {
@@ -5968,4 +5980,106 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
     } // release cs_main
     MaybeSendFeefilter(*pto, *peer, current_time);
     return true;
+}
+
+
+void PeerManagerImpl::Start()
+{
+    {
+        LOCK(m_connman.mutexMsgProc);
+        m_connman.flagInterruptMsgProc = false;
+        m_connman.fMsgProcWake = false;
+    }
+    threadMessageHandler = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
+}
+
+void PeerManagerImpl::Interrupt()
+{
+    {
+        LOCK(m_connman.mutexMsgProc);
+        m_connman.flagInterruptMsgProc = true;
+    }
+    m_connman.condMsgProc.notify_all();
+}
+
+void PeerManagerImpl::Stop()
+{
+    if (threadMessageHandler.joinable()) {
+        threadMessageHandler.join();
+    }
+}
+
+PeerManagerImpl::~PeerManagerImpl()
+{
+    Interrupt();
+    Stop();
+}
+
+Mutex NetEventsInterface::g_msgproc_mutex;
+
+namespace {
+class PeerSnapshot
+{
+private:
+    std::vector<PeerRef> m_snap;
+public:
+    explicit PeerSnapshot(const auto& peers)
+    {
+        m_snap.reserve(peers.size());
+        for (auto& [id, peer] : peers) {
+            m_snap.push_back(peer);
+        }
+    }
+
+    void shuffle()
+    {
+        std::shuffle(m_snap.begin(), m_snap.end(), FastRandomContext{});
+    }
+
+    auto begin() const { return m_snap.begin(); }
+    auto end() const { return m_snap.end(); }
+
+    ~PeerSnapshot() = default;
+};
+}
+
+void PeerManagerImpl::ThreadMessageHandler()
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+
+    while (!m_connman.flagInterruptMsgProc)
+    {
+        bool fMoreWork = false;
+
+        {
+            // Randomize the order in which we process messages from/to our peers.
+            // This prevents attacks in which an attacker exploits having multiple
+            // consecutive connections in the m_nodes list.
+            auto snap = [&]() {
+                LOCK(m_peer_mutex); return PeerSnapshot{m_peer_map};
+            }();
+            snap.shuffle();
+
+            for (auto& peer : snap) {
+                auto node = m_connman.SlowGetNodeHandle(peer->m_id);
+                if (!node.IsValid()) continue;
+                if (node.Disconnected()) continue;
+
+                // Receive messages
+                bool fMoreNodeWork = ProcessMessages(node.ptr(), m_connman.flagInterruptMsgProc);
+                fMoreWork |= (fMoreNodeWork && !node.PauseSend());
+                if (m_connman.flagInterruptMsgProc) return;
+                // Send messages
+                SendMessages(node.ptr());
+
+                if (m_connman.flagInterruptMsgProc) return;
+            }
+        }
+
+        WAIT_LOCK(m_connman.mutexMsgProc, lock);
+        if (!fMoreWork) {
+            m_connman.condMsgProc.wait_until(lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(100), [this]() EXCLUSIVE_LOCKS_REQUIRED(m_connman.mutexMsgProc) { return m_connman.fMsgProcWake; });
+        }
+        m_connman.fMsgProcWake = false;
+    }
 }
