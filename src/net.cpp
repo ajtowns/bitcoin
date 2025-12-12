@@ -117,7 +117,6 @@ bool fDiscover = true;
 bool fListen = true;
 GlobalMutex g_maplocalhost_mutex;
 std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalhost_mutex);
-std::string strSubVersion;
 
 size_t CSerializedNetMsg::GetMemoryUsage() const noexcept
 {

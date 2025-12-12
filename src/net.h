@@ -170,9 +170,6 @@ CService GetLocalAddress(const CNode& peer);
 extern bool fDiscover;
 extern bool fListen;
 
-/** Subversion as sent to the P2P network in `version` messages */
-extern std::string strSubVersion;
-
 struct LocalServiceInfo {
     int nScore;
     uint16_t nPort;

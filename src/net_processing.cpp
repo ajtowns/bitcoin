@@ -92,6 +92,9 @@ using namespace util::hex_literals;
 TRACEPOINT_SEMAPHORE(net, inbound_message);
 TRACEPOINT_SEMAPHORE(net, misbehaving_connection);
 
+/** Subversion as sent to the P2P network in `version` messages */
+std::string strSubVersion;
+
 /** Headers download timeout.
  *  Timeout = base + per_header * (expected number of headers) */
 static constexpr auto HEADERS_DOWNLOAD_TIMEOUT_BASE = 15min;
