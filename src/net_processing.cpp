@@ -3432,8 +3432,9 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
     LogDebug(BCLog::NET, "received: %s (%u bytes) peer=%d\n", SanitizeString(msg_type), vRecv.size(), pfrom.GetId());
 
-    PeerRef peer = GetPeerRef(pfrom.GetId());
-    if (peer == nullptr) return;
+    PeerRef peerref = GetPeerRef(pfrom.GetId());
+    if (peerref == nullptr) return;
+    auto& peer = peerref;
 
     if (msg_type == NetMsgType::VERSION) {
         if (pfrom.nVersion != 0) {
@@ -5480,8 +5481,11 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
     AssertLockNotHeld(m_tx_download_mutex);
     AssertLockHeld(g_msgproc_mutex);
 
-    PeerRef peer = GetPeerRef(pto->GetId());
-    if (!peer) return false;
+    if (pto == nullptr) return false;
+    PeerRef peerref = GetPeerRef(pto->GetId());
+    if (peerref == nullptr) return false;
+    auto& peer = peerref;
+
     const Consensus::Params& consensusParams = m_chainparams.GetConsensus();
 
     // We must call MaybeDiscourageAndDisconnect first, to ensure that we'll
