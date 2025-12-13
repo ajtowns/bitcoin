@@ -204,6 +204,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   kernel/mempool_removal_reason.cpp
   mapport.cpp
   net.cpp
+  net_connections.cpp
   net_processing.cpp
   netgroup.cpp
   node/abort.cpp
