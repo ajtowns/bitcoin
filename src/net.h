@@ -1053,8 +1053,6 @@ protected:
     ~NetEventsInterface() = default;
 };
 
-namespace { class PeerManagerImpl; } // hack
-
 class CConnman
 {
 public:
