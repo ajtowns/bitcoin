@@ -980,9 +980,9 @@ private:
 
     void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
 
-    void ThreadDNSAddressSeed() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
+    void ThreadDNSAddressSeed() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
 
-    void ThreadOpenConnections(const std::vector<std::string> connect, std::span<const std::string> seed_nodes);
+    void ThreadOpenConnections(const std::vector<std::string> connect, std::span<const std::string> seed_nodes) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
 
     void ThreadOpenAddedConnections();
 
@@ -997,4 +997,10 @@ private:
     int GetExtraFullOutboundCount() const;
     // Count the number of block-relay-only peers we have over our limit.
     int GetExtraBlockRelayCount() const;
+
+    Mutex m_addr_fetches_mutex;
+    std::deque<std::string> m_addr_fetches GUARDED_BY(m_addr_fetches_mutex);
+
+    void AddAddrFetch(const std::string& strDest) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
+    void ProcessAddrFetch() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_connman.m_unused_i2p_sessions_mutex);
 };

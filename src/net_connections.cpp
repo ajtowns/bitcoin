@@ -89,7 +89,7 @@ bool fListen = true;
 GlobalMutex g_maplocalhost_mutex;
 std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalhost_mutex);
 
-void CConnman::AddAddrFetch(const std::string& strDest)
+void PeerManagerImpl::AddAddrFetch(const std::string& strDest)
 {
     LOCK(m_addr_fetches_mutex);
     m_addr_fetches.push_back(strDest);
@@ -462,7 +462,7 @@ void PeerManagerImpl::ThreadDNSAddressSeed()
             // If -proxy is in use, we make an ADDR_FETCH connection to the DNS resolved peer address
             // for the base dns seed domain in chainparams
             if (HaveNameProxy()) {
-                m_connman.AddAddrFetch(seed);
+                AddAddrFetch(seed);
             } else {
                 std::vector<CAddress> vAdd;
                 constexpr ServiceFlags requiredServiceBits{SeedsServiceFlags()};
@@ -489,7 +489,7 @@ void PeerManagerImpl::ThreadDNSAddressSeed()
                     // If the seed does not support a subdomain with our desired service bits,
                     // we make an ADDR_FETCH connection to the DNS resolved peer address for the
                     // base dns seed domain in chainparams
-                    m_connman.AddAddrFetch(seed);
+                    AddAddrFetch(seed);
                 }
             }
             --seeds_right_now;
@@ -510,9 +510,9 @@ void CConnman::DumpAddresses()
              addrman.Size(), Ticks<std::chrono::milliseconds>(SteadyClock::now() - start));
 }
 
-void CConnman::ProcessAddrFetch()
+void PeerManagerImpl::ProcessAddrFetch()
 {
-    AssertLockNotHeld(m_unused_i2p_sessions_mutex);
+    AssertLockNotHeld(m_connman.m_unused_i2p_sessions_mutex);
     std::string strDest;
     {
         LOCK(m_addr_fetches_mutex);
@@ -523,11 +523,11 @@ void CConnman::ProcessAddrFetch()
     }
     // Attempt v2 connection if we support v2 - we'll reconnect with v1 if our
     // peer doesn't support it or immediately disconnects us for another reason.
-    const bool use_v2transport(GetLocalServices() & NODE_P2P_V2);
+    const bool use_v2transport(m_connman.GetLocalServices() & NODE_P2P_V2);
     CAddress addr;
-    CountingSemaphoreGrant<> grant(*semOutbound, /*fTry=*/true);
+    CountingSemaphoreGrant<> grant(*m_connman.semOutbound, /*fTry=*/true);
     if (grant) {
-        OpenNetworkConnection(addr, false, std::move(grant), strDest.c_str(), ConnectionType::ADDR_FETCH, use_v2transport);
+        m_connman.OpenNetworkConnection(addr, false, std::move(grant), strDest.c_str(), ConnectionType::ADDR_FETCH, use_v2transport);
     }
 }
 
@@ -684,7 +684,7 @@ void PeerManagerImpl::ThreadOpenConnections(const std::vector<std::string> conne
         if (add_addr_fetch) {
             add_addr_fetch = false;
             const auto& seed{SpanPopBack(seed_nodes)};
-            m_connman.AddAddrFetch(seed);
+            AddAddrFetch(seed);
 
             if (m_addrman.Size() == 0) {
                 LogInfo("Empty addrman, adding seednode (%s) to addrfetch\n", seed);
@@ -693,7 +693,7 @@ void PeerManagerImpl::ThreadOpenConnections(const std::vector<std::string> conne
             }
         }
 
-        m_connman.ProcessAddrFetch();
+        ProcessAddrFetch();
 
         if (!m_connman.m_interrupt_net->sleep_for(500ms)) {
             return;

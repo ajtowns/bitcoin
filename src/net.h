@@ -1127,7 +1127,7 @@ public:
 
     ~CConnman();
 
-    bool Start(CScheduler& scheduler, const Options& options) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !m_added_nodes_mutex, !m_addr_fetches_mutex, !mutexMsgProc);
+    bool Start(CScheduler& scheduler, const Options& options) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !m_added_nodes_mutex, !mutexMsgProc);
 
     void StopThreads();
     void StopNodes() EXCLUSIVE_LOCKS_REQUIRED(!m_reconnections_mutex);
@@ -1319,8 +1319,6 @@ private:
     bool Bind(const CService& addr, unsigned int flags, NetPermissionFlags permissions);
     bool InitBinds(const Options& options);
 
-    void AddAddrFetch(const std::string& strDest) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
-    void ProcessAddrFetch() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_unused_i2p_sessions_mutex);
     void ThreadI2PAcceptIncoming();
     void AcceptConnection(const ListenSocket& hListenSocket);
 
@@ -1487,8 +1485,6 @@ private:
     bool fAddressesInitialized{false};
     AddrMan& addrman;
     const NetGroupManager& m_netgroupman;
-    std::deque<std::string> m_addr_fetches GUARDED_BY(m_addr_fetches_mutex);
-    Mutex m_addr_fetches_mutex;
 
     // connection string and whether to use v2 p2p
     std::vector<AddedNodeParams> m_added_node_params GUARDED_BY(m_added_nodes_mutex);
