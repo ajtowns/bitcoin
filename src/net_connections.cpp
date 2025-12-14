@@ -380,7 +380,7 @@ void PeerManagerImpl::ThreadDNSAddressSeed()
                 break;
             }
 
-            outbound_connection_count = m_connman.GetFullOutboundConnCount();
+            outbound_connection_count = GetFullOutboundConnCount();
             if (outbound_connection_count >= SEED_OUTBOUND_CONNECTION_THRESHOLD) {
                 LogInfo("P2P peers available. Finished fetching data from seed nodes.\n");
                 break;
@@ -435,7 +435,7 @@ void PeerManagerImpl::ThreadDNSAddressSeed()
                         if (!m_connman.m_interrupt_net->sleep_for(w)) return;
                         to_wait -= w;
 
-                        if (m_connman.GetFullOutboundConnCount() >= SEED_OUTBOUND_CONNECTION_THRESHOLD) {
+                        if (GetFullOutboundConnCount() >= SEED_OUTBOUND_CONNECTION_THRESHOLD) {
                             if (found > 0) {
                                 LogInfo("%d addresses found from DNS seeds\n", found);
                                 LogInfo("P2P peers available. Finished DNS seeding.\n");
@@ -549,12 +549,12 @@ void CConnman::StartExtraBlockRelayPeers()
 }
 
 // Return the number of outbound connections that are full relay (not blocks only)
-int CConnman::GetFullOutboundConnCount() const
+int PeerManagerImpl::GetFullOutboundConnCount() const
 {
     int nRelevant = 0;
     {
-        LOCK(m_nodes_mutex);
-        for (const CNode* pnode : m_nodes) {
+        LOCK(m_connman.m_nodes_mutex);
+        for (const CNode* pnode : m_connman.m_nodes) {
             if (pnode->fSuccessfullyConnected && pnode->IsFullOutboundConn()) ++nRelevant;
         }
     }
@@ -567,32 +567,32 @@ int CConnman::GetFullOutboundConnCount() const
 // Also exclude peers that haven't finished initial connection handshake yet
 // (so that we don't decide we're over our desired connection limit, and then
 // evict some peer that has finished the handshake)
-int CConnman::GetExtraFullOutboundCount() const
+int PeerManagerImpl::GetExtraFullOutboundCount() const
 {
     int full_outbound_peers = 0;
     {
-        LOCK(m_nodes_mutex);
-        for (const CNode* pnode : m_nodes) {
+        LOCK(m_connman.m_nodes_mutex);
+        for (const CNode* pnode : m_connman.m_nodes) {
             if (pnode->fSuccessfullyConnected && !pnode->fDisconnect && pnode->IsFullOutboundConn()) {
                 ++full_outbound_peers;
             }
         }
     }
-    return std::max(full_outbound_peers - m_max_outbound_full_relay, 0);
+    return std::max(full_outbound_peers - m_connman.m_max_outbound_full_relay, 0);
 }
 
-int CConnman::GetExtraBlockRelayCount() const
+int PeerManagerImpl::GetExtraBlockRelayCount() const
 {
     int block_relay_peers = 0;
     {
-        LOCK(m_nodes_mutex);
-        for (const CNode* pnode : m_nodes) {
+        LOCK(m_connman.m_nodes_mutex);
+        for (const CNode* pnode : m_connman.m_nodes) {
             if (pnode->fSuccessfullyConnected && !pnode->fDisconnect && pnode->IsBlockOnlyConn()) {
                 ++block_relay_peers;
             }
         }
     }
-    return std::max(block_relay_peers - m_max_outbound_block_relay, 0);
+    return std::max(block_relay_peers - m_connman.m_max_outbound_block_relay, 0);
 }
 
 std::unordered_set<Network> CConnman::GetReachableEmptyNetworks() const
@@ -1255,14 +1255,14 @@ bool CConnman::AddedNodesContain(const CAddress& addr) const
                            [&](const auto& p) { return p.m_added_node == addr_str || p.m_added_node == addr_port_str; }));
 }
 
-size_t CConnman::GetNodeCount(ConnectionDirection flags) const
+size_t PeerManagerImpl::GetNodeCount(ConnectionDirection flags) const
 {
-    LOCK(m_nodes_mutex);
+    LOCK(m_connman.m_nodes_mutex);
     if (flags == ConnectionDirection::Both) // Shortcut if we want total
-        return m_nodes.size();
+        return m_connman.m_nodes.size();
 
     int nNum = 0;
-    for (const auto& pnode : m_nodes) {
+    for (const auto& pnode : m_connman.m_nodes) {
         if (flags & (pnode->IsInboundConn() ? ConnectionDirection::In : ConnectionDirection::Out)) {
             nNum++;
         }

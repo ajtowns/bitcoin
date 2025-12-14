@@ -73,9 +73,9 @@ static RPCHelpMan getconnectioncount()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     NodeContext& node = EnsureAnyNodeContext(request.context);
-    const CConnman& connman = EnsureConnman(node);
+    const PeerManager& peerman = EnsurePeerman(node);
 
-    return connman.GetNodeCount(ConnectionDirection::Both);
+    return peerman.GetNodeCount(ConnectionDirection::Both);
 },
     };
 }
@@ -705,9 +705,11 @@ static RPCHelpMan getnetworkinfo()
     }
     if (node.connman) {
         obj.pushKV("networkactive", node.connman->GetNetworkActive());
-        obj.pushKV("connections", node.connman->GetNodeCount(ConnectionDirection::Both));
-        obj.pushKV("connections_in", node.connman->GetNodeCount(ConnectionDirection::In));
-        obj.pushKV("connections_out", node.connman->GetNodeCount(ConnectionDirection::Out));
+    }
+    if (node.peerman) {
+        obj.pushKV("connections", node.peerman->GetNodeCount(ConnectionDirection::Both));
+        obj.pushKV("connections_in", node.peerman->GetNodeCount(ConnectionDirection::In));
+        obj.pushKV("connections_out", node.peerman->GetNodeCount(ConnectionDirection::Out));
     }
     obj.pushKV("networks",      GetNetworksInfo());
     if (node.mempool) {

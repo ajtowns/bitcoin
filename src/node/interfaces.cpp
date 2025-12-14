@@ -187,7 +187,7 @@ public:
     bool getProxy(Network net, Proxy& proxy_info) override { return GetProxy(net, proxy_info); }
     size_t getNodeCount(ConnectionDirection flags) override
     {
-        return m_context->connman ? m_context->connman->GetNodeCount(flags) : 0;
+        return m_context->peerman ? m_context->peerman->GetNodeCount(flags) : 0;
     }
     bool getNodesStats(NodesStats& stats) override
     {

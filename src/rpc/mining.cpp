@@ -20,6 +20,7 @@
 #include <interfaces/mining.h>
 #include <key_io.h>
 #include <net.h>
+#include <net_processing.h>
 #include <node/context.h>
 #include <node/miner.h>
 #include <node/warnings.h>
@@ -763,8 +764,8 @@ static RPCHelpMan getblocktemplate()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
 
     if (!miner.isTestChain()) {
-        const CConnman& connman = EnsureConnman(node);
-        if (connman.GetNodeCount(ConnectionDirection::Both) == 0) {
+        const PeerManager& peerman = EnsurePeerman(node);
+        if (peerman.GetNodeCount(ConnectionDirection::Both) == 0) {
             throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, CLIENT_NAME " is not connected!");
         }
 

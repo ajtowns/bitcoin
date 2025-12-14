@@ -4262,7 +4262,7 @@ void PeerManagerImpl::EvictExtraOutboundPeers(std::chrono::seconds now)
     // The youngest block-relay-only peer would be the extra peer we connected
     // to temporarily in order to sync our tip; see net.cpp.
     // Note that we use higher nodeid as a measure for most recent connection.
-    if (m_connman.GetExtraBlockRelayCount() > 0) {
+    if (GetExtraBlockRelayCount() > 0) {
         std::pair<NodeId, std::chrono::seconds> youngest_peer{-1, 0}, next_youngest_peer{-1, 0};
 
         m_connman.ForEachNode([&](CNode* pnode) {
@@ -4302,7 +4302,7 @@ void PeerManagerImpl::EvictExtraOutboundPeers(std::chrono::seconds now)
     }
 
     // Check whether we have too many outbound-full-relay peers
-    if (m_connman.GetExtraFullOutboundCount() > 0) {
+    if (GetExtraFullOutboundCount() > 0) {
         // If we have more outbound-full-relay peers than we target, disconnect one.
         // Pick the outbound-full-relay peer that least recently announced
         // us a new block, with ties broken by choosing the more recent

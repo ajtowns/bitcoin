@@ -146,9 +146,6 @@ FUZZ_TARGET(connman, .init = initialize_connman)
                 (void)connman.GetDeterministicRandomizer(fuzzed_data_provider.ConsumeIntegral<uint64_t>());
             },
             [&] {
-                (void)connman.GetNodeCount(fuzzed_data_provider.PickValueInArray({ConnectionDirection::None, ConnectionDirection::In, ConnectionDirection::Out, ConnectionDirection::Both}));
-            },
-            [&] {
                 (void)connman.OutboundTargetReached(fuzzed_data_provider.ConsumeBool());
             },
             [&] {
@@ -214,7 +211,6 @@ FUZZ_TARGET(connman, .init = initialize_connman)
             });
     }
     (void)connman.GetAddedNodeInfo(fuzzed_data_provider.ConsumeBool());
-    (void)connman.GetExtraFullOutboundCount();
     (void)connman.GetLocalServices();
     assert(connman.GetMaxOutboundTarget() == max_outbound_limit);
     (void)connman.GetMaxOutboundTimeframe();

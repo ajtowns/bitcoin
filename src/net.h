@@ -1229,18 +1229,6 @@ public:
 
     void StartExtraBlockRelayPeers();
 
-    // Count the number of full-relay peer we have.
-    int GetFullOutboundConnCount() const;
-    // Return the number of outbound peers we have in excess of our target (eg,
-    // if we previously called SetTryNewOutboundPeer(true), and have since set
-    // to false, we may have extra peers that we wish to disconnect). This may
-    // return a value less than (num_outbound_connections - num_outbound_slots)
-    // in cases where some outbound connections are not yet fully connected, or
-    // not yet fully disconnected.
-    int GetExtraFullOutboundCount() const;
-    // Count the number of block-relay-only peers we have over our limit.
-    int GetExtraBlockRelayCount() const;
-
     bool AddNode(const AddedNodeParams& add) EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex);
     bool RemoveAddedNode(std::string_view node) EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex);
     bool AddedNodesContain(const CAddress& addr) const EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex);
@@ -1261,7 +1249,6 @@ public:
      */
     bool AddConnection(const std::string& address, ConnectionType conn_type, bool use_v2transport) EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
 
-    size_t GetNodeCount(ConnectionDirection) const;
     std::map<CNetAddr, LocalServiceInfo> getNetLocalAddresses() const;
     uint32_t GetMappedAS(const CNetAddr& addr) const;
     void GetNodeStats(std::vector<CNodeStats>& vstats) const;

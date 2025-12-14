@@ -428,6 +428,7 @@ public:
     void CheckForStaleTipAndEvictPeers() override;
     util::Expected<void, std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    size_t GetNodeCount(ConnectionDirection) const override;
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     std::vector<node::TxOrphanage::OrphanInfo> GetOrphanTransactions() override EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
     PeerManagerInfo GetInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -984,4 +985,16 @@ private:
     void ThreadOpenConnections(const std::vector<std::string> connect, std::span<const std::string> seed_nodes);
 
     void ThreadOpenAddedConnections();
+
+    // Count the number of full-relay peer we have.
+    int GetFullOutboundConnCount() const;
+    // Return the number of outbound peers we have in excess of our target (eg,
+    // if we previously called SetTryNewOutboundPeer(true), and have since set
+    // to false, we may have extra peers that we wish to disconnect). This may
+    // return a value less than (num_outbound_connections - num_outbound_slots)
+    // in cases where some outbound connections are not yet fully connected, or
+    // not yet fully disconnected.
+    int GetExtraFullOutboundCount() const;
+    // Count the number of block-relay-only peers we have over our limit.
+    int GetExtraBlockRelayCount() const;
 };
