@@ -446,13 +446,11 @@ public:
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
 
-    void Start() override;
+    void Start(CScheduler& scheduler, const CConnman::Options& connOptions) override;
     void Interrupt() override;
     void Stop() override;
 
 private:
-    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
-
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
 
@@ -974,4 +972,15 @@ private:
     void LogBlockHeader(const CBlockIndex& index, const CNode& peer, bool via_compact_block);
 
     std::thread threadMessageHandler;
+    std::thread threadDNSAddressSeed;
+    std::thread threadOpenConnections;
+    std::thread threadOpenAddedConnections;
+
+    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
+
+    void ThreadDNSAddressSeed() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
+
+    void ThreadOpenConnections(const std::vector<std::string> connect, std::span<const std::string> seed_nodes);
+
+    void ThreadOpenAddedConnections();
 };

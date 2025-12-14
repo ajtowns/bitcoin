@@ -2181,12 +2181,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
                                                                 i2p_sam, m_interrupt_net);
     }
 
-    // Randomize the order in which we may query seednode to potentially prevent connecting to the same one every restart (and signal that we have restarted)
-    std::vector<std::string> seed_nodes = connOptions.vSeedNodes;
-    if (!seed_nodes.empty()) {
-        std::shuffle(seed_nodes.begin(), seed_nodes.end(), FastRandomContext{});
-    }
-
     if (m_use_addrman_outgoing) {
         // Load addresses from anchors.dat
         m_anchors = ReadAnchors(gArgs.GetDataDirNet() / ANCHORS_DATABASE_FILENAME);
@@ -2220,14 +2214,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     // Send and receive from sockets, accept connections
     threadSocketHandler = std::thread(&util::TraceThread, "net", [this] { ThreadSocketHandler(); });
 
-    if (!gArgs.GetBoolArg("-dnsseed", DEFAULT_DNSSEED))
-        LogInfo("DNS seeding disabled\n");
-    else
-        threadDNSAddressSeed = std::thread(&util::TraceThread, "dnsseed", [this] { ThreadDNSAddressSeed(); });
-
-    // Initiate manual connections
-    threadOpenAddedConnections = std::thread(&util::TraceThread, "addcon", [this] { ThreadOpenAddedConnections(); });
-
     if (connOptions.m_use_addrman_outgoing && !connOptions.m_specified_outgoing.empty()) {
         if (m_client_interface) {
             m_client_interface->ThreadSafeMessageBox(
@@ -2235,11 +2221,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
                 "", CClientUIInterface::MSG_ERROR);
         }
         return false;
-    }
-    if (connOptions.m_use_addrman_outgoing || !connOptions.m_specified_outgoing.empty()) {
-        threadOpenConnections = std::thread(
-            &util::TraceThread, "opencon",
-            [this, connect = connOptions.m_specified_outgoing, seed_nodes = std::move(seed_nodes)] { ThreadOpenConnections(connect, seed_nodes); });
     }
 
     if (m_i2p_sam_session) {
@@ -2297,14 +2278,9 @@ void CConnman::StopThreads()
     if (threadI2PAcceptIncoming.joinable()) {
         threadI2PAcceptIncoming.join();
     }
-    if (threadOpenConnections.joinable())
-        threadOpenConnections.join();
-    if (threadOpenAddedConnections.joinable())
-        threadOpenAddedConnections.join();
-    if (threadDNSAddressSeed.joinable())
-        threadDNSAddressSeed.join();
-    if (threadSocketHandler.joinable())
+    if (threadSocketHandler.joinable()) {
         threadSocketHandler.join();
+    }
 }
 
 void CConnman::StopNodes()

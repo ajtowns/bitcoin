@@ -1338,10 +1338,8 @@ private:
     bool Bind(const CService& addr, unsigned int flags, NetPermissionFlags permissions);
     bool InitBinds(const Options& options);
 
-    void ThreadOpenAddedConnections() EXCLUSIVE_LOCKS_REQUIRED(!m_added_nodes_mutex, !m_unused_i2p_sessions_mutex, !m_reconnections_mutex);
     void AddAddrFetch(const std::string& strDest) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex);
     void ProcessAddrFetch() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_unused_i2p_sessions_mutex);
-    void ThreadOpenConnections(std::vector<std::string> connect, std::span<const std::string> seed_nodes) EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_added_nodes_mutex, !m_nodes_mutex, !m_unused_i2p_sessions_mutex, !m_reconnections_mutex);
     void ThreadI2PAcceptIncoming();
     void AcceptConnection(const ListenSocket& hListenSocket);
 
@@ -1391,7 +1389,6 @@ private:
     void SocketHandlerListening(const Sock::EventsPerSock& events_per_sock);
 
     void ThreadSocketHandler() EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !mutexMsgProc, !m_nodes_mutex, !m_reconnections_mutex);
-    void ThreadDNSAddressSeed() EXCLUSIVE_LOCKS_REQUIRED(!m_addr_fetches_mutex, !m_nodes_mutex);
 
     uint64_t CalculateKeyedNetGroup(const CNetAddr& ad) const;
 
@@ -1667,10 +1664,7 @@ private:
      */
     std::unique_ptr<i2p::sam::Session> m_i2p_sam_session;
 
-    std::thread threadDNSAddressSeed;
     std::thread threadSocketHandler;
-    std::thread threadOpenAddedConnections;
-    std::thread threadOpenConnections;
     std::thread threadI2PAcceptIncoming;
 
     /** flag for deciding to connect to an extra outbound peer,

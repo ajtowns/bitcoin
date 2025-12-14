@@ -167,7 +167,7 @@ public:
     */
     virtual ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const = 0;
 
-    virtual void Start() = 0;
+    virtual void Start(CScheduler& scheduler, const CConnman::Options& connOptions) = 0;
     virtual void Interrupt() = 0;
     virtual void Stop() = 0;
 };

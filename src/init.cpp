@@ -2214,7 +2214,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }, DUMP_BANS_INTERVAL);
 
     if (node.peerman) node.peerman->StartScheduledTasks(scheduler);
-    if (node.peerman) node.peerman->Start();
+    if (node.peerman) node.peerman->Start(scheduler, connOptions);
 
 #if HAVE_SYSTEM
     StartupNotify(args);

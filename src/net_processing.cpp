@@ -13,6 +13,7 @@
 #include <blockfilter.h>
 #include <chain.h>
 #include <chainparams.h>
+#include <common/args.h>
 #include <common/bloom.h>
 #include <consensus/amount.h>
 #include <consensus/params.h>
@@ -5095,14 +5096,40 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
 }
 
 
-void PeerManagerImpl::Start()
+void PeerManagerImpl::Start(CScheduler& scheduler, const CConnman::Options& connOptions)
 {
     {
         LOCK(m_connman.mutexMsgProc);
         m_connman.flagInterruptMsgProc = false;
         m_connman.fMsgProcWake = false;
     }
+
+    // Start threads
+
+    // Message handler
     threadMessageHandler = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
+
+    // DNS seeding
+    if (!gArgs.GetBoolArg("-dnsseed", DEFAULT_DNSSEED)) {
+        LogInfo("DNS seeding disabled\n");
+    } else {
+        threadDNSAddressSeed = std::thread(&util::TraceThread, "dnsseed", [this] { ThreadDNSAddressSeed(); });
+    }
+
+    // Initiate manual connections
+    threadOpenAddedConnections = std::thread(&util::TraceThread, "addcon", [this] { ThreadOpenAddedConnections(); });
+
+    // Automatically connect to peers
+    if (connOptions.m_use_addrman_outgoing || !connOptions.m_specified_outgoing.empty()) {
+        // Randomize the order in which we may query seednode to potentially prevent connecting to the same one every restart (and signal that we have restarted)
+        std::vector<std::string> seed_nodes = connOptions.vSeedNodes;
+        if (!seed_nodes.empty()) {
+            std::shuffle(seed_nodes.begin(), seed_nodes.end(), FastRandomContext{});
+        }
+        threadOpenConnections = std::thread(
+            &util::TraceThread, "opencon",
+            [this, connect = connOptions.m_specified_outgoing, seed_nodes = std::move(seed_nodes)] { ThreadOpenConnections(connect, seed_nodes); });
+    }
 }
 
 void PeerManagerImpl::Interrupt()
@@ -5116,6 +5143,15 @@ void PeerManagerImpl::Interrupt()
 
 void PeerManagerImpl::Stop()
 {
+    if (threadOpenConnections.joinable()) {
+        threadOpenConnections.join();
+    }
+    if (threadOpenAddedConnections.joinable()) {
+        threadOpenAddedConnections.join();
+    }
+    if (threadDNSAddressSeed.joinable()) {
+        threadDNSAddressSeed.join();
+    }
     if (threadMessageHandler.joinable()) {
         threadMessageHandler.join();
     }
