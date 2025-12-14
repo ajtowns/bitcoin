@@ -652,6 +652,10 @@ static RPCHelpMan getnetworkinfo()
                         {RPCResult::Type::NUM, "connections_in", "the number of inbound connections"},
                         {RPCResult::Type::NUM, "connections_out", "the number of outbound connections"},
                         {RPCResult::Type::BOOL, "networkactive", "whether p2p networking is enabled"},
+                        {RPCResult::Type::NUM, "inbound_inv_size", "number of queued txs to announce to inbounds"},
+                        {RPCResult::Type::NUM, "outbound_inv_size", "number of queued txs to announce to outbounds"},
+                        {RPCResult::Type::NUM, "inbound_bucket", "token bucket value for txs to announce to inbounds"},
+                        {RPCResult::Type::NUM, "outbound_bucket", "token bucket value for txs to announce to outbounds"},
                         {RPCResult::Type::ARR, "networks", "information per network",
                         {
                             {RPCResult::Type::OBJ, "", "",
@@ -705,6 +709,10 @@ static RPCHelpMan getnetworkinfo()
         auto peerman_info{node.peerman->GetInfo()};
         obj.pushKV("localrelay", !peerman_info.ignores_incoming_txs);
         obj.pushKV("timeoffset", Ticks<std::chrono::seconds>(peerman_info.median_outbound_time_offset));
+        obj.pushKV("inbound_inv_size", peerman_info.inbound_inv_size);
+        obj.pushKV("outbound_inv_size", peerman_info.outbound_inv_size);
+        obj.pushKV("inbound_bucket", peerman_info.inbound_bucket);
+        obj.pushKV("outbound_bucket", peerman_info.outbound_bucket);
     }
     if (node.connman) {
         obj.pushKV("networkactive", node.connman->GetNetworkActive());

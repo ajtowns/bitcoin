@@ -69,6 +69,10 @@ struct CNodeStateStats {
 struct PeerManagerInfo {
     std::chrono::seconds median_outbound_time_offset{0s};
     bool ignores_incoming_txs{false};
+    size_t inbound_inv_size{0};
+    size_t outbound_inv_size{0};
+    double inbound_bucket{0};
+    double outbound_bucket{0};
 };
 
 class PeerManager : public CValidationInterface, public NetEventsInterface
