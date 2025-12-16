@@ -2248,17 +2248,21 @@ static std::vector<Wtxid> BumpInvVecForProcessing(std::vector<Wtxid>& vec, size_
     std::vector<Wtxid> to_process;
 
     if (n > 0 && !vec.empty()) {
-        auto itervec = mempool.SortMiningScoreWithToplogy(vec);
+        auto itervec = mempool.SortMiningScoreWithToplogy(vec, n);
         vec.clear();
 
         to_process.reserve(std::min(n, itervec.size()));
 
-        for (size_t i = 0; i < itervec.size(); ++i) {
-            if (i < n) {
-                to_process.push_back(itervec[i]->GetTx().GetWitnessHash());
-            } else {
-                vec.push_back(itervec[i]->GetTx().GetWitnessHash());
-            }
+        // process things at the end
+        size_t i = itervec.size();
+        while (i > 0 && n > 0) {
+            --i;
+            --n;
+            to_process.push_back(itervec[i]->GetTx().GetWitnessHash());
+        }
+        // save the heap from the front
+        for (size_t j = 0; j < i; ++j) {
+            vec.push_back(itervec[j]->GetTx().GetWitnessHash());
         }
         if (vec.empty()) {
             std::vector<Wtxid>{}.swap(vec); // free vec

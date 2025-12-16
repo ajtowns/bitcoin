@@ -536,16 +536,23 @@ void CTxMemPool::check(const CCoinsViewCache& active_coins_tip, int64_t spendhei
     assert(innerUsage == cachedInnerUsage);
 }
 
-std::vector<CTxMemPool::txiter> CTxMemPool::SortMiningScoreWithToplogy(std::span<const Wtxid> wtxids) const
+std::vector<CTxMemPool::txiter> CTxMemPool::SortMiningScoreWithToplogy(std::span<const Wtxid> wtxids, size_t n) const
 {
+    auto cmp = [&](const auto& a, const auto& b) EXCLUSIVE_LOCKS_REQUIRED(cs) noexcept { return m_txgraph->CompareMainOrder(*a, *b) > 0; };
+
     std::vector<txiter> res;
     res.reserve(wtxids.size());
     for (auto& wtxid : wtxids) {
         if (auto i{GetIter(wtxid)}; i.has_value()) {
             res.push_back(i.value());
+            std::push_heap(res.begin(), res.end(), cmp);
         }
     }
-    std::sort(res.begin(), res.end(), [&](const auto& a, const auto& b) EXCLUSIVE_LOCKS_REQUIRED(cs) noexcept { return m_txgraph->CompareMainOrder(*a, *b) < 0; });
+    auto end = res.end();
+    while (n > 0 && res.begin() != end) {
+        std::pop_heap(res.begin(), end, cmp);
+        --end;
+    }
     return res;
 }
 
