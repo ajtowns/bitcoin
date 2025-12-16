@@ -2279,18 +2279,20 @@ void PeerManagerImpl::CatchupRelayTransactions(NodeClock::time_point now)
     LOCK(m_inv_to_send_mutex);
     m_inbound_inv_bucket.increment(now);
     m_outbound_inv_bucket.increment(now);
-    bool go = (!m_inbound_inventory.empty() && m_inbound_inv_bucket.available() >= INVENTORY_BROADCAST_TARGET);
-    go = go || (!m_outbound_inventory.empty() && m_outbound_inv_bucket.available() >= INVENTORY_BROADCAST_TARGET);
-    if (!go) return;
+    size_t in_avail = m_inbound_inventory.empty() ? 0 : m_inbound_inv_bucket.available();
+    if (in_avail < 50) in_avail = 0;
+    size_t out_avail = m_outbound_inventory.empty() ? 0 : m_outbound_inv_bucket.available();
+    if (out_avail < 50) out_avail = 0;
+    if (in_avail == 0 && out_avail == 0) return;
 
     {
         LOCK(m_mempool.cs);
-        for_inbound = BumpInvVecForProcessing(m_inbound_inventory, m_inbound_inv_bucket.available(), m_mempool);
+        for_inbound = BumpInvVecForProcessing(m_inbound_inventory, in_avail, m_mempool);
         m_inbound_inv_bucket.decrement(for_inbound.size());
-        for_outbound = BumpInvVecForProcessing(m_outbound_inventory, m_outbound_inv_bucket.available(), m_mempool);
+        for_outbound = BumpInvVecForProcessing(m_outbound_inventory, out_avail, m_mempool);
         m_outbound_inv_bucket.decrement(for_outbound.size());
     }
-    {
+    if (!for_inbound.empty() || !for_outbound.empty()) {
         LOCK(m_peer_mutex);
         for (auto& it : m_peer_map) {
             Peer& peer = *it.second;

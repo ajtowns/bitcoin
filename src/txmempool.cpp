@@ -545,9 +545,9 @@ std::vector<CTxMemPool::txiter> CTxMemPool::SortMiningScoreWithToplogy(std::span
     for (auto& wtxid : wtxids) {
         if (auto i{GetIter(wtxid)}; i.has_value()) {
             res.push_back(i.value());
-            std::push_heap(res.begin(), res.end(), cmp);
         }
     }
+    std::make_heap(res.begin(), res.end(), cmp);
     auto end = res.end();
     while (n > 0 && res.begin() != end) {
         std::pop_heap(res.begin(), end, cmp);
