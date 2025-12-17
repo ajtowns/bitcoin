@@ -11,17 +11,6 @@
 
 #if defined(ENABLE_CHACHA20_VEC)
 
-#if defined(CHACHA20_VEC_DISABLE_STATES_16) && \
-    defined(CHACHA20_VEC_DISABLE_STATES_8) && \
-    defined(CHACHA20_VEC_DISABLE_STATES_6) && \
-    defined(CHACHA20_VEC_DISABLE_STATES_4) && \
-    defined(CHACHA20_VEC_DISABLE_STATES_2)
-#define CHACHA20_VEC_ALL_MULTI_STATES_DISABLED
-#endif
-
-
-#if !defined(CHACHA20_VEC_ALL_MULTI_STATES_DISABLED)
-
 #if defined(__has_attribute)
 #  if __has_attribute(always_inline)
 #    define ALWAYS_INLINE __attribute__ ((always_inline)) inline
@@ -31,7 +20,6 @@
 #if !defined(ALWAYS_INLINE)
 #  define ALWAYS_INLINE inline
 #endif
-
 
 namespace {
 
@@ -294,10 +282,10 @@ public:
     }
 };
 
-template <size_t STATES>
+template <int STATES>
 ALWAYS_INLINE void multi_block_crypt(std::span<const std::byte> in_bytes, std::span<std::byte> out_bytes, const vec256& state0, const vec256& state1, const vec256& state2)
 {
-    static_assert(STATES >= 2 && STATES % 2 == 0);
+    static_assert(STATES >= 2 && STATES % 2 == 0 && STATES < 10000);
     return Vectorize<STATES/2>::multi_block_crypt(in_bytes, out_bytes, state0, state1, state2);
 }
 
@@ -312,8 +300,18 @@ ALWAYS_INLINE void process_block(std::span<const std::byte>& in_bytes, std::span
     }
 }
 
+template <size_t S=0>
+ALWAYS_INLINE void process_vec_block(std::span<const std::byte>& in_bytes, std::span<std::byte>& out_bytes, const vec256& state0, const vec256& state1, vec256& state2)
+{
+    if constexpr (S < std::tuple_size_v<decltype(CHACHA20_VEC_SIZES)>) {
+        if constexpr (S > 0) static_assert(std::get<S-1>(CHACHA20_VEC_SIZES) > std::get<S>(CHACHA20_VEC_SIZES), "CHACHA20_VEC_SIZES must be strictly decreasing");
+
+        process_block<CHACHA20_VEC_SIZES[S]>(in_bytes, out_bytes, state0, state1, state2);
+        process_vec_block<S+1>(in_bytes, out_bytes, state0, state1, state2);
+    }
+}
+
 } // anonymous namespace
-#endif // CHACHA20_VEC_ALL_MULTI_STATES_DISABLED
 
 #if defined(CHACHA20_NAMESPACE)
 namespace CHACHA20_NAMESPACE {
@@ -321,27 +319,13 @@ namespace CHACHA20_NAMESPACE {
 
 void chacha20_crypt_vectorized(std::span<const std::byte>& in_bytes, std::span<std::byte>& out_bytes, const std::array<uint32_t, 12>& input) noexcept
 {
-#if !defined(CHACHA20_VEC_ALL_MULTI_STATES_DISABLED)
+    if constexpr (std::tuple_size_v<decltype(CHACHA20_VEC_SIZES)> == 0) return;
+
     assert(in_bytes.size() == out_bytes.size());
     const vec256 state0 =  (vec256){input[0], input[1], input[2], input[3], input[0], input[1], input[2], input[3]};
     const vec256 state1 =  (vec256){input[4], input[5], input[6], input[7], input[4], input[5], input[6], input[7]};
     vec256 state2 =  (vec256){input[8], input[9], input[10], input[11], input[8], input[9], input[10], input[11]};
-#if !defined(CHACHA20_VEC_DISABLE_STATES_16)
-    process_block<16>(in_bytes, out_bytes, state0, state1, state2);
-#endif
-#if !defined(CHACHA20_VEC_DISABLE_STATES_8)
-    process_block<8>(in_bytes, out_bytes, state0, state1, state2);
-#endif
-#if !defined(CHACHA20_VEC_DISABLE_STATES_6)
-    process_block<6>(in_bytes, out_bytes, state0, state1, state2);
-#endif
-#if !defined(CHACHA20_VEC_DISABLE_STATES_4)
-    process_block<4>(in_bytes, out_bytes, state0, state1, state2);
-#endif
-#if !defined(CHACHA20_VEC_DISABLE_STATES_2)
-    process_block<2>(in_bytes, out_bytes, state0, state1, state2);
-#endif
-#endif // CHACHA20_VEC_ALL_MULTI_STATES_DISABLED
+    process_vec_block(in_bytes, out_bytes, state0, state1, state2);
 }
 
 #if defined(CHACHA20_NAMESPACE)
