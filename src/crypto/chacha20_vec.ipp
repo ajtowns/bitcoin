@@ -297,7 +297,19 @@ public:
 template <size_t STATES>
 ALWAYS_INLINE void multi_block_crypt(std::span<const std::byte> in_bytes, std::span<std::byte> out_bytes, const vec256& state0, const vec256& state1, const vec256& state2)
 {
+    static_assert(STATES >= 2 && STATES % 2 == 0);
     return Vectorize<STATES/2>::multi_block_crypt(in_bytes, out_bytes, state0, state1, state2);
+}
+
+template <size_t STATES>
+ALWAYS_INLINE void process_block(std::span<const std::byte>& in_bytes, std::span<std::byte>& out_bytes, const vec256& state0, const vec256& state1, vec256& state2)
+{
+    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * STATES) {
+        multi_block_crypt<STATES>(in_bytes, out_bytes, state0, state1, state2);
+        state2 += (vec256){STATES, 0, 0, 0, STATES, 0, 0, 0};
+        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * STATES);
+        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * STATES);
+    }
 }
 
 } // anonymous namespace
@@ -315,44 +327,19 @@ void chacha20_crypt_vectorized(std::span<const std::byte>& in_bytes, std::span<s
     const vec256 state1 =  (vec256){input[4], input[5], input[6], input[7], input[4], input[5], input[6], input[7]};
     vec256 state2 =  (vec256){input[8], input[9], input[10], input[11], input[8], input[9], input[10], input[11]};
 #if !defined(CHACHA20_VEC_DISABLE_STATES_16)
-    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * 16) {
-        multi_block_crypt<16>(in_bytes, out_bytes, state0, state1, state2);
-        state2 += (vec256){16, 0, 0, 0, 16, 0, 0, 0};
-        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 16);
-        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 16);
-    }
+    process_block<16>(in_bytes, out_bytes, state0, state1, state2);
 #endif
 #if !defined(CHACHA20_VEC_DISABLE_STATES_8)
-    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * 8) {
-        multi_block_crypt<8>(in_bytes, out_bytes, state0, state1, state2);
-        state2 += (vec256){8, 0, 0, 0, 8, 0, 0, 0};
-        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 8);
-        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 8);
-    }
+    process_block<8>(in_bytes, out_bytes, state0, state1, state2);
 #endif
 #if !defined(CHACHA20_VEC_DISABLE_STATES_6)
-    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * 6) {
-        multi_block_crypt<6>(in_bytes, out_bytes, state0, state1, state2);
-        state2 += (vec256){6, 0, 0, 0, 6, 0, 0, 0};
-        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 6);
-        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 6);
-    }
+    process_block<6>(in_bytes, out_bytes, state0, state1, state2);
 #endif
 #if !defined(CHACHA20_VEC_DISABLE_STATES_4)
-    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * 4) {
-        multi_block_crypt<4>(in_bytes, out_bytes, state0, state1, state2);
-        state2 += (vec256){4, 0, 0, 0, 4, 0, 0, 0};
-        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 4);
-        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 4);
-    }
+    process_block<4>(in_bytes, out_bytes, state0, state1, state2);
 #endif
 #if !defined(CHACHA20_VEC_DISABLE_STATES_2)
-    while(in_bytes.size() >= CHACHA20_VEC_BLOCKLEN * 2) {
-        multi_block_crypt<2>(in_bytes, out_bytes, state0, state1, state2);
-        state2 += (vec256){2, 0, 0, 0, 2, 0, 0, 0};
-        in_bytes = in_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 2);
-        out_bytes = out_bytes.subspan(CHACHA20_VEC_BLOCKLEN * 2);
-    }
+    process_block<2>(in_bytes, out_bytes, state0, state1, state2);
 #endif
 #endif // CHACHA20_VEC_ALL_MULTI_STATES_DISABLED
 }
