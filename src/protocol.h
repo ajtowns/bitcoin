@@ -329,6 +329,7 @@ using MsgByShortId = std::array<uint8_t, 255>;
 MsgByShortId GetMsgById(std::span<const std::pair<uint8_t, std::string>> inp);
 
 extern const MsgByShortId DEFAULT_MSG_BY_ID;
+extern const MsgByShortId CRAZY_MSG_BY_ID;
 
 inline void GetData(SerializedNetMsgType& msg_type, std::span<const uint8_t> msg_by_id)
 {
