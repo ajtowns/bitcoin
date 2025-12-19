@@ -733,6 +733,15 @@ private:
     {
         PushMessage(node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
     }
+    template <typename... Args>
+    void MakeAndPushFeature(CNode& node, std::string_view feature_id, Args&&... args) const
+    {
+        if (!Assume(feature_id.size() >= 4 && feature_id.size() <= 80)) return;
+        std::vector<unsigned char> feature_data;
+        VectorWriter{feature_data, 0, std::forward<Args>(args)...};
+        if (!Assume(feature_data.size() <= 512)) return;
+        MakeAndPushMessage(node, NetMsgType::FEATURE, feature_id, std::move(feature_data));
+    }
 
     /** Send a version message to a peer */
     void PushNodeVersion(CNode& pnode, const Peer& peer);
@@ -3556,8 +3565,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         if (transport_info.transport_type == TransportProtocolType::V2) {
             peer->m_is_v2_transport = true;
 
-            if (greatest_common_version >= 70016) {
-                MakeAndPushMessage(pfrom, NetMsgType::ACCEPT324ID);
+            if (greatest_common_version >= 70017) {
+                MakeAndPushFeature(pfrom, NetMsgFeature::SET324ID);
             }
         }
 
@@ -3877,15 +3886,32 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         return;
     }
 
-    if (msg_type == NetMsgType::ACCEPT324ID) {
+    if (msg_type == NetMsgType::FEATURE) {
         if (pfrom.fSuccessfullyConnected) {
-            LogDebug(BCLog::NET, "accept324id received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
+            LogDebug(BCLog::NET, "feature received after verack, %s\n", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
         }
-        if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
-        pfrom.m_bip324_crazy_mode = 1;
-        return;
+
+        std::string feature_id;
+        std::vector<unsigned char> feature_data;
+        try {
+            vRecv >> LIMITED_STRING(feature_id, MAX_FEATUREID_LENGTH);
+            vRecv >> feature_data;
+        } catch (const std::exception&) {
+            feature_id = "";
+        }
+        if (feature_id.size() < 4 || feature_data.size() > MAX_FEATUREDATA_LENGTH || !vRecv.empty()) {
+            LogDebug(BCLog::NET, "invalid feature payload, %s", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+        }
+
+        if (feature_id == NetMsgFeature::SET324ID) {
+            if (!peer->m_is_v2_transport) return; // ignore msg from non-v2 peers
+            pfrom.m_bip324_crazy_mode = 1;
+            return;
+        }
+        LogDebug(BCLog::NET, "Unknown feature advertised: %s", SanitizeString(feature_id));
     }
 
     if (!pfrom.fSuccessfullyConnected) {

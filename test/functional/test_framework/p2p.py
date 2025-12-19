@@ -32,7 +32,6 @@ import threading
 from test_framework.messages import (
     CBlockHeader,
     MAX_HEADERS_RESULTS,
-    msg_accept324id,
     msg_addr,
     msg_addrv2,
     msg_block,
@@ -42,6 +41,7 @@ from test_framework.messages import (
     msg_cfheaders,
     msg_cfilter,
     msg_cmpctblock,
+    msg_feature,
     msg_feefilter,
     msg_filteradd,
     msg_filterclear,
@@ -113,7 +113,6 @@ OVERLOADED_PEER_TX_DELAY = 2
 GETDATA_TX_INTERVAL = 60
 
 MESSAGEMAP = {
-    b"accept324id": msg_accept324id,
     b"addr": msg_addr,
     b"addrv2": msg_addrv2,
     b"block": msg_block,
@@ -122,6 +121,7 @@ MESSAGEMAP = {
     b"cfheaders": msg_cfheaders,
     b"cfilter": msg_cfilter,
     b"cmpctblock": msg_cmpctblock,
+    b"feature": msg_feature,
     b"feefilter": msg_feefilter,
     b"filteradd": msg_filteradd,
     b"filterclear": msg_filterclear,
@@ -534,7 +534,6 @@ class P2PInterface(P2PConnection):
     def on_close(self):
         pass
 
-    def on_accept324id(self, message): pass
     def on_addr(self, message): pass
     def on_addrv2(self, message): pass
     def on_block(self, message): pass
@@ -543,6 +542,7 @@ class P2PInterface(P2PConnection):
     def on_cfheaders(self, message): pass
     def on_cfilter(self, message): pass
     def on_cmpctblock(self, message): pass
+    def on_feature(self, message): pass
     def on_feefilter(self, message): pass
     def on_filteradd(self, message): pass
     def on_filterclear(self, message): pass

@@ -78,6 +78,7 @@ const MsgByShortId DEFAULT_MSG_BY_ID = LiteralGetMsgById({
     {26, NetMsgType::GETCFCHECKPT},
     {27, NetMsgType::CFCHECKPT},
     {28, NetMsgType::ADDRV2},
+    {129, NetMsgType::FEATURE},
 });
 
 const MsgByShortId CRAZY_MSG_BY_ID = LiteralGetMsgById({
@@ -116,7 +117,7 @@ const MsgByShortId CRAZY_MSG_BY_ID = LiteralGetMsgById({
     {162, NetMsgType::CFCHECKPT},
     {163, NetMsgType::WTXIDRELAY},
     {164, NetMsgType::SENDTXRCNCL},
-    {165, NetMsgType::ACCEPT324ID},
+    {165, NetMsgType::FEATURE},
     {166, NetMsgType::SET324ID},
 });
 

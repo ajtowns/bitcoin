@@ -1949,9 +1949,9 @@ class BIP324IDDef:
     def __eq__(self, other):
         return isinstance(other, BIP324IDDef) and self.id == other.id and self.msgtype == other.msgtype
 
-class msg_accept324id:
+class msg_feature:
     __slots__ = ()
-    msgtype = b"accept324id"
+    msgtype = b"feature"
 
     def __init__(self):
         pass
@@ -1963,7 +1963,7 @@ class msg_accept324id:
         return b""
 
     def __repr__(self):
-        return "msg_accept324id()"
+        return "msg_feature()"
 
 class msg_set324id:
     __slots__ = ("vec", )
