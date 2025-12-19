@@ -723,6 +723,13 @@ public:
 
     const NetPermissionFlags m_permission_flags;
 
+    /** Whether we have sent the SET324ALIAS message to use custom 1-byte message types.
+     * Thread safety: this is only set to true on receipt of an appropriate FEATURE message
+     * between VERSION and VERACK, so is safe to access from threads other than msgproc once
+     * fSuccessfullyConnected is observed to be true.
+     */
+    std::atomic<bool> m_set324alias{false};
+
     /**
      * Socket used for communication with the node.
      * May not own a Sock object (after `CloseSocketDisconnect()` or during tests).

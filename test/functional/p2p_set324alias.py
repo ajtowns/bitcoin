@@ -108,6 +108,10 @@ class P2PSet324AliasTest(BitcoinTestFramework):
         self.wait_until(lambda: peer.pong is not None)
         assert_equal(peer.pong.nonce, nonce)
 
+        # bitcoind currently does not have any aliases to define for set324alias
+        assert_equal(peer.set324alias, None)
+        #assert_equal(peer.set324alias.vec, [BIP324Alias(nnn, b"xxxxxx")])
+
 
 if __name__ == "__main__":
     P2PSet324AliasTest(__file__).main()
