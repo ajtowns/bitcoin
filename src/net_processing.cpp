@@ -731,7 +731,11 @@ private:
     void PushMessage(CNode& node, CSerializedNetMsg&& msg) const
     {
         assert(msg.m_type.m_id == 0);
-        BIP324::GetId(msg.m_type, m_bip324_msg_by_id);
+        if (node.m_bip324_crazy_mode == 2) {
+            BIP324::GetId(msg.m_type, m_crazy_msg_by_id);
+        } else {
+            BIP324::GetId(msg.m_type, m_bip324_msg_by_id);
+        }
         m_connman.PushMessage(&node, std::move(msg));
     }
     template <typename... Args>
@@ -815,6 +819,7 @@ private:
     const Options m_opts;
 
     const BIP324::ShortMsgMap m_bip324_msg_by_id;
+    const BIP324::ShortMsgMap m_crazy_msg_by_id;
 
     bool RejectIncomingTxs(const CNode& peer) const;
 
@@ -2041,7 +2046,8 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_txdownloadman(node::TxDownloadOptions{pool, m_rng, opts.deterministic_rng}),
       m_warnings{warnings},
       m_opts{opts},
-      m_bip324_msg_by_id{BIP324::GetMapMsgToId(BIP324::DEFAULT_MSG_BY_ID)}
+      m_bip324_msg_by_id{BIP324::GetMapMsgToId(BIP324::DEFAULT_MSG_BY_ID)},
+      m_crazy_msg_by_id{BIP324::GetMapMsgToId(BIP324::CRAZY_MSG_BY_ID)}
 {
     // While Erlay support is incomplete, it must be enabled explicitly via -txreconciliation.
     // This argument can go away after Erlay support is complete.
@@ -3874,6 +3880,19 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             LogInfo("%s", new_peer_msg());
         }
 
+        if (pfrom.m_bip324_crazy_mode == 1) {
+            std::vector<std::pair<uint8_t, std::string>> ids;
+            for (size_t i = 0; i < BIP324::CRAZY_MSG_BY_ID.size(); ++i) {
+                uint8_t x{BIP324::CRAZY_MSG_BY_ID[i]};
+                if (x < ALL_NET_MESSAGE_TYPES.size()) {
+                    ids.emplace_back(i+1, ALL_NET_MESSAGE_TYPES[x]);
+                }
+            }
+            MakeAndPushMessage(pfrom, NetMsgType::SET324ID, ids);
+            pfrom.m_bip324_crazy_mode = 2; // active
+            LogDebug(BCLog::NET, "set crazy mode for peer=%d", pfrom.GetId());
+        }
+
         if (auto tx_relay = peer.GetTxRelay()) {
             // `TxRelay::m_tx_inventory_to_send` must be empty before the
             // version handshake is completed as
@@ -4015,7 +4034,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (feature_id == NetMsgFeature::SET324ID) {
             if (!peer.m_is_v2_transport) return; // ignore msg from non-v2 peers
-            // we don't send set324id messages yet, so just ignore anyway
+            pfrom.m_bip324_crazy_mode = 1;
             return;
         }
 
@@ -5267,7 +5286,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     CNetMessage& msg{poll_result->first};
     bool fMoreWork = poll_result->second;
 
-    BIP324::GetData(msg.m_type, BIP324::DEFAULT_MSG_BY_ID);
+    BIP324::GetData(msg.m_type, peer.m_v2_shortid_map);
     {
         LOCK(node.cs_vRecv);
         node.AccountForRecvBytes(msg.m_type, msg.m_raw_message_size);
