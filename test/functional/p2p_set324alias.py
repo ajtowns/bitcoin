@@ -111,6 +111,9 @@ class P2PSet324AliasTest(BitcoinTestFramework):
         self.wait_until(lambda: peer.pong is not None)
         assert_equal(peer.pong.nonce, nonce)
 
+        # bitcoind defines one one-byte message type via set324alias
+        assert_equal(peer.set324alias.vec, [BIP324Alias(38, b"set324alias")])
+
 
 if __name__ == "__main__":
     P2PSet324AliasTest(__file__).main()

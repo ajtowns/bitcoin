@@ -7,6 +7,7 @@
 
 #include <bip324.h>
 #include <common/system.h>
+#include <util/check.h>
 
 namespace BIP324 {
 static consteval RecvMsgMap LiteralRecvMsgMap(std::span<const std::pair<uint8_t, std::string_view>> inp)
@@ -110,6 +111,57 @@ SendMsgMap RecvMsgMap::ToSendMsgMap() const
     }
     return r;
 }
+
+// Messages types only sent (at most) once per connection, so not worth a 1-byte message type
+static constexpr std::array OncePerConnMsgType{std::to_array<std::string_view>({
+    NetMsgType::VERSION,
+    NetMsgType::VERACK,
+    NetMsgType::SENDADDRV2,
+    NetMsgType::GETADDR,
+    NetMsgType::SENDHEADERS,
+    NetMsgType::WTXIDRELAY,
+    NetMsgType::SENDTXRCNCL,
+    // NetMsgType::SET324ALIAS, -- should be included, but skipped so the code path is exercised
+})};
+
+static consteval auto GetExtraMessageTypes()
+{
+    constexpr size_t N = std::tuple_size_v<decltype(ALL_NET_MESSAGE_TYPES)>;
+    std::array<std::string_view, N> r{};
+    size_t count = 0;
+    size_t skipped = 0;
+    for (size_t i = 0; i < N; ++i) {
+        auto& v = ALL_NET_MESSAGE_TYPES[i];
+        if (std::ranges::find_if(BIP324Defaults, [&](const auto& el) { return el.second == v; }) == BIP324Defaults.end()) {
+            if (std::ranges::find_if(OncePerConnMsgType, [&](const auto& el) { return el == v; }) != OncePerConnMsgType.end()) {
+                ++skipped;
+            } else {
+                ++count;
+                r[i] = v;
+            }
+        }
+    }
+    if (skipped != OncePerConnMsgType.size()) throw; // Check for overlap between OncePerConnMsgType and BIP324Defaults
+    return std::pair{count, r};
+}
+
+const std::vector<AliasPayloadEntry> SET324ALIAS_PAYLOAD{[] {
+    const auto& [count, extras] = GetExtraMessageTypes();
+    uint8_t m = MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED;
+    std::vector<AliasPayloadEntry> r;
+    r.reserve(count);
+    for (auto e : extras) {
+        if (e.empty()) continue;
+        r.emplace_back(++m, std::string{e});
+    }
+    return r;
+}()};
+
+const RecvMsgMap SET324ALIAS_RECVMSGMAP{[] {
+    RecvMsgMap r{DEFAULT_RECVMSGMAP};
+    r.Update(SET324ALIAS_PAYLOAD);
+    return r;
+}()};
 
 } // namespace BIP324
 
