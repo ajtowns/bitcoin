@@ -816,7 +816,11 @@ private:
     void PushMessage(CNode& node, CSerializedNetMsg&& msg) const
     {
         assert(msg.m_type.m_id == 0);
-        msg.m_type.GetId(m_bip324_sendmsgmap);
+        if (node.m_set324alias) {
+            msg.m_type.GetId(m_set324alias_sendmsgmap);
+        } else {
+            msg.m_type.GetId(m_bip324_sendmsgmap);
+        }
         m_connman.PushMessage(&node, std::move(msg));
     }
     template <typename... Args>
@@ -902,6 +906,7 @@ private:
     const Options m_opts;
 
     const BIP324::SendMsgMap m_bip324_sendmsgmap;
+    const BIP324::SendMsgMap m_set324alias_sendmsgmap;
 
     bool RejectIncomingTxs(const CNode& peer) const;
 
@@ -2162,6 +2167,7 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_warnings{warnings},
       m_opts{opts},
       m_bip324_sendmsgmap{BIP324::DEFAULT_RECVMSGMAP.ToSendMsgMap()},
+      m_set324alias_sendmsgmap{BIP324::SET324ALIAS_RECVMSGMAP.ToSendMsgMap()},
       m_inbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/1.0),
       m_outbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/OUTBOUND_INVENTORY_BUCKET_MULTIPLIER)
 {
@@ -4276,7 +4282,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (feature_id == NetMsgFeature::BIP324ALIAS) {
             if (!peer.m_is_v2_transport) return; // ignore msg from non-v2 peers
-            // we don't send set324alias messages yet, so just ignore anyway
+            if (BIP324::SET324ALIAS_PAYLOAD.size() == 0) return; // nothing to send, so don't
+            if (pfrom.m_set324alias) return; // don't send twice
+            MakeAndPushMessage(pfrom, NetMsgType::SET324ALIAS, BIP324::SET324ALIAS_PAYLOAD);
+            pfrom.m_set324alias = true;
             return;
         }
 

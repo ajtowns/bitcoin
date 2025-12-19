@@ -723,6 +723,8 @@ public:
 
     const NetPermissionFlags m_permission_flags;
 
+    std::atomic<bool> m_set324alias{false};
+
     /**
      * Socket used for communication with the node.
      * May not own a Sock object (after `CloseSocketDisconnect()` or during tests).

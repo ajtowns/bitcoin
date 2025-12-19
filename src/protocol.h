@@ -344,6 +344,9 @@ public:
 extern const RecvMsgMap DEFAULT_RECVMSGMAP;
 inline constexpr unsigned MAX_ONE_BYTE_MSGTYPE_IMPLEMENTED{37};
 
+extern const RecvMsgMap SET324ALIAS_RECVMSGMAP;
+extern const std::vector<AliasPayloadEntry> SET324ALIAS_PAYLOAD;
+
 } // BIP324 namespace
 
 class SerializedNetMsgType
