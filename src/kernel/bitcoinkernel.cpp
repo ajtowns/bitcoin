@@ -227,7 +227,7 @@ btck_Warning cast_btck_warning(kernel::Warning warning)
 }
 
 struct LoggingConnection {
-    std::unique_ptr<std::list<std::function<void(const std::string&)>>::iterator> m_connection;
+    std::unique_ptr<std::list<BCLog::Logger::CallbackFn>::iterator> m_connection;
     void* m_user_data;
     std::function<void(void* user_data)> m_deleter;
 
@@ -247,7 +247,7 @@ struct LoggingConnection {
             throw std::runtime_error("Failed to start logging");
         }
 
-        m_connection = std::make_unique<std::list<std::function<void(const std::string&)>>::iterator>(connection);
+        m_connection = std::make_unique<std::list<BCLog::Logger::CallbackFn>::iterator>(connection);
         m_user_data = user_data;
         m_deleter = user_data_destroy_callback;
 

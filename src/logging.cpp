@@ -81,13 +81,13 @@ bool BCLog::Logger::StartLogging()
         const auto& buflog = m_msgs_before_open.front();
         std::string s{buflog.str};
         FormatLogStrInPlace(s, buflog.category, buflog.level, buflog.source_loc, buflog.threadname, buflog.now, buflog.mocktime);
-        m_msgs_before_open.pop_front();
 
         if (m_print_to_file) FileWriteStr(s, m_fileout);
         if (m_print_to_console) fwrite(s.data(), 1, s.size(), stdout);
         for (const auto& cb : m_print_callbacks) {
-            cb(s);
+            cb(s, buflog.category, buflog.level, buflog.source_loc, buflog.now, buflog.threadname);
         }
+        m_msgs_before_open.pop_front();
     }
     m_cur_buffer_memusage = 0;
     if (m_print_to_console) fflush(stdout);
@@ -455,7 +455,10 @@ void BCLog::Logger::LogPrintStr_(std::string_view str, SourceLocation&& source_l
         return;
     }
 
-    FormatLogStrInPlace(str_prefixed, category, level, source_loc, util::ThreadGetInternalName(), SystemClock::now(), GetMockTime());
+    const auto now = SystemClock::now();
+    std::string threadname = util::ThreadGetInternalName();
+
+    FormatLogStrInPlace(str_prefixed, category, level, source_loc, threadname, now, GetMockTime());
     bool ratelimit{false};
     if (should_ratelimit && m_limiter) {
         auto status{m_limiter->Consume(source_loc, str_prefixed)};
@@ -487,7 +490,7 @@ void BCLog::Logger::LogPrintStr_(std::string_view str, SourceLocation&& source_l
         fflush(stdout);
     }
     for (const auto& cb : m_print_callbacks) {
-        cb(str_prefixed);
+        cb(str_prefixed, category, level, source_loc, now, threadname);
     }
     if (m_print_to_file && !ratelimit) {
         assert(m_fileout != nullptr);

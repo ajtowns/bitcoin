@@ -6,6 +6,7 @@
 #define BITCOIN_TEST_UTIL_LOGGING_H
 
 #include <util/macros.h>
+#include <logging.h>
 
 #include <functional>
 #include <list>
@@ -35,7 +36,7 @@ public:
 private:
     const std::string m_message;
     bool m_found{false};
-    std::list<std::function<void(const std::string&)>>::iterator m_print_connection;
+    std::list<BCLog::Logger::CallbackFn>::iterator m_print_connection;
     MatchFn m_match;
 };
 

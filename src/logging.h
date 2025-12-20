@@ -206,6 +206,9 @@ namespace BCLog {
             Level level;
         };
 
+        using CallbackFn = std::function<void(const std::string&, LogFlags, Level, const SourceLocation&, SystemClock::time_point, std::string_view)>;
+        using SimpleCallbackFn = std::function<void(const std::string&)>;
+
     private:
         /** Log categories bitfield. */
         std::atomic<CategoryMask> m_categories{BCLog::NONE};
@@ -243,7 +246,7 @@ namespace BCLog {
         size_t m_buffer_lines_discarded GUARDED_BY(m_cs){0};
 
         /** Slots that connect to the print signal */
-        std::list<std::function<void(const std::string&)>> m_print_callbacks GUARDED_BY(m_cs) {};
+        std::list<CallbackFn> m_print_callbacks GUARDED_BY(m_cs) {};
 
         //! Manages the rate limiting of each log location.
         std::shared_ptr<LogRateLimiter> m_limiter GUARDED_BY(m_cs);
@@ -290,7 +293,7 @@ namespace BCLog {
         }
 
         /** Connect a slot to the print signal and return the connection */
-        std::list<std::function<void(const std::string&)>>::iterator PushBackCallback(std::function<void(const std::string&)> fun) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
+        std::list<CallbackFn>::iterator PushBackCallback(CallbackFn fun) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
         {
             STDLOCK(m_cs);
             m_any_print_callbacks = true;
@@ -298,8 +301,17 @@ namespace BCLog {
             return --m_print_callbacks.end();
         }
 
+        std::list<CallbackFn>::iterator PushBackCallback(SimpleCallbackFn fun) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
+        {
+            CallbackFn cb = [fun](const std::string& s, LogFlags, Level, SourceLocation, SystemClock::time_point, std::string_view) -> void
+            {
+                fun(s);
+            };
+            return PushBackCallback(cb);
+        }
+
         /** Delete a connection */
-        void DeleteCallback(std::list<std::function<void(const std::string&)>>::iterator it) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
+        void DeleteCallback(std::list<CallbackFn>::iterator it) EXCLUSIVE_LOCKS_REQUIRED(!m_cs)
         {
             STDLOCK(m_cs);
             m_print_callbacks.erase(it);
