@@ -170,7 +170,7 @@ static constexpr auto INBOUND_INVENTORY_BROADCAST_INTERVAL{5s};
 static constexpr auto OUTBOUND_INVENTORY_BROADCAST_INTERVAL{2s};
 /** Maximum rate of inventory items to send per second.
  *  Limits the impact of low-fee transaction floods. */
-static constexpr unsigned int INVENTORY_BROADCAST_PER_SECOND{6};
+static constexpr unsigned int INVENTORY_BROADCAST_PER_SECOND{14};
 /** Target number of tx inventory items to send per transmission. */
 static constexpr unsigned int INVENTORY_BROADCAST_TARGET = INVENTORY_BROADCAST_PER_SECOND * count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL);
 /** Maximum number of inventory items to send per transmission. */
@@ -1095,10 +1095,10 @@ private:
 
     mutable Mutex m_inv_to_send_mutex;
     std::vector<Wtxid> m_inbound_inventory GUARDED_BY(m_inv_to_send_mutex);
-    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL)> m_inbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){INVENTORY_BROADCAST_TARGET};
+    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL)> m_inbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){300};
 
     std::vector<Wtxid> m_outbound_inventory GUARDED_BY(m_inv_to_send_mutex);
-    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(OUTBOUND_INVENTORY_BROADCAST_INTERVAL)> m_outbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){INVENTORY_BROADCAST_TARGET};
+    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(OUTBOUND_INVENTORY_BROADCAST_INTERVAL)> m_outbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){300};
 
     void CatchupRelayTransactions(NodeClock::time_point now) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_inv_to_send_mutex);
 };
@@ -2280,17 +2280,25 @@ void PeerManagerImpl::CatchupRelayTransactions(NodeClock::time_point now)
     m_inbound_inv_bucket.increment(now);
     m_outbound_inv_bucket.increment(now);
     size_t in_avail = m_inbound_inventory.empty() ? 0 : m_inbound_inv_bucket.available();
-    if (in_avail < 50) in_avail = 0;
     size_t out_avail = m_outbound_inventory.empty() ? 0 : m_outbound_inv_bucket.available();
-    if (out_avail < 50) out_avail = 0;
-    if (in_avail == 0 && out_avail == 0) return;
+
+    static_assert(decltype(m_inbound_inv_bucket)::MAX >= INVENTORY_BROADCAST_TARGET);
+    static_assert(decltype(m_outbound_inv_bucket)::MAX >= INVENTORY_BROADCAST_TARGET);
+
+    if (in_avail < INVENTORY_BROADCAST_TARGET && out_avail < INVENTORY_BROADCAST_TARGET) return;
+    if (in_avail < INVENTORY_BROADCAST_TARGET) in_avail = 0;
+    if (out_avail < INVENTORY_BROADCAST_TARGET/2) out_avail = 0;
 
     {
         LOCK(m_mempool.cs);
-        for_inbound = BumpInvVecForProcessing(m_inbound_inventory, in_avail, m_mempool);
-        m_inbound_inv_bucket.decrement(for_inbound.size());
-        for_outbound = BumpInvVecForProcessing(m_outbound_inventory, out_avail, m_mempool);
-        m_outbound_inv_bucket.decrement(for_outbound.size());
+        if (in_avail > 0) {
+            for_inbound = BumpInvVecForProcessing(m_inbound_inventory, in_avail, m_mempool);
+            m_inbound_inv_bucket.decrement(for_inbound.size());
+        }
+        if (out_avail > 0) {
+            for_outbound = BumpInvVecForProcessing(m_outbound_inventory, out_avail, m_mempool);
+            m_outbound_inv_bucket.decrement(for_outbound.size());
+        }
     }
     if (!for_inbound.empty() || !for_outbound.empty()) {
         LOCK(m_peer_mutex);
