@@ -551,6 +551,7 @@ std::vector<CTxMemPool::txiter> CTxMemPool::SortMiningScoreWithToplogy(std::span
             }
         }
 
+        n = std::min(res.size(), n);
         std::partial_sort(res.rbegin(), res.rbegin() + n, res.rend(), cmp);
     }
     return res;
