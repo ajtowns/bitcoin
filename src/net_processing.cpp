@@ -2316,7 +2316,7 @@ LogInfo("AJAJ: out_avail == %s", out_avail);
             // distinguish transactions received during the handshake from the rest
             // in the announcement.
             if (tx_relay->m_next_inv_send_time == 0s) continue;
-            any_inbound_exists = true;
+            if (peer.m_is_inbound) any_inbound_exists = true;
             for (auto& i : (peer.m_is_inbound ? for_inbound: for_outbound)) {
                 tx_relay->m_tx_inventory_to_send.emplace_back(i);
             }
