@@ -2235,12 +2235,16 @@ static std::vector<Wtxid> BumpInvVecForProcessing(std::vector<Wtxid>& vec, size_
     std::vector<Wtxid> to_process;
 
     if (n > 0 && !vec.empty()) {
-        auto itervec = mempool.SortMiningScoreWithToplogy(vec, n);
-        if (n >= vec.size()) {
+        // sort an extra element if possible so we always include a duplicate of any of the
+        // best n elements if there is one
+        auto itervec = mempool.SortMiningScoreWithToplogy(vec, n + 1);
+        if (n >= itervec.size()) {
             vec.clear();
             vec.swap(to_process); // maybe avoid reallocating
+            to_process.reserve(itervec.size());
         } else {
             vec.clear();
+            to_process.reserve(n);
         }
 
         if (!itervec.empty()) {
@@ -2250,21 +2254,20 @@ static std::vector<Wtxid> BumpInvVecForProcessing(std::vector<Wtxid>& vec, size_
                 tosatpervb(mempool.GetMainChunkFeerate(*itervec.back())));
         }
 
-        to_process.reserve(std::min(n, itervec.size()));
-
         // process things at the end
         size_t i = itervec.size();
         while (i > 0 && n > 0) {
             --i;
             --n;
+            if (i > 0 && itervec[i] == itervec[i-1]) continue; // skip duplicates
             to_process.push_back(itervec[i]->GetTx().GetWitnessHash());
         }
-        // save the heap from the front
+        // save the unsorted section as-is
         for (size_t j = 0; j < i; ++j) {
             vec.push_back(itervec[j]->GetTx().GetWitnessHash());
         }
         if (vec.empty()) {
-            std::vector<Wtxid>{}.swap(vec); // free vec
+            std::vector<Wtxid>{}.swap(vec); // free memory associated with vec
         }
     }
     return to_process;
