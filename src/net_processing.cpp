@@ -505,6 +505,44 @@ struct CNodeState {
     int64_t m_last_block_announcement{0};
 };
 
+struct InvToSendBucket
+{
+    std::vector<Wtxid> backlog;
+    util::TokenBucket<NodeClock> size_bucket;
+    util::TokenBucket<NodeClock> count_bucket;
+    InvToSendBucket(double mult) :
+        size_bucket(/*rate=*/20e3*mult, /*value=*/4e6, /*cap=*/18e6, /*debt=*/-50e3),
+        count_bucket(/*rate=*/INVENTORY_BROADCAST_PER_SECOND*mult, /*value=*/INVENTORY_BROADCAST_PER_SECOND*30, /*cap=*/INVENTORY_BROADCAST_PER_SECOND*30)
+    {
+    }
+
+    bool immediate_relay()
+    {
+        return backlog.empty() && count_bucket.value() >= 1 && size_bucket.value() >= 0;
+    }
+
+    size_t avail()
+    {
+        if (backlog.empty() || size_bucket.value() < 0) {
+            return 0;
+        } else {
+            return static_cast<size_t>(count_bucket.value());
+        }
+    }
+
+    void increment(NodeClock::time_point now)
+    {
+        size_bucket.increment(now);
+        count_bucket.increment(now);
+    }
+
+    bool decrement(double size)
+    {
+        bool x = size_bucket.decrement(size);
+        return count_bucket.decrement(1) && x;
+    }
+};
+
 class PeerManagerImpl final : public PeerManager
 {
 public:
@@ -544,7 +582,7 @@ public:
     std::vector<node::TxOrphanage::OrphanInfo> GetOrphanTransactions() override EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
     PeerManagerInfo GetInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_inv_to_send_mutex);
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
-    void InitiateTxBroadcastToAll(const Txid& txid, const Wtxid& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_inv_to_send_mutex);
+    void InitiateTxBroadcastToAll(const CTransactionRef& tx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_inv_to_send_mutex);
     void InitiateTxBroadcastPrivate(const CTransactionRef& tx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void SetBestBlock(int height, std::chrono::seconds time) override
     {
@@ -1094,11 +1132,8 @@ private:
     PrivateBroadcast m_tx_for_private_broadcast;
 
     mutable Mutex m_inv_to_send_mutex;
-    std::vector<Wtxid> m_inbound_inventory GUARDED_BY(m_inv_to_send_mutex);
-    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL)> m_inbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){3};
-
-    std::vector<Wtxid> m_outbound_inventory GUARDED_BY(m_inv_to_send_mutex);
-    util::TokenBucket<300, INVENTORY_BROADCAST_TARGET, count_seconds(OUTBOUND_INVENTORY_BROADCAST_INTERVAL)> m_outbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){3};
+    InvToSendBucket m_inbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){/*mult=*/1.0};
+    InvToSendBucket m_outbound_inv_bucket GUARDED_BY(m_inv_to_send_mutex){/*mult=*/2.5};
 
     void CatchupRelayTransactions(NodeClock::time_point now) EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_inv_to_send_mutex);
 };
@@ -1635,7 +1670,7 @@ void PeerManagerImpl::ReattemptInitialBroadcast(CScheduler& scheduler)
         CTransactionRef tx = m_mempool.get(txid);
 
         if (tx != nullptr) {
-            InitiateTxBroadcastToAll(txid, tx->GetWitnessHash());
+            InitiateTxBroadcastToAll(tx);
         } else {
             m_mempool.RemoveUnbroadcastTx(txid, true);
         }
@@ -1860,10 +1895,10 @@ PeerManagerInfo PeerManagerImpl::GetInfo() const
     return PeerManagerInfo{
         .median_outbound_time_offset = m_outbound_time_offsets.Median(),
         .ignores_incoming_txs = m_opts.ignore_incoming_txs,
-        .inbound_inv_size = m_inbound_inventory.size(),
-        .outbound_inv_size = m_outbound_inventory.size(),
-        .inbound_bucket = m_inbound_inv_bucket.value(),
-        .outbound_bucket = m_outbound_inv_bucket.value(),
+        .inbound_inv_size = m_inbound_inv_bucket.backlog.size(),
+        .outbound_inv_size = m_outbound_inv_bucket.backlog.size(),
+        .inbound_bucket = m_inbound_inv_bucket.count_bucket.value(),
+        .outbound_bucket = m_outbound_inv_bucket.count_bucket.value(),
     };
 }
 
@@ -2230,20 +2265,20 @@ void PeerManagerImpl::SendPings()
 static double tosatpervb(FeePerWeight fpw) { return (double)fpw.fee*4/(double)fpw.size; }
 //static double tosatpervb(FeePerVSize fpvs) { return (double)fpvs.fee/(double)fpvs.size; }
 
-static std::vector<Wtxid> BumpInvVecForProcessing(std::vector<Wtxid>& vec, size_t n, CTxMemPool& mempool) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs)
+static std::vector<Wtxid> BumpInvVecForProcessing(InvToSendBucket& inv_bucket, size_t n, CTxMemPool& mempool) EXCLUSIVE_LOCKS_REQUIRED(mempool.cs)
 {
     std::vector<Wtxid> to_process;
 
-    if (n > 0 && !vec.empty()) {
+    if (n > 0 && !inv_bucket.backlog.empty()) {
         // sort an extra element if possible so we always include a duplicate of any of the
         // best n elements if there is one
-        auto itervec = mempool.SortMiningScoreWithToplogy(vec, n + 1);
+        auto itervec = mempool.SortMiningScoreWithToplogy(inv_bucket.backlog, n + 1);
         if (n >= itervec.size()) {
-            vec.clear();
-            vec.swap(to_process); // maybe avoid reallocating
+            inv_bucket.backlog.clear();
+            inv_bucket.backlog.swap(to_process); // maybe avoid reallocating
             to_process.reserve(itervec.size());
         } else {
-            vec.clear();
+            inv_bucket.backlog.clear();
             to_process.reserve(n);
         }
 
@@ -2261,14 +2296,18 @@ static std::vector<Wtxid> BumpInvVecForProcessing(std::vector<Wtxid>& vec, size_
             --n;
             if (i > 0 && itervec[i] == itervec[i-1]) continue; // skip duplicates
             to_process.push_back(itervec[i]->GetTx().GetWitnessHash());
+            if (!inv_bucket.size_bucket.decrement(itervec[i]->GetTx().ComputeTotalSize())) {
+                break; // used up size budget
+            }
         }
-        // save the unsorted section as-is
+        // save the remainder (mostly unsorted) section as-is
         for (size_t j = 0; j < i; ++j) {
-            vec.push_back(itervec[j]->GetTx().GetWitnessHash());
+            inv_bucket.backlog.push_back(itervec[j]->GetTx().GetWitnessHash());
         }
-        if (vec.empty()) {
-            std::vector<Wtxid>{}.swap(vec); // free memory associated with vec
+        if (inv_bucket.backlog.empty()) {
+            std::vector<Wtxid>{}.swap(inv_bucket.backlog); // free memory associated with vec
         }
+        inv_bucket.count_bucket.decrement(to_process.size());
     }
     return to_process;
 }
@@ -2281,11 +2320,8 @@ void PeerManagerImpl::CatchupRelayTransactions(NodeClock::time_point now)
     LOCK(m_inv_to_send_mutex);
     m_inbound_inv_bucket.increment(now);
     m_outbound_inv_bucket.increment(now);
-    size_t in_avail = m_inbound_inventory.empty() ? 0 : m_inbound_inv_bucket.available();
-    size_t out_avail = m_outbound_inventory.empty() ? 0 : m_outbound_inv_bucket.available();
-
-    static_assert(decltype(m_inbound_inv_bucket)::MAX >= INVENTORY_BROADCAST_TARGET);
-    static_assert(decltype(m_outbound_inv_bucket)::MAX >= INVENTORY_BROADCAST_TARGET);
+    size_t in_avail = m_inbound_inv_bucket.avail();
+    size_t out_avail = m_outbound_inv_bucket.avail();
 
     if (in_avail < INVENTORY_BROADCAST_TARGET && out_avail < INVENTORY_BROADCAST_TARGET) return;
     if (in_avail < INVENTORY_BROADCAST_TARGET) in_avail = 0;
@@ -2293,18 +2329,10 @@ void PeerManagerImpl::CatchupRelayTransactions(NodeClock::time_point now)
 
     {
         LOCK(m_mempool.cs);
-        if (in_avail > 0) {
-LogInfo("AJAJ: in_avail == %s", in_avail);
-            for_inbound = BumpInvVecForProcessing(m_inbound_inventory, in_avail, m_mempool);
-            m_inbound_inv_bucket.decrement(for_inbound.size());
-        }
-        if (out_avail > 0) {
-LogInfo("AJAJ: out_avail == %s", out_avail);
-            for_outbound = BumpInvVecForProcessing(m_outbound_inventory, out_avail, m_mempool);
-            m_outbound_inv_bucket.decrement(for_outbound.size());
-        }
+        for_inbound = BumpInvVecForProcessing(m_inbound_inv_bucket, in_avail, m_mempool);
+        for_outbound = BumpInvVecForProcessing(m_outbound_inv_bucket, out_avail, m_mempool);
     }
-    bool any_inbound_exists = false;
+    bool any_inbound_connected = false;
     if (!for_inbound.empty() || !for_outbound.empty()) {
         LOCK(m_peer_mutex);
         for (auto& it : m_peer_map) {
@@ -2319,31 +2347,35 @@ LogInfo("AJAJ: out_avail == %s", out_avail);
             // distinguish transactions received during the handshake from the rest
             // in the announcement.
             if (tx_relay->m_next_inv_send_time == 0s) continue;
-            if (peer.m_is_inbound) any_inbound_exists = true;
+            if (peer.m_is_inbound) any_inbound_connected = true;
             for (auto& i : (peer.m_is_inbound ? for_inbound: for_outbound)) {
                 tx_relay->m_tx_inventory_to_send.emplace_back(i);
             }
         }
-        if (!any_inbound_exists) {
+        if (!any_inbound_connected) {
             // if the node has no inbound connections, pretend we send all the queued inbound txs
-            std::vector<Wtxid>{}.swap(m_inbound_inventory);
+            std::vector<Wtxid>{}.swap(m_inbound_inv_bucket.backlog);
         }
     }
 }
 
-void PeerManagerImpl::InitiateTxBroadcastToAll(const Txid& txid, const Wtxid& wtxid)
+void PeerManagerImpl::InitiateTxBroadcastToAll(const CTransactionRef& tx)
 {
+    const Txid& txid{tx->GetHash()};
+    const Wtxid& wtxid{tx->GetWitnessHash()};
+
     {
         LOCK(m_inv_to_send_mutex);
-        bool go = m_inbound_inventory.empty() && m_inbound_inv_bucket.available() >= 1.0;
-        go = go && m_outbound_inventory.empty() && m_outbound_inv_bucket.available() >= 1.0;
+        bool go = m_inbound_inv_bucket.immediate_relay();
+        go = go && m_outbound_inv_bucket.immediate_relay();
         if (!go) {
-            m_inbound_inventory.push_back(wtxid);
-            m_outbound_inventory.push_back(wtxid);
+            m_inbound_inv_bucket.backlog.push_back(wtxid);
+            m_outbound_inv_bucket.backlog.push_back(wtxid);
             return;
         }
-        m_inbound_inv_bucket.decrement();
-        m_outbound_inv_bucket.decrement();
+        auto size = tx->ComputeTotalSize();
+        m_inbound_inv_bucket.decrement(size);
+        m_outbound_inv_bucket.decrement(size);
     }
     LOCK(m_peer_mutex);
     for(auto& it : m_peer_map) {
@@ -3261,7 +3293,7 @@ void PeerManagerImpl::ProcessValidTx(NodeId nodeid, const CTransactionRef& tx, c
              tx->GetWitnessHash().ToString(),
              m_mempool.size(), m_mempool.DynamicMemoryUsage() / 1000);
 
-    InitiateTxBroadcastToAll(tx->GetHash(), tx->GetWitnessHash());
+    InitiateTxBroadcastToAll(tx);
 
     for (const CTransactionRef& removedTx : replaced_transactions) {
         AddToCompactExtraTransactions(removedTx);
@@ -4620,7 +4652,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 } else {
                     LogInfo("Force relaying tx %s (wtxid=%s) from peer=%d\n",
                               txid.ToString(), wtxid.ToString(), pfrom.GetId());
-                    InitiateTxBroadcastToAll(txid, wtxid);
+                    InitiateTxBroadcastToAll(ptx);
                 }
             }
 
@@ -6117,37 +6149,47 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                 if (fSendTrickle) {
                     // Produce a vector with all candidates for sending
 
-                    std::vector<Wtxid> inv_tx = [&]() EXCLUSIVE_LOCKS_REQUIRED(tx_relay->m_tx_inventory_mutex) {
-                        LOCK(m_mempool.cs);
-                        return BumpInvVecForProcessing(tx_relay->m_tx_inventory_to_send, tx_relay->m_tx_inventory_to_send.size(), m_mempool);
-                    }();
-
                     const CFeeRate filterrate{tx_relay->m_fee_filter_received.load()};
+
+                    // sorted from lowest priority to highest, skipping low fee
+                    auto inv_tx = [&]() EXCLUSIVE_LOCKS_REQUIRED(tx_relay->m_tx_inventory_mutex) {
+                        std::vector<CTransactionRef> res;
+                        auto& vec = tx_relay->m_tx_inventory_to_send;
+                        LOCK(m_mempool.cs);
+                        auto itervec = m_mempool.SortMiningScoreWithToplogy(vec, vec.size());
+                        res.reserve(itervec.size());
+                        for (size_t i = 0; i < itervec.size(); ++i) {
+                            if (i > 0 && itervec[i] == itervec[i-1]) continue; // skip duplicates
+                            // Peer told you to not send transactions at that feerate? Don't bother sending it.
+                            if (itervec[i]->GetFee() < filterrate.GetFee(itervec[i]->GetTxSize())) {
+                                continue;
+                            }
+                            res.push_back(itervec[i]->GetSharedTx());
+                        }
+                        // Ensure we'll respond to GETDATA requests for anything we're about to announce
+                        tx_relay->m_last_inv_sequence = m_mempool.GetSequence();
+                        return res;
+                    }();
+                    tx_relay->m_tx_inventory_to_send.clear();
+
                     // Topologically and fee-rate sort the inventory we send for privacy and priority reasons.
                     LOCK(tx_relay->m_bloom_filter_mutex);
 
                     while (!inv_tx.empty()) {
-                        // Fetch the top element from the heap
-                        Wtxid wtxid = inv_tx.back();
+                        // Fetch the top element
+                        CTransactionRef tx = std::move(inv_tx.back());
                         inv_tx.pop_back();
-                        // Not in the mempool anymore? don't bother sending it.
-                        auto txinfo = m_mempool.info(wtxid);
-                        if (!txinfo.tx) continue;
                         // `TxRelay::m_tx_inventory_known_filter` contains either txids or wtxids
                         // depending on whether our peer supports wtxid-relay. Therefore, first
                         // construct the inv and then use its hash for the filter check.
                         const auto inv = peer->m_wtxid_relay ?
-                                             CInv{MSG_WTX, wtxid.ToUint256()} :
-                                             CInv{MSG_TX, txinfo.tx->GetHash().ToUint256()};
-                        // Peer told you to not send transactions at that feerate? Don't bother sending it.
-                        if (txinfo.fee < filterrate.GetFee(txinfo.vsize)) {
-                            continue;
-                        }
+                                             CInv{MSG_WTX, tx->GetWitnessHash().ToUint256()} :
+                                             CInv{MSG_TX, tx->GetHash().ToUint256()};
                         // Check if not in the filter already
                         if (tx_relay->m_tx_inventory_known_filter.contains(inv.hash)) {
                             continue;
                         }
-                        if (tx_relay->m_bloom_filter && !tx_relay->m_bloom_filter->IsRelevantAndUpdate(*txinfo.tx)) continue;
+                        if (tx_relay->m_bloom_filter && !tx_relay->m_bloom_filter->IsRelevantAndUpdate(*tx)) continue;
                         // Send
                         vInv.push_back(inv);
                         if (vInv.size() == MAX_INV_SZ) {
@@ -6157,9 +6199,6 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                         tx_relay->m_tx_inventory_known_filter.insert(inv.hash);
                     }
 
-                    // Ensure we'll respond to GETDATA requests for anything we've just announced
-                    LOCK(m_mempool.cs);
-                    tx_relay->m_last_inv_sequence = m_mempool.GetSequence();
                 }
         }
         if (!vInv.empty())

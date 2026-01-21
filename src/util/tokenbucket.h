@@ -6,11 +6,10 @@
 #define BITCOIN_UTIL_TOKENBUCKET_H
 
 #include <util/check.h>
-#include <util/time.h>
 
 namespace util {
 
-template<auto Max, auto Increment, auto SecondsPerInc, typename Clock = NodeClock>
+template<typename Clock>
 class TokenBucket
 {
 public:
@@ -18,36 +17,28 @@ public:
     using time_point = typename Clock::time_point;
     using duration = typename Clock::duration;
 
-    static_assert(SecondsPerInc > 0);
+    const double m_rate{1};
+    const double m_cap{0};
+    const double m_max_debt{0};
 
-    static constexpr double MAX = Max;
-    static constexpr double RATE = double{Increment}/double{SecondsPerInc};
-
-    static_assert(RATE > 0);
-
-    TokenBucket() = default;
-    TokenBucket(double d) : m_value{std::min(d, MAX)} { }
+    TokenBucket(double rate, double value, double cap, double debt=0) : m_rate{rate}, m_cap{cap}, m_max_debt{0}, m_value{std::min(value,cap)} { }
 
     void increment(const time_point& now)
     {
-        if (m_value < MAX && m_last_updated.time_since_epoch().count() > 0 && now > m_last_updated) {
-            double inc = RATE * std::chrono::duration_cast<SecondsDouble>(now - m_last_updated).count();
-            m_value += std::min(MAX - m_value, inc);
+        if (now > m_last_updated) {
+            if (m_value < m_cap && m_last_updated.time_since_epoch().count() > 0) {
+                double inc = m_rate * std::chrono::duration_cast<SecondsDouble>(now - m_last_updated).count();
+                m_value = std::min(m_cap, m_value + inc);
+            }
         }
         m_last_updated = now;
     }
 
     bool decrement(double n = 1.0)
     {
-        if (m_value >= n) {
-            m_value -= n;
-            return true;
-        } else {
-            return false;
-        }
+        m_value -= n;
+        return (m_value > m_max_debt);
     }
-
-    size_t available() const { return (m_value >= 1.0 ? static_cast<size_t>(m_value) : 0); }
 
     double value() const { return m_value; }
 
