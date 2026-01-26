@@ -725,6 +725,15 @@ private:
     {
         m_connman.PushMessage(&node, NetMsg::Make(std::move(msg_type), std::forward<Args>(args)...));
     }
+    template <typename... Args>
+    void MakeAndPushFeature(CNode& node, std::string_view feature_id, Args&&... args) const
+    {
+        if (!Assume(feature_id.size() >= 4 && feature_id.size() <= 80)) return;
+        std::vector<unsigned char> feature_data;
+        VectorWriter{feature_data, 0, std::forward<Args>(args)...};
+        if (!Assume(feature_data.size() <= 512)) return;
+        MakeAndPushMessage(node, NetMsgType::FEATURE, feature_id, std::move(feature_data));
+    }
 
     /** Send a version message to a peer */
     void PushNodeVersion(CNode& pnode, const Peer& peer);
@@ -3713,6 +3722,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             }
         }
 
+        if (greatest_common_version >= FEATURE_VERSION) {
+            // announce supported features
+        }
+
         MakeAndPushMessage(pfrom, NetMsgType::VERACK);
 
         // Potentially mark this peer as a preferred download peer.
@@ -3926,6 +3939,33 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             return;
         }
         peer->m_wants_addrv2 = true;
+        return;
+    }
+
+    if (msg_type == NetMsgType::FEATURE) {
+        if (pfrom.fSuccessfullyConnected) {
+            // Disconnect peers that send a FEATURE message after VERACK.
+            LogDebug(BCLog::NET, "feature received after verack, %s", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        }
+
+        std::string feature_id;
+        std::vector<unsigned char> feature_data;
+        try {
+            vRecv >> LIMITED_STRING(feature_id, MAX_FEATUREID_LENGTH);
+            vRecv >> feature_data;
+        } catch (const std::exception&) {
+            feature_id = "";
+        }
+        if (feature_id.size() < 4 || feature_id.size() > MAX_FEATUREID_LENGTH || feature_data.size() > MAX_FEATUREDATA_LENGTH || !vRecv.empty()) {
+            LogDebug(BCLog::NET, "invalid feature payload, %s", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        }
+
+        // ignore unknown feature_id
+        LogDebug(BCLog::NET, "unknown feature advertised: %s", SanitizeString(feature_id));
         return;
     }
 

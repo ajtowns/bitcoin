@@ -35,4 +35,7 @@ static const int INVALID_CB_NO_BAN_VERSION = 70015;
 //! "wtxidrelay" message type for wtxid-based relay starts with this version
 static const int WTXID_RELAY_VERSION = 70016;
 
+//! "feature" message type for feature negotiation starts with this version
+static const int FEATURE_VERSION = 70017;
+
 #endif // BITCOIN_NODE_PROTOCOL_VERSION_H
