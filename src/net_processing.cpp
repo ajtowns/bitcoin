@@ -419,6 +419,9 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
+    /** Whether this peer shares stale block information */
+    std::atomic<bool> m_staleblocks;
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -3724,6 +3727,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (greatest_common_version >= FEATURE_VERSION) {
             // announce supported features
+            MakeAndPushFeature(pfrom, NetMsgFeature::STALEBLOCKS);
         }
 
         MakeAndPushMessage(pfrom, NetMsgType::VERACK);
