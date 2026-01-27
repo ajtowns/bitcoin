@@ -5859,6 +5859,14 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                         break;
                     }
                 }
+                if (!fRevertToInv && !fFoundStartingHeader && pBestIndex != nullptr && vHeaders.empty()) {
+                    // Peer has all the headers, but we'll let it know when we've updated to a new tip anyway
+                    if (pBestIndex == m_chainman.ActiveTip() && pBestIndex == m_chainman.m_best_header) {
+                        const uint256& hashToAnnounce = pBestIndex->GetBlockHash();
+                        peer->m_blocks_for_inv_relay.push_back(hashToAnnounce);
+                        LogDebug(BCLog::NET, "sending inv of tip to peer=%d hash=%s\n", pto->GetId(), hashToAnnounce.ToString());
+                    }
+                }
             }
             if (!fRevertToInv && !vHeaders.empty()) {
                 if (vHeaders.size() == 1 && state.m_requested_hb_cmpctblocks) {
