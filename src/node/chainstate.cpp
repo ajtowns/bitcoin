@@ -133,6 +133,9 @@ static ChainstateLoadResult CompleteChainstateInitialization(
                                                          chainman.GetConsensus().SegwitHeight)};
     };
 
+    // Initialize recent stale tips tracker
+    chainman.GetStaleTips().Initialize(chainman.m_blockman, chainman.ActiveChain());
+
     // Now that chainstates are loaded and we're able to flush to
     // disk, rebalance the coins caches to desired levels based
     // on the condition of each chainstate.

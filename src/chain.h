@@ -299,6 +299,21 @@ protected:
     CBlockIndex& operator=(CBlockIndex&&) = delete;
 };
 
+/** Comparison function for sorting the chain tips.  */
+struct CompareBlocksByHeight
+{
+    bool operator()(const CBlockIndex* a, const CBlockIndex* b) const
+    {
+        /* Make sure that unequal blocks with the same height do not compare
+           equal. Use the pointers themselves to make a distinction. */
+
+        if (a->nHeight != b->nHeight)
+          return (a->nHeight > b->nHeight);
+
+        return a < b;
+    }
+};
+
 /** Compute how much work an nBits value corresponds to. */
 arith_uint256 GetBitsProof(uint32_t bits);
 
