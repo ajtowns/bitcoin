@@ -35,7 +35,7 @@ StaleTipData::StaleTipData(const StaleFork& fork)
     }
 }
 
-std::vector<CBlockHeader> StaleTipData::ReconstructHeaders() const
+std::pair<uint256, std::vector<CBlockHeader>> StaleTipData::ReconstructHeaders() const
 {
     std::vector<CBlockHeader> result;
     result.reserve(m_headers.size());
@@ -54,7 +54,7 @@ std::vector<CBlockHeader> StaleTipData::ReconstructHeaders() const
         prev_hash = header.GetHash();
     }
 
-    return result;
+    return {prev_hash, result};
 }
 
 bool StaleTips::IsAncestor(const CBlockIndex* ancestor, const CBlockIndex* descendant)

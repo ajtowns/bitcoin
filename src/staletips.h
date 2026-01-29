@@ -54,8 +54,8 @@ public:
     StaleTipData() = default;
     explicit StaleTipData(const StaleFork& fork) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    /** Reconstruct full headers from compressed form */
-    std::vector<CBlockHeader> ReconstructHeaders() const;
+    /** Reconstruct tip hash and full headers from compressed form */
+    std::pair<uint256, std::vector<CBlockHeader>> ReconstructHeaders() const;
 
     SERIALIZE_METHODS(StaleTipData, obj)
     {
