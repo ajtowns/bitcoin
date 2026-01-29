@@ -63,7 +63,7 @@ bool StaleTips::IsAncestor(const CBlockIndex* ancestor, const CBlockIndex* desce
            ancestor == descendant->GetAncestor(ancestor->nHeight);
 }
 
-const CBlockIndex* StaleTips::GetForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const
+const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const
 {
     const CBlockIndex* tip = chain.Tip();
     if (tip == nullptr) return nullptr;
@@ -152,7 +152,7 @@ void StaleTips::Initialize(node::BlockManager& blockman, const CChain& chain)
         if (block_index.nHeight < min_height) continue;
         if (chain.Contains(&block_index)) continue; // Skip blocks on active chain
 
-        if (GetForkPoint(chain, &block_index) != nullptr) {
+        if (GetEligibleForkPoint(chain, &block_index) != nullptr) {
             candidates.insert(&block_index);
             if (block_index.pprev != nullptr) {
                 has_children.insert(block_index.pprev);
@@ -172,27 +172,30 @@ void StaleTips::AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip)
 {
     AssertLockHeld(::cs_main);
     if (stale_tip == nullptr) return;
-    if (GetForkPoint(chain, stale_tip) == nullptr) return;
+    if (GetEligibleForkPoint(chain, stale_tip) == nullptr) return;
     Add(stale_tip);
 }
 
 std::pair<std::vector<StaleFork>, uint32_t> StaleTips::GetTipsToAnnounce(
     const CChain& chain,
     uint32_t last_announced_seqno,
-    bool want_blocks) const
+    bool want_blocks)
 {
     AssertLockHeld(::cs_main);
     std::vector<StaleFork> result;
 
-    for (const auto& entry : m_tips) {
+    for (auto& entry : m_tips) {
         if (entry.pindex == nullptr) continue;
 
         uint32_t relevant_seqno = want_blocks ? entry.block_seqno : entry.header_seqno;
         if (relevant_seqno == 0) continue; // No seqno means not ready (for blocks mode)
         if (relevant_seqno <= last_announced_seqno) continue;
 
-        const CBlockIndex* fork_point = GetForkPoint(chain, entry.pindex);
-        if (fork_point != nullptr) {
+        const CBlockIndex* fork_point = GetEligibleForkPoint(chain, entry.pindex);
+        if (fork_point == nullptr) {
+            // No longer eligible (too old or reorged out), clear it
+            entry.pindex = nullptr;
+        } else {
             result.push_back({fork_point, entry.pindex});
         }
     }

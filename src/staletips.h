@@ -83,8 +83,8 @@ private:
     /** Check if ancestor is an ancestor of descendant */
     static bool IsAncestor(const CBlockIndex* ancestor, const CBlockIndex* descendant);
 
-    /** Returns fork_point if stale_tip is eligible, nullptr otherwise */
-    const CBlockIndex* GetForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const;
+    /** Returns fork_point if stale_tip is eligible (recent enough, not too deep), nullptr otherwise */
+    const CBlockIndex* GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const;
 
     void Add(const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
@@ -95,11 +95,12 @@ public:
 
     void AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    /** Get stale tips to announce, filtering by mode and sequence number */
+    /** Get stale tips to announce, filtering by mode and sequence number.
+     *  Also clears entries that are no longer eligible (too old or reorged). */
     std::pair<std::vector<StaleFork>, uint32_t> GetTipsToAnnounce(
         const CChain& chain,
         uint32_t last_announced_seqno,
-        bool want_blocks) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+        bool want_blocks) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     uint32_t GetLastSeqno() const { return m_last_seqno; }
 };
