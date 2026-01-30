@@ -71,9 +71,6 @@ private:
     std::array<Entry, MAX_STALE_TIPS> m_tips{};
     uint32_t m_last_seqno{0};
 
-    /** Check if ancestor is an ancestor of descendant */
-    static bool IsAncestor(const CBlockIndex* ancestor, const CBlockIndex* descendant);
-
     /** Returns fork_point if stale_tip is eligible (recent enough, not too deep), nullptr otherwise */
     const CBlockIndex* GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const;
 

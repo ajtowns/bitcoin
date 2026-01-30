@@ -57,12 +57,6 @@ std::pair<uint256, std::vector<CBlockHeader>> StaleTipData::ReconstructHeaders()
     return {prev_hash, result};
 }
 
-bool StaleTips::IsAncestor(const CBlockIndex* ancestor, const CBlockIndex* descendant)
-{
-    return ancestor->nHeight < descendant->nHeight &&
-           ancestor == descendant->GetAncestor(ancestor->nHeight);
-}
-
 const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const
 {
     const CBlockIndex* tip = chain.Tip();
@@ -101,12 +95,12 @@ void StaleTips::Add(const CBlockIndex* stale_tip)
             return;
         }
 
-        if (IsAncestor(existing, stale_tip)) {
+        if (stale_tip->HasAncestor(existing)) {
             // New tip extends an existing entry - remove the old one
             m_tips[i].pindex = nullptr;
             if (target_slot == nullptr) target_slot = &m_tips[i];
             continue;
-        } else if (IsAncestor(stale_tip, existing)) {
+        } else if (existing->HasAncestor(stale_tip)) {
             // New tip is ancestor of existing - don't add it
             return;
         }
