@@ -4952,6 +4952,27 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 LogDebug(BCLog::NET, "staleblock headers from peer %d invalid: %s",
                          pfrom.GetId(), state.ToString());
             }
+            // continue processing, in case some headers were valid
+        }
+
+        // Add to stale tips cache if it's not on the active chain
+        if (pindexLast) {
+            LOCK(cs_main);
+            if (!m_chainman.ActiveChain().Contains(pindexLast)) {
+                m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindexLast);
+
+                // Request the block if peer has it and we don't
+                if (stale_tip_data.m_have_block &&
+                    !(pindexLast->nStatus & BLOCK_HAVE_DATA) &&
+                    !IsBlockRequested(pindexLast->GetBlockHash())) {
+                    uint32_t nFetchFlags = GetFetchFlags(*peer);
+                    std::vector<CInv> vGetData{CInv{MSG_BLOCK | nFetchFlags, pindexLast->GetBlockHash()}};
+                    MakeAndPushMessage(pfrom, NetMsgType::GETDATA, vGetData);
+                    BlockRequested(pfrom.GetId(), *pindexLast);
+                    LogDebug(BCLog::NET, "Requesting stale block %s from peer %d\n",
+                             pindexLast->GetBlockHash().ToString(), pfrom.GetId());
+                }
+            }
         }
 
         return;
