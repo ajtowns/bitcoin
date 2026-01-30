@@ -774,6 +774,9 @@ private:
     /** Send `staleblock` messages for any new stale tips. */
     void MaybeSendStaleTips(CNode& node, Peer& peer, CNodeState& state) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, cs_main);
 
+    /** Request blocks for a stale chain if we're in BLOCKS mode and don't have them. */
+    void MaybeRequestStaleBlocks(CNode& pfrom, Peer& peer, const CBlockIndex* pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
     FastRandomContext m_rng GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
     FeeFilterRounder m_fee_filter_rounder GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
@@ -4960,27 +4963,9 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             if (!m_chainman.ActiveChain().Contains(pindexLast)) {
                 m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindexLast);
 
-                // Request the block if peer has it and we don't
-                if (m_opts.stale_tip_mode == StaleTipMode::BLOCKS && stale_tip_data.m_have_block) {
-                    uint32_t nFetchFlags = GetFetchFlags(*peer);
-                    std::vector<CInv> getdata;
-                    while (!(pindexLast->nStatus & BLOCK_VALID_CHAIN)) {
-                        if (!(pindexLast->nStatus & BLOCK_HAVE_DATA)) {
-                            if (!IsBlockRequested(pindexLast->GetBlockHash())) {
-                                getdata.emplace_back(MSG_BLOCK | nFetchFlags, pindexLast->GetBlockHash());
-                                BlockRequested(pfrom.GetId(), *pindexLast);
-                                LogDebug(BCLog::NET, "Requesting stale block %s from peer %d\n",
-                                     pindexLast->GetBlockHash().ToString(), pfrom.GetId());
-                            } else {
-                                // remember this node can provide this block, for later retries?
-                            }
-                        }
-                        pindexLast = pindexLast->pprev;
-                    }
-                    if (!getdata.empty()) {
-                        std::reverse(getdata.begin(), getdata.end());
-                        MakeAndPushMessage(pfrom, NetMsgType::GETDATA, getdata);
-                    }
+                // Request blocks if peer has them and we're in BLOCKS mode
+                if (stale_tip_data.m_have_block) {
+                    MaybeRequestStaleBlocks(pfrom, *peer, pindexLast);
                 }
             }
         }
@@ -5833,6 +5818,37 @@ void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& sta
     }
 
     peer.m_stale_tip_last_seqno = new_seqno;
+}
+
+void PeerManagerImpl::MaybeRequestStaleBlocks(CNode& pfrom, Peer& peer, const CBlockIndex* pindex)
+{
+    AssertLockHeld(cs_main);
+
+    // Only request blocks if we're in BLOCKS mode
+    if (m_opts.stale_tip_mode != StaleTipMode::BLOCKS) return;
+
+    uint32_t nFetchFlags = GetFetchFlags(peer);
+    std::vector<CInv> getdata;
+
+    // Walk back from tip, requesting blocks we don't have
+    while (pindex && !(pindex->nStatus & BLOCK_VALID_CHAIN)) {
+        if (!(pindex->nStatus & BLOCK_HAVE_DATA)) {
+            if (!IsBlockRequested(pindex->GetBlockHash())) {
+                getdata.emplace_back(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash());
+                BlockRequested(pfrom.GetId(), *pindex);
+                LogDebug(BCLog::NET, "Requesting stale block %s from peer %d\n",
+                         pindex->GetBlockHash().ToString(), pfrom.GetId());
+            } else {
+                // TODO: remember this peer can provide this block, for later retries
+            }
+        }
+        pindex = pindex->pprev;
+    }
+
+    if (!getdata.empty()) {
+        std::reverse(getdata.begin(), getdata.end());
+        MakeAndPushMessage(pfrom, NetMsgType::GETDATA, getdata);
+    }
 }
 
 namespace {
