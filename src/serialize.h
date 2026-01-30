@@ -1223,6 +1223,14 @@ T FromStream(Stream&& s)
     return result;
 }
 
+template<typename T, typename Stream, typename Opts>
+T FromStream(Stream&& s, Opts&& opts)
+{
+    T result;
+    s >> opts(result);
+    return result;
+}
+
 /**
  * Helper macro for SerParams structs
  *
