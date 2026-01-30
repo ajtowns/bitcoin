@@ -50,6 +50,7 @@
 #include <scheduler.h>
 #include <script/script.h>
 #include <serialize.h>
+#include <staletips.h>
 #include <span.h>
 #include <streams.h>
 #include <sync.h>
@@ -4884,6 +4885,69 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             }
             if (stats.second) {
                 m_chainman.ReportHeadersPresync(stats.second->first, stats.second->second);
+            }
+        }
+
+        return;
+    }
+
+    if (msg_type == NetMsgType::STALEBLOCK)
+    {
+        StaleTipData stale_tip_data;
+        vRecv >> stale_tip_data;
+
+        // Reconstruct the headers
+        if (stale_tip_data.m_headers.empty()) {
+            LogDebug(BCLog::NET, "staleblock message had no headers, %s", pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        } else if (stale_tip_data.m_headers.size() > StaleTips::MAX_FORK_LENGTH) {
+            LogDebug(BCLog::NET, "staleblock message had too long header chain (%d entries), %s",
+                stale_tip_data.m_headers.size(), pfrom.DisconnectMsg(fLogIPs));
+            pfrom.fDisconnect = true;
+            return;
+        }
+        auto [tip_hash, headers] = stale_tip_data.ReconstructHeaders();
+
+        {
+            LOCK(cs_main);
+
+            if (m_chainman.m_blockman.LookupBlockIndex(tip_hash) != nullptr) {
+                LogDebug(BCLog::NET, "ignoring staleblock with already known tip %s, peer=%d",
+                         tip_hash.ToString(), pfrom.GetId());
+                return;
+            }
+
+            const CBlockIndex* fork_point = m_chainman.m_blockman.LookupBlockIndex(stale_tip_data.m_hash_fork_point);
+            const CBlockIndex* active_tip = m_chainman.ActiveTip();
+            if (!fork_point) {
+                LogDebug(BCLog::NET, "ignoring staleblock with unknown fork point %s, peer=%d",
+                         stale_tip_data.m_hash_fork_point.ToString(), pfrom.GetId());
+                return;
+            } else if (fork_point->nHeight + (int)headers.size() < active_tip->nHeight - StaleTips::MAX_HEIGHT_DELTA) {
+                LogDebug(BCLog::NET, "ignoring staleblock with too old fork point %s (%d + %d < %d - %d), peer=%d",
+                         stale_tip_data.m_hash_fork_point.ToString(),
+                         fork_point->nHeight, headers.size(),
+                         active_tip->nHeight, StaleTips::MAX_HEIGHT_DELTA,
+                         pfrom.GetId());
+                return;
+            } else if (fork_point->nChainWork < GetAntiDoSWorkThreshold()) {
+                LogDebug(BCLog::NET, "ignoring staleblock with low-work fork point %s, peer=%d",
+                         stale_tip_data.m_hash_fork_point.ToString(), pfrom.GetId());
+                return;
+            }
+        }
+
+        LogDebug(BCLog::NET, "Received staleblock from peer %d: %d header(s) forking from %s, tip %s",
+                 pfrom.GetId(), headers.size(), stale_tip_data.m_hash_fork_point.ToString(), tip_hash.ToString());
+
+        // Process the headers
+        BlockValidationState state;
+        const CBlockIndex* pindexLast = nullptr;
+        if (!m_chainman.ProcessNewBlockHeaders(headers, /*min_pow_checked=*/true, state, &pindexLast)) {
+            if (state.IsInvalid()) {
+                LogDebug(BCLog::NET, "staleblock headers from peer %d invalid: %s",
+                         pfrom.GetId(), state.ToString());
             }
         }
 

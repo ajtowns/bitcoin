@@ -61,8 +61,6 @@ class StaleTips
 {
 private:
     static constexpr size_t MAX_STALE_TIPS{10};
-    static constexpr int MAX_HEIGHT_DELTA{1000};
-    static constexpr int MAX_FORK_LENGTH{20};
 
     struct Entry {
         const CBlockIndex* pindex{nullptr};
@@ -82,6 +80,9 @@ private:
     void Add(const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
 public:
+    static constexpr int MAX_HEIGHT_DELTA{1000};
+    static constexpr int MAX_FORK_LENGTH{20};
+
     StaleTips() = default;
 
     void Initialize(node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
