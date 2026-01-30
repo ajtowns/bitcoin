@@ -280,6 +280,13 @@ public:
     CBlockIndex* GetAncestor(int height);
     const CBlockIndex* GetAncestor(int height) const;
 
+    //! Shortcut to check if a block is an ancestor of this block.
+    bool HasAncestor(const CBlockIndex* anc) const 
+    {
+        if (!anc) return true;
+        return anc->nHeight <= nHeight && anc == GetAncestor(anc->nHeight);
+    }
+
     CBlockIndex() = default;
     ~CBlockIndex() = default;
 
