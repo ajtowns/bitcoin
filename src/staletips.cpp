@@ -138,8 +138,8 @@ void StaleTips::Initialize(node::BlockManager& blockman, const CChain& chain)
     std::set<const CBlockIndex*> has_children;
 
     for (const auto& [hash, block_index] : blockman.m_block_index) {
-        if (!block_index.IsValid(BLOCK_VALID_TREE)) continue;
-        if (block_index.nHeight < min_height) continue;
+        if (!block_index.IsValid(BLOCK_VALID_TREE)) continue; // Insufficiently connected
+        if (block_index.nHeight < min_height) continue; // Too old to be interesting
         if (chain.Contains(&block_index)) continue; // Skip blocks on active chain
 
         if (GetEligibleForkPoint(chain, &block_index) != nullptr) {
@@ -178,12 +178,11 @@ std::pair<std::vector<StaleFork>, uint32_t> StaleTips::GetTipsToAnnounce(
         if (entry.pindex == nullptr) continue;
 
         uint32_t relevant_seqno = want_blocks ? entry.block_seqno : entry.header_seqno;
-        if (relevant_seqno == 0) continue; // No seqno means not ready (for blocks mode)
         if (relevant_seqno <= last_announced_seqno) continue;
 
         const CBlockIndex* fork_point = GetEligibleForkPoint(chain, entry.pindex);
         if (fork_point == nullptr) {
-            // No longer eligible (too old, no longer stale), clear it
+            // No longer eligible (too old, no longer stale, etc), clear it
             entry.pindex = nullptr;
         } else {
             result.push_back({fork_point, entry.pindex});
