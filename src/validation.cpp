@@ -4316,6 +4316,14 @@ bool ChainstateManager::ProcessNewBlockHeaders(std::span<const CBlockHeader> hea
             if (ppindex) {
                 *ppindex = pindex;
             }
+
+            // Notify listeners if the last header is a stale tip
+            // (ie, it's not the best header and not an ancestor of the best header)
+            if (m_options.signals && pindex) {
+                if (!m_best_header->HasAncestor(pindex)) {
+                    m_options.signals->AcceptedNotActive(pindex);
+                }
+            }
         }
     }
     if (NotifyHeaderTip()) {
@@ -4507,7 +4515,7 @@ bool ChainstateManager::ProcessNewBlock(const std::shared_ptr<const CBlock>& blo
     if (m_options.signals && pindex) {
         LOCK(cs_main);
         if (!ActiveChain().Contains(pindex)) {
-            m_options.signals->BlockAcceptedNotActive(pindex);
+            m_options.signals->AcceptedNotActive(pindex);
         }
     }
 

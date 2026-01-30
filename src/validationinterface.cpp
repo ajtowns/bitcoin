@@ -221,10 +221,10 @@ void ValidationSignals::BlockConnected(const ChainstateRole& role, const std::sh
                           pindex->nHeight);
 }
 
-void ValidationSignals::BlockAcceptedNotActive(const CBlockIndex* pindex)
+void ValidationSignals::AcceptedNotActive(const CBlockIndex* pindex)
 {
     auto event = [pindex, this] {
-        m_internals->Iterate([&](CValidationInterface& callbacks) { callbacks.BlockAcceptedNotActive(pindex); });
+        m_internals->Iterate([&](CValidationInterface& callbacks) { callbacks.AcceptedNotActive(pindex); });
     };
     ENQUEUE_AND_LOG_EVENT(event, "%s: block hash=%s block height=%d", __func__,
                           pindex->GetBlockHash().ToString(),
