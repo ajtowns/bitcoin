@@ -87,7 +87,8 @@ public:
 
     void Initialize(node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    void AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    /** Add a stale tip to the cache if eligible. Returns true if the tip was eligible. */
+    bool AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /** Get stale tips to announce, filtering by mode and sequence number.
      *  Also clears entries that are no longer eligible (too old or reorged). */

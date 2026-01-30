@@ -775,7 +775,9 @@ private:
     void MaybeSendStaleTips(CNode& node, Peer& peer, CNodeState& state) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, cs_main);
 
     /** Request blocks for a stale chain if we're in BLOCKS mode and don't have them. */
-    void MaybeRequestStaleBlocks(CNode& pfrom, Peer& peer, const CBlockIndex* pindex) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    /** Handle a potential stale tip: add to cache and optionally request blocks.
+     *  Returns true if this was a stale tip (not on active chain). */
+    bool HandleStaleTip(CNode& pfrom, Peer& peer, const CBlockIndex* pindex, bool peer_has_block = true) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
     FastRandomContext m_rng GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
@@ -3110,6 +3112,9 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     // Consider immediately downloading blocks.
     HeadersDirectFetchBlocks(pfrom, peer, *pindexLast);
 
+    // If this is a stale tip, add to cache and maybe request blocks
+    WITH_LOCK(cs_main, HandleStaleTip(pfrom, peer, pindexLast));
+
     return;
 }
 
@@ -4959,15 +4964,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         // Add to stale tips cache if it's not on the active chain
         if (pindexLast) {
-            LOCK(cs_main);
-            if (!m_chainman.ActiveChain().Contains(pindexLast)) {
-                m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindexLast);
-
-                // Request blocks if peer has them and we're in BLOCKS mode
-                if (stale_tip_data.m_have_block) {
-                    MaybeRequestStaleBlocks(pfrom, *peer, pindexLast);
-                }
-            }
+            WITH_LOCK(cs_main, HandleStaleTip(pfrom, *peer, pindexLast, stale_tip_data.m_have_block));
         }
 
         return;
@@ -5820,12 +5817,24 @@ void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& sta
     peer.m_stale_tip_last_seqno = new_seqno;
 }
 
-void PeerManagerImpl::MaybeRequestStaleBlocks(CNode& pfrom, Peer& peer, const CBlockIndex* pindex)
+bool PeerManagerImpl::HandleStaleTip(CNode& pfrom, Peer& peer, const CBlockIndex* pindex, bool peer_has_block)
 {
     AssertLockHeld(cs_main);
 
-    // Only request blocks if we're in BLOCKS mode
-    if (m_opts.stale_tip_mode != StaleTipMode::BLOCKS) return;
+    // Check if this is actually a stale tip (not on active chain)
+    if (m_chainman.ActiveChain().Contains(pindex)) {
+        return false;
+    }
+
+    // Add to stale tips cache; only request blocks if tip was eligible
+    if (!m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindex)) {
+        return false;
+    }
+
+    // Only request blocks if peer has block and we're in BLOCKS mode
+    if (!peer_has_block || m_opts.stale_tip_mode != StaleTipMode::BLOCKS) {
+        return true;
+    }
 
     uint32_t nFetchFlags = GetFetchFlags(peer);
     std::vector<CInv> getdata;
@@ -5849,6 +5858,8 @@ void PeerManagerImpl::MaybeRequestStaleBlocks(CNode& pfrom, Peer& peer, const CB
         std::reverse(getdata.begin(), getdata.end());
         MakeAndPushMessage(pfrom, NetMsgType::GETDATA, getdata);
     }
+
+    return true;
 }
 
 namespace {

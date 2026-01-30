@@ -158,12 +158,14 @@ void StaleTips::Initialize(node::BlockManager& blockman, const CChain& chain)
     }
 }
 
-void StaleTips::AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip)
+bool StaleTips::AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip)
 {
     AssertLockHeld(::cs_main);
-    if (stale_tip == nullptr) return;
-    if (GetEligibleForkPoint(chain, stale_tip) == nullptr) return;
+    if (stale_tip == nullptr) return false;
+    if (GetEligibleForkPoint(chain, stale_tip) == nullptr) return false;
     Add(stale_tip);
+    // even if we won't advertise it, that it's eligible suggests it is worth downloading
+    return true;
 }
 
 std::pair<std::vector<StaleFork>, uint32_t> StaleTips::GetTipsToAnnounce(
