@@ -10,6 +10,57 @@
 #include <algorithm>
 #include <set>
 
+namespace {
+
+/** Result of checking for duplicate header variations on signet.
+ *
+ * On signet, the PoW difficulty is very low and block validity depends on a
+ * signature in the coinbase transaction. This creates two issues for stale
+ * tip tracking:
+ *
+ * 1. Fake headers are cheap to create (pass PoW but lack valid signature)
+ * 2. Multiple valid PoW solutions can exist for the same block content
+ *    (same parent and merkle root, different nonce/nBits)
+ *
+ * To avoid tracking/relaying duplicate header variations of the same logical
+ * block, we check if a candidate tip shares (pprev, hashMerkleRoot) with an
+ * ancestor of any known tip, or vice versa.
+ *
+ * See https://github.com/bitcoin/bitcoin/issues/33266 for details.
+ */
+enum class DupHeaderResult {
+    PREFER_BOTH,  //!< No duplication detected
+    PREFER_OLD,   //!< Candidate is a duplicate variation of (an ancestor of) existing
+    PREFER_NEW,   //!< Existing is a duplicate variation of an ancestor of candidate
+};
+using enum DupHeaderResult;
+
+/** Check if candidate and existing represent duplicate header variations. */
+DupHeaderResult CheckVariantHeader(const CBlockIndex* candidate, const CBlockIndex* existing)
+{
+    auto dupe_variant = [](const auto* a, const auto* b) -> bool {
+        return (a && b && a->pprev == b->pprev && a->hashMerkleRoot == b->hashMerkleRoot);
+    };
+
+    if (candidate->nHeight > existing->nHeight) {
+        // Check if existing duplicates an ancestor of candidate
+        const CBlockIndex* candidate_anc = candidate->GetAncestor(existing->nHeight);
+        if (dupe_variant(existing, candidate_anc)) {
+            return PREFER_NEW;
+        }
+    } else {
+        // Check if candidate duplicates an ancestor of existing
+        const CBlockIndex* existing_anc = existing->GetAncestor(candidate->nHeight);
+        if (dupe_variant(existing_anc, candidate)) {
+            return PREFER_OLD;
+        }
+    }
+
+    return PREFER_BOTH;
+}
+
+} // namespace
+
 StaleTipData::StaleTipData(const StaleFork& fork)
 {
     AssertLockHeld(::cs_main);
@@ -63,6 +114,9 @@ const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CB
     if (tip == nullptr) return nullptr;
     if (stale_tip->nHeight < tip->nHeight - MAX_HEIGHT_DELTA) return nullptr;
 
+    // On signet, only track tips where we have the full block
+    if (m_is_signet && !(stale_tip->nStatus & BLOCK_HAVE_DATA)) return nullptr;
+
     const CBlockIndex* fork_point = chain.FindFork(stale_tip);
     if (fork_point == nullptr) return nullptr;
 
@@ -105,6 +159,20 @@ void StaleTips::Add(const CBlockIndex* stale_tip)
             return;
         }
 
+        // On signet, check for duplicate header variations
+        if (m_is_signet) {
+            auto dup = CheckVariantHeader(stale_tip, existing);
+            if (dup == PREFER_OLD) {
+                // Candidate is a dup of existing's ancestor - reject it
+                return;
+            } else if (dup == PREFER_NEW) {
+                // Existing is a dup of candidate's ancestor - remove it
+                m_tips[i].pindex = nullptr;
+                if (target_slot == nullptr) target_slot = &m_tips[i];
+                continue;
+            }
+        }
+
         // Replace a lower-height stale tip if we haven't found an empty slot
         if (target_slot == nullptr || target_slot->pindex != nullptr) {
             auto height_limit = (target_slot == nullptr ? stale_tip->nHeight : target_slot->pindex->nHeight);
@@ -120,9 +188,12 @@ void StaleTips::Add(const CBlockIndex* stale_tip)
     }
 }
 
-void StaleTips::Initialize(node::BlockManager& blockman, const CChain& chain)
+void StaleTips::Initialize(const CChainParams& chainparams, node::BlockManager& blockman, const CChain& chain)
 {
     AssertLockHeld(::cs_main);
+
+    m_is_signet = (chainparams.GetChainType() == ChainType::SIGNET);
+
     const CBlockIndex* tip = chain.Tip();
     if (tip == nullptr) return;
 
@@ -157,6 +228,15 @@ bool StaleTips::AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip)
     AssertLockHeld(::cs_main);
     if (stale_tip == nullptr) return false;
     if (GetEligibleForkPoint(chain, stale_tip) == nullptr) return false;
+
+    // On signet, reject if candidate is a duplicate header variation of an
+    // ancestor of the active chain tip
+    if (m_is_signet && chain.Tip() != nullptr) {
+        if (CheckVariantHeader(stale_tip, chain.Tip()) == PREFER_OLD) {
+            return false;
+        }
+    }
+
     Add(stale_tip);
     // even if we won't advertise it, that it's eligible suggests it is worth downloading
     return true;
@@ -169,6 +249,8 @@ std::pair<std::vector<StaleFork>, uint32_t> StaleTips::GetTipsToAnnounce(
 {
     AssertLockHeld(::cs_main);
     std::vector<StaleFork> result;
+
+    if (m_is_signet) want_blocks = true; // force blocks mode on signet
 
     for (auto& entry : m_tips) {
         if (entry.pindex == nullptr) continue;

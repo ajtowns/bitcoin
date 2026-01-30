@@ -2032,7 +2032,7 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
 
     // Initialize recent stale tips tracker
     LOCK(::cs_main);
-    m_stale_tips.Initialize(m_chainman.m_blockman, m_chainman.ActiveChain());
+    m_stale_tips.Initialize(m_chainman.GetParams(), m_chainman.m_blockman, m_chainman.ActiveChain());
 }
 
 void PeerManagerImpl::StartScheduledTasks(CScheduler& scheduler)

@@ -13,6 +13,7 @@
 #include <array>
 #include <vector>
 
+class CChainParams;
 namespace node {
 class BlockManager;
 }
@@ -70,9 +71,10 @@ private:
 
     std::array<Entry, MAX_STALE_TIPS> m_tips{};
     uint32_t m_last_seqno{0};
+    bool m_is_signet{false};
 
     /** Returns fork_point if stale_tip is eligible (recent enough, not too deep), nullptr otherwise */
-    const CBlockIndex* GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const;
+    const CBlockIndex* GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     void Add(const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
@@ -82,9 +84,10 @@ public:
 
     StaleTips() = default;
 
-    void Initialize(node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void Initialize(const CChainParams& chainparams, node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    /** Add a stale tip to the cache if eligible. Returns true if the tip was eligible. */
+    /** Add a stale tip to the cache if eligible. Returns true if the tip was eligible.
+     *  On signet, also checks for duplicate header variations (same pprev and merkle root). */
     bool AddStaleTip(const CChain& chain, const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /** Get stale tips to announce, filtering by mode and sequence number.
