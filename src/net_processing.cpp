@@ -269,6 +269,11 @@ struct Peer {
      * Most peers use headers-first syncing, which doesn't use this mechanism */
     uint256 m_continuation_block GUARDED_BY(m_block_inv_mutex) {};
 
+    /** Peer's preference for receiving stale tip announcements (set via FEATURE negotiation). */
+    StaleTipMode m_stale_tip_mode GUARDED_BY(NetEventsInterface::g_msgproc_mutex){StaleTipMode::NONE};
+    /** Sequence number of last stale tip announcement sent to this peer. */
+    uint32_t m_stale_tip_last_seqno GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+
     /** Set to true once initial VERSION message was sent (only relevant for outbound peers). */
     bool m_outbound_version_message_sent GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
 
@@ -3727,7 +3732,10 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (greatest_common_version >= FEATURE_VERSION) {
             // announce supported features
-            MakeAndPushFeature(pfrom, NetMsgFeature::STALEBLOCKS);
+            if (m_opts.stale_tip_mode != StaleTipMode::NONE) {
+                bool prefer_blocks = (m_opts.stale_tip_mode == StaleTipMode::BLOCKS);
+                MakeAndPushFeature(pfrom, NetMsgFeature::STALEBLOCKS, prefer_blocks);
+            }
         }
 
         MakeAndPushMessage(pfrom, NetMsgType::VERACK);
@@ -3967,6 +3975,15 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         if (feature_id.size() < 4 || feature_id.size() > MAX_FEATUREID_LENGTH || feature_data.size() > MAX_FEATUREDATA_LENGTH || !vRecv.empty()) {
             LogDebug(BCLog::NET, "invalid feature payload, %s", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
+            return;
+        }
+
+        if (feature_id == NetMsgFeature::STALEBLOCKS) {
+            // Peer supports stale block announcements
+            bool prefer_blocks{false};
+            feature_data >> prefer_blocks;
+            peer->m_stale_tip_mode = prefer_blocks ? StaleTipMode::BLOCKS : StaleTipMode::HEADERS;
+            LogDebug(BCLog::NET, "peer %d supports stale tip announcements (modes=%s)\n", pfrom.GetId(), prefer_blocks ? "blocks" : "headers");
             return;
         }
 
