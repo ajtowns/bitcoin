@@ -804,6 +804,9 @@ private:
 
     std::unique_ptr<TxReconciliationTracker> m_txreconciliation;
 
+    //! Track recent stale tips
+    StaleTips m_stale_tips GUARDED_BY(::cs_main);
+
     /** The height of the best chain */
     std::atomic<int> m_best_height{-1};
     /** The time of the best chain tip block */
@@ -2018,6 +2021,10 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
     if (opts.reconcile_txs) {
         m_txreconciliation = std::make_unique<TxReconciliationTracker>(TXRECONCILIATION_VERSION);
     }
+
+    // Initialize recent stale tips tracker
+    LOCK(::cs_main);
+    m_stale_tips.Initialize(m_chainman.m_blockman, m_chainman.ActiveChain());
 }
 
 void PeerManagerImpl::StartScheduledTasks(CScheduler& scheduler)
@@ -5810,7 +5817,7 @@ void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& sta
 
     bool prefer_blocks = m_opts.stale_tip_mode == StaleTipMode::BLOCKS && peer.m_stale_tip_mode == StaleTipMode::BLOCKS;
 
-    auto [tips, new_seqno] = m_chainman.GetStaleTips().GetTipsToAnnounce(
+    auto [tips, new_seqno] = m_stale_tips.GetTipsToAnnounce(
         m_chainman.ActiveChain(), peer.m_stale_tip_last_seqno, prefer_blocks);
 
     for (const auto& fork : tips) {
@@ -5836,7 +5843,7 @@ bool PeerManagerImpl::HandleStaleTip(CNode& pfrom, Peer& peer, const CBlockIndex
     }
 
     // Add to stale tips cache; only request blocks if tip was eligible
-    if (!m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindex)) {
+    if (!m_stale_tips.AddStaleTip(m_chainman.ActiveChain(), pindex)) {
         return false;
     }
 
