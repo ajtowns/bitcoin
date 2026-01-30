@@ -3984,8 +3984,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (feature_id == NetMsgFeature::STALEBLOCKS) {
             // Peer supports stale block announcements
-            bool prefer_blocks{false};
-            feature_data >> prefer_blocks;
+            const auto prefer_blocks = FromStream<bool>(feature_data);
             peer->m_stale_tip_mode = prefer_blocks ? StaleTipMode::BLOCKS : StaleTipMode::HEADERS;
             LogDebug(BCLog::NET, "peer %d supports stale tip announcements (modes=%s)\n", pfrom.GetId(), prefer_blocks ? "blocks" : "headers");
             return;
@@ -4896,8 +4895,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
     if (msg_type == NetMsgType::STALEBLOCK)
     {
-        StaleTipData stale_tip_data;
-        vRecv >> stale_tip_data;
+        auto stale_tip_data = FromStream<StaleTipData>(vRecv);
 
         // Reconstruct the headers
         if (stale_tip_data.m_headers.empty()) {
