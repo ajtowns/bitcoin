@@ -10,6 +10,7 @@
 #include <net.h>
 #include <node/txorphanage.h>
 #include <protocol.h>
+#include <staletips.h>
 #include <threadsafety.h>
 #include <util/expected.h>
 #include <validationinterface.h>
@@ -128,6 +129,9 @@ public:
 
     /** Get peer manager info. */
     virtual PeerManagerInfo GetInfo() const = 0;
+
+    /** Get info about tracked stale tips */
+    virtual std::vector<StaleFork> GetStaleTips() = 0;
 
     /**
      * Initiate a transaction broadcast to eligible peers.

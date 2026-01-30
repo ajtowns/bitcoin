@@ -674,6 +674,17 @@ static RPCHelpMan getnetworkinfo()
                                 {RPCResult::Type::NUM, "score", "relative score"},
                             }},
                         }},
+                        {RPCResult::Type::ARR, "staletips", "recent stale block tips being tracked for relay",
+                        {
+                            {RPCResult::Type::OBJ, "", "",
+                            {
+                                {RPCResult::Type::STR_HEX, "hash", "block hash of the stale tip"},
+                                {RPCResult::Type::NUM, "height", "block height of the stale tip"},
+                                {RPCResult::Type::BOOL, "have_block", "whether we have the full block data"},
+                                {RPCResult::Type::STR_HEX, "fork_point", "block hash where this fork diverges from active chain"},
+                                {RPCResult::Type::NUM, "fork_length", "number of blocks in this stale fork"},
+                            }},
+                        }},
                         (IsDeprecatedRPCEnabled("warnings") ?
                             RPCResult{RPCResult::Type::STR, "warnings", "any network and blockchain warnings (DEPRECATED)"} :
                             RPCResult{RPCResult::Type::ARR, "warnings", "any network and blockchain warnings (run with `-deprecatedrpc=warnings` to return the latest warning as a single string)",
@@ -731,6 +742,19 @@ static RPCHelpMan getnetworkinfo()
         }
     }
     obj.pushKV("localaddresses", std::move(localAddresses));
+    if (node.peerman) {
+        UniValue stale_tips(UniValue::VARR);
+        for (const auto& [fork_point, tip] : node.peerman->GetStaleTips()) {
+            UniValue entry(UniValue::VOBJ);
+            entry.pushKV("hash", tip->GetBlockHash().GetHex());
+            entry.pushKV("height", tip->nHeight);
+            entry.pushKV("have_block", (tip->nStatus & BLOCK_HAVE_DATA) != 0);
+            entry.pushKV("fork_point", fork_point->GetBlockHash().GetHex());
+            entry.pushKV("fork_length", tip->nHeight - fork_point->nHeight);
+            stale_tips.push_back(std::move(entry));
+        }
+        obj.pushKV("staletips", std::move(stale_tips));
+    }
     obj.pushKV("warnings", node::GetWarningsForRpc(*CHECK_NONFATAL(node.warnings), IsDeprecatedRPCEnabled("warnings")));
     return obj;
 },

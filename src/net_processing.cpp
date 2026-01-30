@@ -553,6 +553,7 @@ public:
     bool GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     std::vector<node::TxOrphanage::OrphanInfo> GetOrphanTransactions() override EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
     PeerManagerInfo GetInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    std::vector<StaleFork> GetStaleTips() override EXCLUSIVE_LOCKS_REQUIRED(!cs_main);
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void InitiateTxBroadcastToAll(const Txid& txid, const Wtxid& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void InitiateTxBroadcastPrivate(const CTransactionRef& tx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
@@ -1881,6 +1882,12 @@ PeerManagerInfo PeerManagerImpl::GetInfo() const
         .median_outbound_time_offset = m_outbound_time_offsets.Median(),
         .ignores_incoming_txs = m_opts.ignore_incoming_txs,
     };
+}
+
+std::vector<StaleFork> PeerManagerImpl::GetStaleTips()
+{
+    LOCK(::cs_main);
+    return m_stale_tips.GetTipsToAnnounce(m_chainman.ActiveChain(), 0, false).first;
 }
 
 void PeerManagerImpl::AddToCompactExtraTransactions(const CTransactionRef& tx)
