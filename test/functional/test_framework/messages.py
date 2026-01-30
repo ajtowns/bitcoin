@@ -1927,6 +1927,94 @@ class msg_sendtxrcncl:
         return "msg_sendtxrcncl(version=%lu, salt=%lu)" %\
             (self.version, self.salt)
 
+class CompressedBlockHeader:
+    """Compressed block header for stale tip relay (omits hashPrevBlock)."""
+    __slots__ = ("nVersion", "hashMerkleRoot", "nTime", "nBits", "nNonce")
+
+    def __init__(self, header=None):
+        if header is not None:
+            self.nVersion = header.nVersion
+            self.hashMerkleRoot = header.hashMerkleRoot
+            self.nTime = header.nTime
+            self.nBits = header.nBits
+            self.nNonce = header.nNonce
+        else:
+            self.nVersion = 0
+            self.hashMerkleRoot = 0
+            self.nTime = 0
+            self.nBits = 0
+            self.nNonce = 0
+
+    def deserialize(self, f):
+        self.nVersion = int.from_bytes(f.read(4), "little", signed=True)
+        self.hashMerkleRoot = deser_uint256(f)
+        self.nTime = int.from_bytes(f.read(4), "little")
+        self.nBits = int.from_bytes(f.read(4), "little")
+        self.nNonce = int.from_bytes(f.read(4), "little")
+
+    def serialize(self):
+        r = self.nVersion.to_bytes(4, "little", signed=True)
+        r += ser_uint256(self.hashMerkleRoot)
+        r += self.nTime.to_bytes(4, "little")
+        r += self.nBits.to_bytes(4, "little")
+        r += self.nNonce.to_bytes(4, "little")
+        return r
+
+
+class msg_feature:
+    """FEATURE message for negotiating optional features."""
+    __slots__ = ("feature_id", "feature_data")
+    msgtype = b"feature"
+
+    def __init__(self, feature_id="", feature_data=b""):
+        self.feature_id = feature_id
+        self.feature_data = feature_data
+
+    def deserialize(self, f):
+        self.feature_id = deser_string(f).decode()
+        self.feature_data = deser_string(f)
+
+    def serialize(self):
+        r = ser_string(self.feature_id.encode())
+        r += ser_string(self.feature_data)
+        return r
+
+    def __repr__(self):
+        return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
+
+
+class msg_staleblock:
+    """STALEBLOCK message announcing a stale tip."""
+    __slots__ = ("hash_fork_point", "headers", "have_block")
+    msgtype = b"staleblock"
+
+    def __init__(self):
+        self.hash_fork_point = 0
+        self.headers = []
+        self.have_block = False
+
+    def deserialize(self, f):
+        self.hash_fork_point = deser_uint256(f)
+        num_headers = deser_compact_size(f)
+        self.headers = []
+        for _ in range(num_headers):
+            h = CompressedBlockHeader()
+            h.deserialize(f)
+            self.headers.append(h)
+        self.have_block = bool(int.from_bytes(f.read(1), "little"))
+
+    def serialize(self):
+        r = ser_uint256(self.hash_fork_point)
+        r += ser_compact_size(len(self.headers))
+        for h in self.headers:
+            r += h.serialize()
+        r += self.have_block.to_bytes(1, "little")
+        return r
+
+    def __repr__(self):
+        return f"msg_staleblock(fork_point={self.hash_fork_point:064x}, headers={len(self.headers)}, have_block={self.have_block})"
+
+
 class TestFrameworkScript(unittest.TestCase):
     def test_addrv2_encode_decode(self):
         def check_addrv2(ip, net):
