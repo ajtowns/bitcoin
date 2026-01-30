@@ -527,6 +527,8 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
     void BlockDisconnected(const std::shared_ptr<const CBlock> &block, const CBlockIndex* pindex) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex, !cs_main);
+    void AcceptedNotActive(const CBlockIndex* pindex) override
+        EXCLUSIVE_LOCKS_REQUIRED(!cs_main);
     void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void BlockChecked(const std::shared_ptr<const CBlock>& block, const BlockValidationState& state) override
@@ -2101,6 +2103,12 @@ void PeerManagerImpl::BlockDisconnected(const std::shared_ptr<const CBlock> &blo
     WITH_LOCK(m_tx_download_mutex, m_txdownloadman.BlockDisconnected());
 
     // Attempt to add disconnected block to stale tip cache; no downloading needed of course
+    WITH_LOCK(::cs_main, m_stale_tips.AddStaleTip(m_chainman.ActiveChain(), pindex));
+}
+
+void PeerManagerImpl::AcceptedNotActive(const CBlockIndex* pindex)
+{
+    // Add stale block/header to cache for relay to peers
     WITH_LOCK(::cs_main, m_stale_tips.AddStaleTip(m_chainman.ActiveChain(), pindex));
 }
 
