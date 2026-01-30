@@ -122,6 +122,15 @@ protected:
      */
     virtual void BlockConnected(const kernel::ChainstateRole& role, const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex) {}
     /**
+     * Notifies listeners of a new block that is not part of the active chain.
+     *
+     * Called when a block is written to disk, which does not form part
+     * of the active chain.
+     *
+     * Called on a background thread.
+     */
+    virtual void BlockAcceptedNotActive(const CBlockIndex* pindex) {}
+    /**
      * Notifies listeners of a block being disconnected
      * Provides the block that was disconnected.
      *
@@ -224,6 +233,7 @@ public:
     void TransactionRemovedFromMempool(const CTransactionRef&, MemPoolRemovalReason, uint64_t mempool_sequence);
     void MempoolTransactionsRemovedForBlock(const std::vector<RemovedMempoolTransactionInfo>&, unsigned int nBlockHeight);
     void BlockConnected(const kernel::ChainstateRole&, const std::shared_ptr<const CBlock>&, const CBlockIndex* pindex);
+    void BlockAcceptedNotActive(const CBlockIndex* pindex);
     void BlockDisconnected(const std::shared_ptr<const CBlock> &, const CBlockIndex* pindex);
     void ChainStateFlushed(const kernel::ChainstateRole&, const CBlockLocator&);
     void BlockChecked(const std::shared_ptr<const CBlock>&, const BlockValidationState&);

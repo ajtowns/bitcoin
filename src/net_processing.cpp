@@ -526,7 +526,7 @@ public:
     void BlockConnected(const ChainstateRole& role, const std::shared_ptr<const CBlock>& pblock, const CBlockIndex* pindexConnected) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
     void BlockDisconnected(const std::shared_ptr<const CBlock> &block, const CBlockIndex* pindex) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_tx_download_mutex, !cs_main);
     void UpdatedBlockTip(const CBlockIndex *pindexNew, const CBlockIndex *pindexFork, bool fInitialDownload) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void BlockChecked(const std::shared_ptr<const CBlock>& block, const BlockValidationState& state) override
@@ -2097,8 +2097,11 @@ void PeerManagerImpl::BlockConnected(
 
 void PeerManagerImpl::BlockDisconnected(const std::shared_ptr<const CBlock> &block, const CBlockIndex* pindex)
 {
-    LOCK(m_tx_download_mutex);
-    m_txdownloadman.BlockDisconnected();
+    // Notify download manager (to reset rejection caches)
+    WITH_LOCK(m_tx_download_mutex, m_txdownloadman.BlockDisconnected());
+
+    // Attempt to add disconnected block to stale tip cache; no downloading needed of course
+    WITH_LOCK(::cs_main, m_stale_tips.AddStaleTip(m_chainman.ActiveChain(), pindex));
 }
 
 /**

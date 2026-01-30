@@ -4460,8 +4460,8 @@ bool ChainstateManager::ProcessNewBlock(const std::shared_ptr<const CBlock>& blo
 {
     AssertLockNotHeld(cs_main);
 
+    CBlockIndex* pindex = nullptr;
     {
-        CBlockIndex *pindex = nullptr;
         if (new_block) *new_block = false;
         BlockValidationState state;
 
@@ -4502,6 +4502,14 @@ bool ChainstateManager::ProcessNewBlock(const std::shared_ptr<const CBlock>& blo
         LogError("%s: [background] ActivateBestChain failed (%s)\n", __func__, bg_state.ToString());
         return false;
      }
+
+    // Notify listeners if this block was accepted but is not on the active chain
+    if (m_options.signals && pindex) {
+        LOCK(cs_main);
+        if (!ActiveChain().Contains(pindex)) {
+            m_options.signals->BlockAcceptedNotActive(pindex);
+        }
+    }
 
     return true;
 }
