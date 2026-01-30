@@ -4916,6 +4916,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             LOCK(cs_main);
 
             if (m_chainman.m_blockman.LookupBlockIndex(tip_hash) != nullptr) {
+                // XXX we should not always ignore this
                 LogDebug(BCLog::NET, "ignoring staleblock with already known tip %s, peer=%d",
                          tip_hash.ToString(), pfrom.GetId());
                 return;
@@ -4962,15 +4963,26 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 m_chainman.GetStaleTips().AddStaleTip(m_chainman.ActiveChain(), pindexLast);
 
                 // Request the block if peer has it and we don't
-                if (stale_tip_data.m_have_block &&
-                    !(pindexLast->nStatus & BLOCK_HAVE_DATA) &&
-                    !IsBlockRequested(pindexLast->GetBlockHash())) {
+                if (m_opts.stale_tip_mode == StaleTipMode::BLOCKS && stale_tip_data.m_have_block) {
                     uint32_t nFetchFlags = GetFetchFlags(*peer);
-                    std::vector<CInv> vGetData{CInv{MSG_BLOCK | nFetchFlags, pindexLast->GetBlockHash()}};
-                    MakeAndPushMessage(pfrom, NetMsgType::GETDATA, vGetData);
-                    BlockRequested(pfrom.GetId(), *pindexLast);
-                    LogDebug(BCLog::NET, "Requesting stale block %s from peer %d\n",
-                             pindexLast->GetBlockHash().ToString(), pfrom.GetId());
+                    std::vector<CInv> getdata;
+                    while (!(pindexLast->nStatus & BLOCK_VALID_CHAIN)) {
+                        if (!(pindexLast->nStatus & BLOCK_HAVE_DATA)) {
+                            if (!IsBlockRequested(pindexLast->GetBlockHash())) {
+                                getdata.emplace_back(MSG_BLOCK | nFetchFlags, pindexLast->GetBlockHash());
+                                BlockRequested(pfrom.GetId(), *pindexLast);
+                                LogDebug(BCLog::NET, "Requesting stale block %s from peer %d\n",
+                                     pindexLast->GetBlockHash().ToString(), pfrom.GetId());
+                            } else {
+                                // remember this node can provide this block, for later retries?
+                            }
+                        }
+                        pindexLast = pindexLast->pprev;
+                    }
+                    if (!getdata.empty()) {
+                        std::reverse(getdata.begin(), getdata.end());
+                        MakeAndPushMessage(pfrom, NetMsgType::GETDATA, getdata);
+                    }
                 }
             }
         }
