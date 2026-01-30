@@ -25,6 +25,17 @@ void ApplyArgsManOptions(const ArgsManager& argsman, PeerManager::Options& optio
     if (auto value{argsman.GetBoolArg("-blocksonly")}) options.ignore_incoming_txs = *value;
 
     if (auto value{argsman.GetBoolArg("-privatebroadcast")}) options.private_broadcast = *value;
+
+    if (auto value{argsman.GetArg("-staletips")}) {
+        if (*value == "none") {
+            options.stale_tip_mode = StaleTipMode::NONE;
+        } else if (*value == "headers") {
+            options.stale_tip_mode = StaleTipMode::HEADERS;
+        } else if (*value == "blocks") {
+            options.stale_tip_mode = StaleTipMode::BLOCKS;
+        }
+        // Invalid values are silently ignored, using the default
+    }
 }
 
 } // namespace node

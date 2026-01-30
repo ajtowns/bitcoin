@@ -35,6 +35,13 @@ namespace node {
 class Warnings;
 } // namespace node
 
+/** Mode for stale tip sharing with a peer */
+enum class StaleTipMode {
+    NONE,    //!< Don't share stale tips
+    HEADERS, //!< Share headers immediately when we learn of them
+    BLOCKS,  //!< Only share after we have full block data
+};
+
 /** Whether transaction reconciliation protocol should be enabled by default. */
 static constexpr bool DEFAULT_TXRECONCILIATION_ENABLE{false};
 /** Default number of non-mempool transactions to keep around for block reconstruction. Includes
@@ -42,6 +49,8 @@ static constexpr bool DEFAULT_TXRECONCILIATION_ENABLE{false};
 static const uint32_t DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN{100};
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
 static const bool DEFAULT_PEERBLOCKFILTERS = false;
+/** Default mode for sharing stale tips with peers. */
+static constexpr StaleTipMode DEFAULT_STALETIPS_MODE{StaleTipMode::HEADERS};
 /** Maximum number of outstanding CMPCTBLOCK requests for the same block. */
 static const unsigned int MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK = 3;
 /** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
@@ -92,6 +101,8 @@ public:
         uint32_t max_headers_result{MAX_HEADERS_RESULTS};
         //! Whether private broadcast is used for sending transactions.
         bool private_broadcast{DEFAULT_PRIVATE_BROADCAST};
+        //! Mode for sharing stale tips (recent blocks not on active chain) with peers.
+        StaleTipMode stale_tip_mode{DEFAULT_STALETIPS_MODE};
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,

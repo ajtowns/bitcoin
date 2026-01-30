@@ -17,13 +17,6 @@ namespace node {
 class BlockManager;
 }
 
-/** Mode for stale tip sharing with a peer */
-enum class StaleTipMode {
-    NONE,    //!< Don't share stale tips
-    HEADERS, //!< Share headers immediately when we learn of them
-    BLOCKS,  //!< Only share after we have full block data
-};
-
 /** A stale fork: the fork point on the active chain and the tip of the stale branch */
 struct StaleFork {
     const CBlockIndex* fork_point;

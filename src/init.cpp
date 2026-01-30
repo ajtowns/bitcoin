@@ -596,6 +596,9 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
         "-whitebind. "
         "Additional flags \"in\" and \"out\" control whether permissions apply to incoming connections and/or manual (default: incoming only). "
         "Can be specified multiple times.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-staletips=<mode>", "Share recent stale blocks (blocks with valid proof-of-work not on the active chain) with peers. "
+        "Mode can be \"none\" (disabled), \"headers\" (share headers immediately), or \"blocks\" (share after downloading full block). "
+        "(default: headers)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
 
     g_wallet_init_interface.AddWalletOptions(argsman);
 
