@@ -771,6 +771,9 @@ private:
     /** Send `feefilter` message. */
     void MaybeSendFeefilter(CNode& node, Peer& peer, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
+    /** Send `staleblock` messages for any new stale tips. */
+    void MaybeSendStaleTips(CNode& node, Peer& peer, CNodeState& state) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, cs_main);
+
     FastRandomContext m_rng GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
     FeeFilterRounder m_fee_filter_rounder GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
@@ -5766,6 +5769,41 @@ void PeerManagerImpl::MaybeSendFeefilter(CNode& pto, Peer& peer, std::chrono::mi
     }
 }
 
+void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& state)
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockHeld(::cs_main);
+
+    // Check if we're even doing this
+    if (m_opts.stale_tip_mode == StaleTipMode::NONE) return;
+
+    // Check if peer wants stale tip announcements at all
+    if (peer.m_stale_tip_mode == StaleTipMode::NONE) return;
+
+    // Need to know where peer's chain is to send relevant stale tips
+    if (!state.pindexLastCommonBlock) return;
+
+    // Don't send during initial block download
+    if (m_chainman.IsInitialBlockDownload()) return;
+
+    bool prefer_blocks = m_opts.stale_tip_mode == StaleTipMode::BLOCKS && peer.m_stale_tip_mode == StaleTipMode::BLOCKS;
+
+    auto [tips, new_seqno] = m_chainman.GetStaleTips().GetTipsToAnnounce(
+        m_chainman.ActiveChain(), peer.m_stale_tip_last_seqno, prefer_blocks);
+
+    for (const auto& fork : tips) {
+        // Only send if we're confident peer has the fork point
+        if (fork.fork_point->nHeight > state.pindexLastCommonBlock->nHeight) continue;
+
+        StaleTipData data(fork);
+        MakeAndPushMessage(pto, NetMsgType::STALEBLOCK, data);
+        LogDebug(BCLog::NET, "Sending staleblock to peer %d: %zu header(s) forking from %s\n",
+                 pto.GetId(), data.m_headers.size(), data.m_hash_fork_point.ToString());
+    }
+
+    peer.m_stale_tip_last_seqno = new_seqno;
+}
+
 namespace {
 class CompareInvMempoolOrder
 {
@@ -6320,6 +6358,8 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
 
         if (!vGetData.empty())
             MakeAndPushMessage(*pto, NetMsgType::GETDATA, vGetData);
+
+        MaybeSendStaleTips(*pto, *peer, state);
     } // release cs_main
     MaybeSendFeefilter(*pto, *peer, current_time);
     return true;
