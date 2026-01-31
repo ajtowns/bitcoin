@@ -117,6 +117,7 @@ add_executable(fuzz
   signet.cpp
   socks5.cpp
   span.cpp
+  staletips.cpp
   string.cpp
   strprintf.cpp
   system.cpp
