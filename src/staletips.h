@@ -99,8 +99,6 @@ public:
         const CChain& chain,
         uint32_t last_announced_seqno,
         bool want_blocks) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-
-    uint32_t GetLastSeqno() const { return m_last_seqno; }
 };
 
 #endif // BITCOIN_STALE_TIPS_H

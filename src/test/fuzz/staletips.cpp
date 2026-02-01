@@ -77,7 +77,8 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
     constexpr int TEST_MAX_HEIGHT_DELTA{40};
     constexpr int TEST_MAX_FORK_LENGTH{10};
     StaleTips staletips{TEST_MAX_HEIGHT_DELTA, TEST_MAX_FORK_LENGTH};
-    uint32_t last_seqno = 0;
+    uint32_t last_announced_seqno = 0;
+    uint32_t last_observed_seqno = 0;  // For checking monotonicity
 
     // Build initial chain
     {
@@ -149,23 +150,51 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                 }
             },
             [&] {
-                // Query tips to announce and test StaleTipData
+                // Query tips to announce and verify invariants
                 LOCK(cs_main);
                 bool want_blocks = fuzzed_data_provider.ConsumeBool();
-                auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), last_seqno, want_blocks);
+                auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), last_announced_seqno, want_blocks);
+
+                // Sequence number must never decrease
+                assert(seqno >= last_observed_seqno);
+                last_observed_seqno = seqno;
+
                 if (fuzzed_data_provider.ConsumeBool()) {
-                    last_seqno = seqno;
+                    last_announced_seqno = seqno;
                 }
-                // Test StaleTipData constructor and ReconstructHeaders for each fork
+
+                int chain_height = chainman.ActiveChain().Height();
                 for (const auto& fork : tips) {
+                    // Basic structure checks
                     assert(fork.fork_point != nullptr);
                     assert(fork.tip != nullptr);
-                    assert(fork.tip->nHeight > fork.fork_point->nHeight);
                     assert(fork.tip->HasAncestor(fork.fork_point));
 
+                    // fork_point must be on active chain
+                    assert(chainman.ActiveChain().Contains(fork.fork_point));
+
+                    // tip must NOT be on active chain (that's what makes it stale)
+                    assert(!chainman.ActiveChain().Contains(fork.tip));
+
+                    // Fork length must be within limits
+                    int fork_length = fork.tip->nHeight - fork.fork_point->nHeight;
+                    assert(fork_length > 0);
+                    assert(fork_length <= TEST_MAX_FORK_LENGTH);
+
+                    // Tip must be within height delta of active chain tip
+                    assert(fork.tip->nHeight >= chain_height - TEST_MAX_HEIGHT_DELTA);
+
+                    // On signet, tips must have block data
+                    if (chain_type == ChainType::SIGNET) {
+                        assert(fork.tip->nStatus & BLOCK_HAVE_DATA);
+                    }
+
+                    // Test StaleTipData round-trip
                     StaleTipData data(fork);
                     auto [tip_hash, headers] = data.ReconstructHeaders();
-                    assert(headers.size() == static_cast<size_t>(fork.tip->nHeight - fork.fork_point->nHeight));
+                    assert(headers.size() == static_cast<size_t>(fork_length));
+                    // Verify reconstructed tip hash matches original
+                    assert(tip_hash == fork.tip->GetBlockHash());
                 }
             },
             [&] {
@@ -217,18 +246,30 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
             });
     }
 
-    // Final check
+    // Final invariant check on all tips
     {
         LOCK(cs_main);
         auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), 0, false);
+
+        // Final seqno should still be monotonic
+        assert(seqno >= last_observed_seqno);
+
+        int chain_height = chainman.ActiveChain().Height();
         for (const auto& fork : tips) {
             assert(fork.fork_point != nullptr);
             assert(fork.tip != nullptr);
-            int chain_height = chainman.ActiveChain().Height();
-            assert(fork.tip->nHeight >= chain_height - TEST_MAX_HEIGHT_DELTA);
+            assert(fork.tip->HasAncestor(fork.fork_point));
+            assert(chainman.ActiveChain().Contains(fork.fork_point));
+            assert(!chainman.ActiveChain().Contains(fork.tip));
+
             int fork_length = fork.tip->nHeight - fork.fork_point->nHeight;
-            assert(fork_length <= TEST_MAX_FORK_LENGTH);
             assert(fork_length > 0);
+            assert(fork_length <= TEST_MAX_FORK_LENGTH);
+            assert(fork.tip->nHeight >= chain_height - TEST_MAX_HEIGHT_DELTA);
+
+            if (chain_type == ChainType::SIGNET) {
+                assert(fork.tip->nStatus & BLOCK_HAVE_DATA);
+            }
         }
     }
 
