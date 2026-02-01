@@ -2,8 +2,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-// TODO: Add signet fuzz coverage to exercise CheckVariantHeader and
-// signet-specific code paths in Add() and AddStaleTip().
 
 #include <chain.h>
 #include <chainparams.h>
@@ -96,10 +94,11 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
         }
     }
 
-    // Initialize StaleTips (tests Initialize() code path and sets m_is_signet)
+    // Initialize StaleTips - randomly choose signet mode to exercise signet-specific code paths
+    ChainType chain_type = fuzzed_data_provider.ConsumeBool() ? ChainType::SIGNET : ChainType::MAIN;
     {
         LOCK(cs_main);
-        staletips.Initialize(Params().GetChainType(), blockman, chainman.ActiveChain());
+        staletips.Initialize(chain_type, blockman, chainman.ActiveChain());
     }
 
     LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 1000)
@@ -199,7 +198,7 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
             [&] {
                 // Re-initialize (tests Initialize with existing stale tips)
                 LOCK(cs_main);
-                staletips.Initialize(Params().GetChainType(), blockman, chainman.ActiveChain());
+                staletips.Initialize(chain_type, blockman, chainman.ActiveChain());
             },
             [&] {
                 // Simulate receiving block data for a tip we only had headers for
