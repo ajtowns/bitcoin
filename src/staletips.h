@@ -9,11 +9,11 @@
 #include <kernel/cs_main.h>
 #include <primitives/block.h>
 #include <serialize.h>
+#include <util/chaintype.h>
 
 #include <array>
 #include <vector>
 
-class CChainParams;
 namespace node {
 class BlockManager;
 }
@@ -72,6 +72,8 @@ private:
     std::array<Entry, MAX_STALE_TIPS> m_tips{};
     uint32_t m_last_seqno{0};
     bool m_is_signet{false};
+    int m_max_height_delta;
+    int m_max_fork_length;
 
     /** Returns fork_point if stale_tip is eligible (recent enough, not too deep), nullptr otherwise */
     const CBlockIndex* GetEligibleForkPoint(const CChain& chain, const CBlockIndex* stale_tip) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
@@ -79,12 +81,13 @@ private:
     void Add(const CBlockIndex* stale_tip) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
 public:
-    static constexpr int MAX_HEIGHT_DELTA{1000};
-    static constexpr int MAX_FORK_LENGTH{20};
+    static constexpr int DEFAULT_MAX_HEIGHT_DELTA{1000};
+    static constexpr int DEFAULT_MAX_FORK_LENGTH{20};
 
-    StaleTips() = default;
+    explicit StaleTips(int max_height_delta = DEFAULT_MAX_HEIGHT_DELTA, int max_fork_length = DEFAULT_MAX_FORK_LENGTH)
+        : m_max_height_delta{max_height_delta}, m_max_fork_length{max_fork_length} {}
 
-    void Initialize(const CChainParams& chainparams, node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void Initialize(ChainType chain_type, node::BlockManager& blockman, const CChain& chain) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /** Add a stale tip to the cache if eligible. Returns true if the tip was eligible.
      *  On signet, also checks for duplicate header variations (same pprev and merkle root). */

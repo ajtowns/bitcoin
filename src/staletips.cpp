@@ -112,7 +112,7 @@ const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CB
 {
     const CBlockIndex* tip = chain.Tip();
     if (tip == nullptr) return nullptr;
-    if (stale_tip->nHeight < tip->nHeight - MAX_HEIGHT_DELTA) return nullptr;
+    if (stale_tip->nHeight < tip->nHeight - m_max_height_delta) return nullptr;
 
     // On signet, only track tips where we have the full block
     if (m_is_signet && !(stale_tip->nStatus & BLOCK_HAVE_DATA)) return nullptr;
@@ -121,7 +121,7 @@ const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CB
     if (fork_point == nullptr) return nullptr;
 
     int fork_depth = stale_tip->nHeight - fork_point->nHeight;
-    if (fork_depth > MAX_FORK_LENGTH || fork_depth <= 0) return nullptr;
+    if (fork_depth > m_max_fork_length || fork_depth <= 0) return nullptr;
 
     return fork_point;
 }
@@ -188,16 +188,16 @@ void StaleTips::Add(const CBlockIndex* stale_tip)
     }
 }
 
-void StaleTips::Initialize(const CChainParams& chainparams, node::BlockManager& blockman, const CChain& chain)
+void StaleTips::Initialize(ChainType chain_type, node::BlockManager& blockman, const CChain& chain)
 {
     AssertLockHeld(::cs_main);
 
-    m_is_signet = (chainparams.GetChainType() == ChainType::SIGNET);
+    m_is_signet = (chain_type == ChainType::SIGNET);
 
     const CBlockIndex* tip = chain.Tip();
     if (tip == nullptr) return;
 
-    const int min_height = std::max<int>(tip->nHeight - MAX_HEIGHT_DELTA, 0);
+    const int min_height = std::max<int>(tip->nHeight - m_max_height_delta, 0);
 
     std::set<const CBlockIndex*> candidates;
     std::set<const CBlockIndex*> has_children;
