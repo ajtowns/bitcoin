@@ -1983,10 +1983,10 @@ class msg_feature:
         return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
 
 
-class msg_staleblock:
-    """STALEBLOCK message announcing a stale tip."""
+class msg_staletip:
+    """STALETIP message announcing a stale tip."""
     __slots__ = ("hash_fork_point", "headers", "have_block")
-    msgtype = b"staleblock"
+    msgtype = b"staletip"
 
     def __init__(self):
         self.hash_fork_point = 0
@@ -2012,7 +2012,7 @@ class msg_staleblock:
         return r
 
     def __repr__(self):
-        return f"msg_staleblock(fork_point={self.hash_fork_point:064x}, headers={len(self.headers)}, have_block={self.have_block})"
+        return f"msg_staletip(fork_point={self.hash_fork_point:064x}, headers={len(self.headers)}, have_block={self.have_block})"
 
 
 class TestFrameworkScript(unittest.TestCase):

@@ -269,11 +269,11 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  */
 inline constexpr const char* FEATURE{"feature"};
 /**
- * Announce a stale block header. Contents is an 80 byte header,
+ * Announce a stale tip. Contents is an 80 byte header,
  * followed by either 0 (if only the header is known) or the
  * witness serialized size of the block.
  */
-inline constexpr const char* STALEBLOCK{"staleblock"};
+inline constexpr const char* STALETIP{"staletip"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -314,14 +314,14 @@ inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
-    NetMsgType::STALEBLOCK,
+    NetMsgType::STALETIP,
 })};
 
 static constexpr size_t MAX_FEATUREID_LENGTH{80};
 static constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
-inline constexpr std::string_view STALEBLOCKS{"https://github.com/ajtowns/bitcoin/tree/202601-staleblocks"};
+inline constexpr std::string_view STALETIP{"https://github.com/ajtowns/bitcoin/tree/202601-staleblocks"};
 }
 
 /** nServices flags */

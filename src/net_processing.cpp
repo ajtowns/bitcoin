@@ -425,9 +425,6 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
-    /** Whether this peer shares stale block information */
-    std::atomic<bool> m_staleblocks;
-
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -774,7 +771,7 @@ private:
     /** Send `feefilter` message. */
     void MaybeSendFeefilter(CNode& node, Peer& peer, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
-    /** Send `staleblock` messages for any new stale tips. */
+    /** Send `staletip` messages for any new stale tips. */
     void MaybeSendStaleTips(CNode& node, Peer& peer, CNodeState& state) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, cs_main);
 
     /** Handle a potential stale tip: add to cache and optionally request blocks.
@@ -3777,7 +3774,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             // announce supported features
             if (m_opts.stale_tip_mode != StaleTipMode::NONE) {
                 bool prefer_blocks = (m_opts.stale_tip_mode == StaleTipMode::BLOCKS);
-                MakeAndPushFeature(pfrom, NetMsgFeature::STALEBLOCKS, prefer_blocks);
+                MakeAndPushFeature(pfrom, NetMsgFeature::STALETIP, prefer_blocks);
             }
         }
 
@@ -4021,8 +4018,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             return;
         }
 
-        if (feature_id == NetMsgFeature::STALEBLOCKS) {
-            // Peer supports stale block announcements
+        if (feature_id == NetMsgFeature::STALETIP) {
+            // Peer supports stale tip announcements
             const auto prefer_blocks = FromStream<bool>(feature_data);
             peer->m_stale_tip_mode = prefer_blocks ? StaleTipMode::BLOCKS : StaleTipMode::HEADERS;
             LogDebug(BCLog::NET, "peer %d supports stale tip announcements (modes=%s)\n", pfrom.GetId(), prefer_blocks ? "blocks" : "headers");
@@ -4934,17 +4931,17 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         return;
     }
 
-    if (msg_type == NetMsgType::STALEBLOCK)
+    if (msg_type == NetMsgType::STALETIP)
     {
         auto stale_tip_data = FromStream<StaleTipData>(vRecv);
 
         // Reconstruct the headers
         if (stale_tip_data.m_headers.empty()) {
-            LogDebug(BCLog::NET, "staleblock message had no headers, %s", pfrom.DisconnectMsg(fLogIPs));
+            LogDebug(BCLog::NET, "staletip message had no headers, %s", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
         } else if (stale_tip_data.m_headers.size() > StaleTips::DEFAULT_MAX_FORK_LENGTH) {
-            LogDebug(BCLog::NET, "staleblock message had too long header chain (%d entries), %s",
+            LogDebug(BCLog::NET, "staletip message had too long header chain (%d entries), %s",
                 stale_tip_data.m_headers.size(), pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
@@ -4958,7 +4955,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             if (known_tip != nullptr) {
                 // We already know this tip; check if we need any blocks from this peer
                 if (!HandleStaleTip(pfrom, *peer, known_tip, stale_tip_data.m_have_block)) {
-                    LogDebug(BCLog::NET, "ignoring staleblock with already known tip %s, peer=%d",
+                    LogDebug(BCLog::NET, "ignoring staletip with already known tip %s, peer=%d",
                              tip_hash.ToString(), pfrom.GetId());
                 }
                 return;
@@ -4967,24 +4964,24 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             const CBlockIndex* fork_point = m_chainman.m_blockman.LookupBlockIndex(stale_tip_data.m_hash_fork_point);
             const CBlockIndex* active_tip = m_chainman.ActiveTip();
             if (!fork_point) {
-                LogDebug(BCLog::NET, "ignoring staleblock with unknown fork point %s, peer=%d",
+                LogDebug(BCLog::NET, "ignoring staletip with unknown fork point %s, peer=%d",
                          stale_tip_data.m_hash_fork_point.ToString(), pfrom.GetId());
                 return;
             } else if (fork_point->nHeight + (int)headers.size() < active_tip->nHeight - StaleTips::DEFAULT_MAX_HEIGHT_DELTA) {
-                LogDebug(BCLog::NET, "ignoring staleblock with too old fork point %s (%d + %d < %d - %d), peer=%d",
+                LogDebug(BCLog::NET, "ignoring staletip with too old fork point %s (%d + %d < %d - %d), peer=%d",
                          stale_tip_data.m_hash_fork_point.ToString(),
                          fork_point->nHeight, headers.size(),
                          active_tip->nHeight, StaleTips::DEFAULT_MAX_HEIGHT_DELTA,
                          pfrom.GetId());
                 return;
             } else if (fork_point->nChainWork < GetAntiDoSWorkThreshold()) {
-                LogDebug(BCLog::NET, "ignoring staleblock with low-work fork point %s, peer=%d",
+                LogDebug(BCLog::NET, "ignoring staletip with low-work fork point %s, peer=%d",
                          stale_tip_data.m_hash_fork_point.ToString(), pfrom.GetId());
                 return;
             }
         }
 
-        LogDebug(BCLog::NET, "Received staleblock from peer %d: %d header(s) forking from %s, tip %s",
+        LogDebug(BCLog::NET, "Received staletip from peer %d: %d header(s) forking from %s, tip %s",
                  pfrom.GetId(), headers.size(), stale_tip_data.m_hash_fork_point.ToString(), tip_hash.ToString());
 
         // Process the headers
@@ -4992,7 +4989,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         const CBlockIndex* pindexLast = nullptr;
         if (!m_chainman.ProcessNewBlockHeaders(headers, /*min_pow_checked=*/true, state, &pindexLast)) {
             if (state.IsInvalid()) {
-                LogDebug(BCLog::NET, "staleblock headers from peer %d invalid: %s",
+                LogDebug(BCLog::NET, "staletip headers from peer %d invalid: %s",
                          pfrom.GetId(), state.ToString());
             }
             // continue processing, in case some headers were valid
@@ -5845,8 +5842,8 @@ void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& sta
         if (fork.fork_point->nHeight > state.pindexLastCommonBlock->nHeight) continue;
 
         StaleTipData data(fork);
-        MakeAndPushMessage(pto, NetMsgType::STALEBLOCK, data);
-        LogDebug(BCLog::NET, "Sending staleblock to peer %d: %zu header(s) forking from %s\n",
+        MakeAndPushMessage(pto, NetMsgType::STALETIP, data);
+        LogDebug(BCLog::NET, "Sending staletip to peer %d: %zu header(s) forking from %s\n",
                  pto.GetId(), data.m_headers.size(), data.m_hash_fork_point.ToString());
     }
 
