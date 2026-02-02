@@ -5834,6 +5834,9 @@ void PeerManagerImpl::MaybeSendStaleTips(CNode& pto, Peer& peer, CNodeState& sta
 
     bool prefer_blocks = m_opts.stale_tip_mode == StaleTipMode::BLOCKS && peer.m_stale_tip_mode == StaleTipMode::BLOCKS;
 
+    // On first announcement, send all available tips regardless of mode preference
+    if (peer.m_stale_tip_last_seqno == 0) prefer_blocks = false;
+
     auto [tips, new_seqno] = m_stale_tips.GetTipsToAnnounce(
         m_chainman.ActiveChain(), peer.m_stale_tip_last_seqno, prefer_blocks);
 

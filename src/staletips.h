@@ -70,7 +70,7 @@ private:
     };
 
     std::array<Entry, MAX_STALE_TIPS> m_tips{};
-    uint32_t m_last_seqno{0};
+    uint32_t m_last_seqno{1};
     bool m_is_signet{false};
     int m_max_height_delta;
     int m_max_fork_length;

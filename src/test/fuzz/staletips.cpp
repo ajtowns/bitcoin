@@ -155,7 +155,8 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                 bool want_blocks = fuzzed_data_provider.ConsumeBool();
                 auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), last_announced_seqno, want_blocks);
 
-                // Sequence number must never decrease
+                // Sequence number must never decrease, and is always positive
+                assert(seqno > 0);
                 assert(seqno >= last_observed_seqno);
                 last_observed_seqno = seqno;
 
@@ -251,7 +252,8 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
         LOCK(cs_main);
         auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), 0, false);
 
-        // Final seqno should still be monotonic
+        // Final seqno should still be monotonic and positive
+        assert(seqno > 0);
         assert(seqno >= last_observed_seqno);
 
         int chain_height = chainman.ActiveChain().Height();
