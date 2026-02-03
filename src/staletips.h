@@ -32,6 +32,8 @@ struct CompressedBlockHeader {
     uint32_t nBits;
     uint32_t nNonce;
 
+    friend bool operator==(const CompressedBlockHeader& a, const CompressedBlockHeader& b) = default;
+
     SERIALIZE_METHODS(CompressedBlockHeader, obj)
     {
         READWRITE(obj.nVersion, obj.hashMerkleRoot, obj.nTime, obj.nBits, obj.nNonce);
@@ -50,6 +52,8 @@ public:
 
     /** Reconstruct tip hash and full headers from compressed form */
     std::pair<uint256, std::vector<CBlockHeader>> ReconstructHeaders() const;
+
+    friend bool operator==(const StaleTipData& a, const StaleTipData& b) = default;
 
     SERIALIZE_METHODS(StaleTipData, obj)
     {
@@ -72,6 +76,7 @@ private:
     std::array<Entry, MAX_STALE_TIPS> m_tips{};
     uint32_t m_last_seqno{1};
     bool m_is_signet{false};
+    bool m_require_min_difficulty{false};
     int m_max_height_delta;
     int m_max_fork_length;
 
@@ -83,6 +88,10 @@ private:
 public:
     static constexpr int DEFAULT_MAX_HEIGHT_DELTA{1000};
     static constexpr int DEFAULT_MAX_FORK_LENGTH{20};
+
+    /** Maximum target (minimum difficulty) for stale tips on testnet3/testnet4.
+     *  Stale tips with target > this value (difficulty < 2^20) are filtered out. */
+    static constexpr uint256 MAX_TIP_TARGET{"0000000000000fffffffffffffffffffffffffffffffffffffffffffffffffff"};
 
     explicit StaleTips(int max_height_delta = DEFAULT_MAX_HEIGHT_DELTA, int max_fork_length = DEFAULT_MAX_FORK_LENGTH)
         : m_max_height_delta{max_height_delta}, m_max_fork_length{max_fork_length} {}

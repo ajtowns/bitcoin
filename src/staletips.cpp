@@ -4,6 +4,7 @@
 
 #include <staletips.h>
 
+#include <arith_uint256.h>
 #include <chain.h>
 #include <node/blockstorage.h>
 
@@ -117,6 +118,13 @@ const CBlockIndex* StaleTips::GetEligibleForkPoint(const CChain& chain, const CB
     // On signet, only track tips where we have the full block
     if (m_is_signet && !(stale_tip->nStatus & BLOCK_HAVE_DATA)) return nullptr;
 
+    // On testnet, require minimum difficulty to avoid trivial 20-minute exception blocks
+    if (m_require_min_difficulty) {
+        arith_uint256 tip_target;
+        tip_target.SetCompact(stale_tip->nBits);
+        if (tip_target > UintToArith256(StaleTips::MAX_TIP_TARGET)) return nullptr;
+    }
+
     const CBlockIndex* fork_point = chain.FindFork(stale_tip);
     if (fork_point == nullptr) return nullptr;
 
@@ -193,6 +201,7 @@ void StaleTips::Initialize(ChainType chain_type, node::BlockManager& blockman, c
     AssertLockHeld(::cs_main);
 
     m_is_signet = (chain_type == ChainType::SIGNET);
+    m_require_min_difficulty = (chain_type == ChainType::TESTNET || chain_type == ChainType::TESTNET4);
 
     const CBlockIndex* tip = chain.Tip();
     if (tip == nullptr) return;

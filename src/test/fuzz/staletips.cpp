@@ -3,9 +3,11 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 
+#include <arith_uint256.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <staletips.h>
+#include <streams.h>
 #include <sync.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
@@ -22,28 +24,37 @@ namespace {
 
 const TestingSetup* g_staletips_setup;
 
-CBlockHeader ConsumeBlockHeaderForStaleTips(FuzzedDataProvider& provider, uint256 prev_hash, int& nonce_counter)
+/** Generate a plausible nBits value: (A << 24) | B where A in [0x10, 0x1d], B in [0x0100, 0xffff] */
+uint32_t ConsumePlausibleNBits(FuzzedDataProvider& provider)
+{
+    uint32_t exponent = provider.ConsumeIntegralInRange<uint8_t>(0x10, 0x1d);
+    uint32_t mantissa = provider.ConsumeIntegralInRange<uint16_t>(0x0100, 0xffff);
+    return (exponent << 24) | mantissa;
+}
+
+CBlockHeader ConsumeBlockHeaderForStaleTips(FuzzedDataProvider& provider, uint256 prev_hash, uint32_t default_nbits, uint32_t min_difficulty_nbits)
 {
     CBlockHeader header;
-    header.nVersion = provider.ConsumeIntegral<decltype(header.nVersion)>();
+    header.nVersion = 4;
     header.hashPrevBlock = prev_hash;
-    header.hashMerkleRoot = uint256(provider.ConsumeIntegral<uint64_t>());
+    header.hashMerkleRoot = uint256(provider.ConsumeIntegral<uint32_t>());
     header.nTime = provider.ConsumeIntegral<decltype(header.nTime)>();
-    header.nBits = Params().GenesisBlock().nBits;
-    header.nNonce = nonce_counter++;
+    // Occasionally use min difficulty to test testnet rejection path
+    header.nBits = provider.ConsumeBool() ? min_difficulty_nbits : default_nbits;
+    header.nNonce = provider.ConsumeIntegral<decltype(header.nNonce)>();
     return header;
 }
 
 /** Create a duplicate header variation (same pprev + merkle root, different nonce) */
-CBlockHeader CreateDuplicateVariation(FuzzedDataProvider& provider, const CBlockIndex* original, int& nonce_counter)
+CBlockHeader CreateDuplicateVariation(FuzzedDataProvider& provider, const CBlockIndex* original)
 {
     CBlockHeader header;
-    header.nVersion = provider.ConsumeIntegral<decltype(header.nVersion)>();
+    header.nVersion = original->nVersion;
     header.hashPrevBlock = original->pprev ? original->pprev->GetBlockHash() : uint256{};
     header.hashMerkleRoot = original->hashMerkleRoot;  // Same merkle root
-    header.nTime = provider.ConsumeIntegral<decltype(header.nTime)>();
+    header.nTime = original->nTime;
     header.nBits = original->nBits;
-    header.nNonce = nonce_counter++;  // Different nonce -> different hash
+    header.nNonce = original->nNonce + 1 + provider.ConsumeIntegral<uint8_t>();
     return header;
 }
 
@@ -64,7 +75,15 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
     auto& blockman = static_cast<TestBlockManager&>(chainman.m_blockman);
     CBlockIndex* genesis = chainman.ActiveChainstate().m_chain[0];
 
-    int nonce_counter = 0;
+    // Pick chain type to test different code paths (signet, testnet, mainnet)
+    ChainType chain_type = fuzzed_data_provider.PickValueInArray<ChainType>(
+        {ChainType::MAIN, ChainType::SIGNET, ChainType::TESTNET, ChainType::TESTNET4});
+    SelectParams(chain_type);
+
+    // Compute nBits values for this chain
+    uint32_t min_difficulty_nbits = UintToArith256(Params().GetConsensus().powLimit).GetCompact();
+    uint32_t default_nbits = ConsumePlausibleNBits(fuzzed_data_provider);
+
     std::vector<CBlockIndex*> blocks;
     blocks.push_back(genesis);
 
@@ -80,38 +99,28 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
     uint32_t last_announced_seqno = 0;
     uint32_t last_observed_seqno = 0;  // For checking monotonicity
 
-    // Build initial chain
-    {
-        LOCK(cs_main);
-        int initial_length = fuzzed_data_provider.ConsumeIntegralInRange<int>(10, 100);
-        CBlockIndex* prev = genesis;
-        for (int i = 0; i < initial_length; ++i) {
-            CBlockHeader header = ConsumeBlockHeaderForStaleTips(fuzzed_data_provider, prev->GetBlockHash(), nonce_counter);
-            CBlockIndex* index = blockman.AddToBlockIndex(header, chainman.m_best_header);
-            index->nStatus |= BLOCK_HAVE_DATA;
-            blocks.push_back(index);
-            chainman.ActiveChain().SetTip(*index);
-            prev = index;
-        }
-    }
-
-    // Initialize StaleTips - randomly choose signet mode to exercise signet-specific code paths
-    ChainType chain_type = fuzzed_data_provider.ConsumeBool() ? ChainType::SIGNET : ChainType::MAIN;
-    {
-        LOCK(cs_main);
-        staletips.Initialize(chain_type, blockman, chainman.ActiveChain());
-    }
+    // we want to only call staletips.Initialize() once, and not call other
+    // functions until we've called that
+    bool have_initialized = false;
 
     LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 1000)
     {
         CallOneOf(
             fuzzed_data_provider,
             [&] {
+                if (!have_initialized) {
+                    // Initialize (tests Initialize with existing stale tips)
+                    LOCK(cs_main);
+                    staletips.Initialize(chain_type, blockman, chainman.ActiveChain());
+                    have_initialized = true;
+                }
+            },
+            [&] {
                 // Create a new block (potentially a stale branch)
                 LOCK(cs_main);
                 CBlockIndex* prev_block = PickValue(fuzzed_data_provider, blocks);
                 if (!(prev_block->nStatus & BLOCK_FAILED_MASK)) {
-                    CBlockHeader header = ConsumeBlockHeaderForStaleTips(fuzzed_data_provider, prev_block->GetBlockHash(), nonce_counter);
+                    CBlockHeader header = ConsumeBlockHeaderForStaleTips(fuzzed_data_provider, prev_block->GetBlockHash(), default_nbits, min_difficulty_nbits);
                     CBlockIndex* index = blockman.AddToBlockIndex(header, chainman.m_best_header);
                     bool have_data = fuzzed_data_provider.ConsumeBool();
                     if (have_data) {
@@ -120,7 +129,7 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                     blocks.push_back(index);
 
                     // Try to add as stale tip if not on active chain
-                    if (!chainman.ActiveChain().Contains(index)) {
+                    if (have_initialized && !chainman.ActiveChain().Contains(index)) {
                         if (staletips.AddStaleTip(chainman.ActiveChain(), index)) {
                             added_stale_tips.push_back(index);
                             // Track tips without block data for later "now have block" test
@@ -135,7 +144,7 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                 // Extend active chain
                 LOCK(cs_main);
                 CBlockIndex* tip = chainman.ActiveChain().Tip();
-                CBlockHeader header = ConsumeBlockHeaderForStaleTips(fuzzed_data_provider, tip->GetBlockHash(), nonce_counter);
+                CBlockHeader header = ConsumeBlockHeaderForStaleTips(fuzzed_data_provider, tip->GetBlockHash(), default_nbits, min_difficulty_nbits);
                 CBlockIndex* index = blockman.AddToBlockIndex(header, chainman.m_best_header);
                 index->nStatus |= BLOCK_HAVE_DATA;
                 blocks.push_back(index);
@@ -151,6 +160,8 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
             },
             [&] {
                 // Query tips to announce and verify invariants
+                if (!have_initialized) return;
+
                 LOCK(cs_main);
                 bool want_blocks = fuzzed_data_provider.ConsumeBool();
                 auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), last_announced_seqno, want_blocks);
@@ -190,16 +201,32 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                         assert(fork.tip->nStatus & BLOCK_HAVE_DATA);
                     }
 
+                    // On testnet, tips must have sufficient difficulty
+                    if (chain_type == ChainType::TESTNET || chain_type == ChainType::TESTNET4) {
+                        arith_uint256 tip_target;
+                        tip_target.SetCompact(fork.tip->nBits);
+                        assert(tip_target <= UintToArith256(StaleTips::MAX_TIP_TARGET));
+                    }
+
                     // Test StaleTipData round-trip
                     StaleTipData data(fork);
                     auto [tip_hash, headers] = data.ReconstructHeaders();
                     assert(headers.size() == static_cast<size_t>(fork_length));
                     // Verify reconstructed tip hash matches original
                     assert(tip_hash == fork.tip->GetBlockHash());
+
+                    // Test serialization round-trip
+                    DataStream ss{};
+                    ss << data;
+                    StaleTipData deserialized;
+                    ss >> deserialized;
+                    assert(deserialized == data);
                 }
             },
             [&] {
                 // Re-add an existing stale tip (tests "already tracking" path)
+                if (!have_initialized) return;
+
                 LOCK(cs_main);
                 if (!added_stale_tips.empty()) {
                     CBlockIndex* tip = PickValue(fuzzed_data_provider, added_stale_tips);
@@ -212,27 +239,24 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
                 if (!added_stale_tips.empty()) {
                     CBlockIndex* original = PickValue(fuzzed_data_provider, added_stale_tips);
                     if (original->pprev) {
-                        CBlockHeader dup_header = CreateDuplicateVariation(fuzzed_data_provider, original, nonce_counter);
+                        CBlockHeader dup_header = CreateDuplicateVariation(fuzzed_data_provider, original);
                         CBlockIndex* dup = blockman.AddToBlockIndex(dup_header, chainman.m_best_header);
                         bool have_data = fuzzed_data_provider.ConsumeBool();
                         if (have_data) {
                             dup->nStatus |= BLOCK_HAVE_DATA;
                         }
                         blocks.push_back(dup);
-                        if (!chainman.ActiveChain().Contains(dup)) {
+                        if (have_initialized && !chainman.ActiveChain().Contains(dup)) {
                             staletips.AddStaleTip(chainman.ActiveChain(), dup);
                         }
                     }
                 }
             },
             [&] {
-                // Re-initialize (tests Initialize with existing stale tips)
-                LOCK(cs_main);
-                staletips.Initialize(chain_type, blockman, chainman.ActiveChain());
-            },
-            [&] {
                 // Simulate receiving block data for a tip we only had headers for
                 // This tests the "already tracking + now have block data" path (line 147)
+                if (!have_initialized) return;
+
                 LOCK(cs_main);
                 if (!tips_without_block_data.empty()) {
                     size_t idx = fuzzed_data_provider.ConsumeIntegralInRange<size_t>(0, tips_without_block_data.size() - 1);
@@ -251,6 +275,11 @@ FUZZ_TARGET(staletips, .init = initialize_staletips)
     {
         LOCK(cs_main);
         auto [tips, seqno] = staletips.GetTipsToAnnounce(chainman.ActiveChain(), 0, false);
+
+        if (!have_initialized) {
+            assert(tips.empty());
+            assert(seqno == 1);
+        }
 
         // Final seqno should still be monotonic and positive
         assert(seqno > 0);
