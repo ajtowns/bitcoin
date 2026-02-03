@@ -100,6 +100,7 @@ add_executable(test_bitcoin
   sighash_tests.cpp
   sigopcount_tests.cpp
   skiplist_tests.cpp
+  staletips_tests.cpp
   sock_tests.cpp
   span_tests.cpp
   streams_tests.cpp
