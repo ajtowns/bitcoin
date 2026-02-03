@@ -62,7 +62,7 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 
 # Feature ID for stale tip announcements
-STALETIP_FEATURE = "https://github.com/ajtowns/bitcoin/tree/202601-staleblocks"
+STALETIP_FEATURE = "https://github.com/ajtowns/bitcoin/tree/202601-staletips"
 
 
 class StaleTipP2P(P2PInterface):

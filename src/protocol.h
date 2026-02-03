@@ -321,7 +321,7 @@ static constexpr size_t MAX_FEATUREID_LENGTH{80};
 static constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
-inline constexpr std::string_view STALETIP{"https://github.com/ajtowns/bitcoin/tree/202601-staleblocks"};
+inline constexpr std::string_view STALETIP{"https://github.com/ajtowns/bitcoin/tree/202601-staletips"};
 }
 
 /** nServices flags */
