@@ -11,6 +11,34 @@
 
 BOOST_FIXTURE_TEST_SUITE(staletips_tests, BasicTestingSetup)
 
+// Test vector from BIP staletip: BCH fork headers at heights 478559-478576
+// Fork point: height 478558, hash 0000000000000000011865af4122fe3b144e2cbeea86142e8ff2fb4107352d43
+// Stale tip: height 478576, hash 000000000000000001416af072f8989829f4c60a1a9658e1cec08411798e4ffa
+// Branch length: 18, have_block: false
+// These are valid Bitcoin headers but invalid Bitcoin blocks (478559 exceeds 1MB limit)
+static const std::string BCH_TEST_VECTOR_HEX =
+    "432d350741fbf28f2e1486eabe2c4e143bfe2241af6518010000000000000000"
+    "12"
+    "00000020abaa4bd8a48c1c6bc08ee39b66065e5e9484304cab8b56d5eed3e40b1ac996c899c480593547011822ca4ae8"
+    "0000002082afc8ef7eb41a4ecac1fea46983742e491f804ad662e3745ab9c6c4297d8a0862c980593547011840a772cb"
+    "0200002058874e50628fdf83aeea4e8cbc7ade946e9ba14bcb1d8ffb28c3daf8ade84df65fca805935470118e2f51003"
+    "00000020111b85f9d3b969a1f7ff3d50af08893c500edfc5623b96dbeab6daf16a5164a40ace805935470118c4f4240a"
+    "0000002040a045063b551b61d6a1c9db6d3231e2d7403185bbb2332ae1f66db24aac7fa288d8805935470118f15dd76b"
+    "0000002070cb14529e8757c359c2e8b1e987f6eee6fbc4472ee9ad4a2e5df6905c19d6d70bed80593547011885ae00d0"
+    "000000209653314c1d73e4630bb485fb25ce7a2583cec7c3ccfc27a6d24163be1e9fb19530f4805935470118f17ad2c5"
+    "00000020cdf48b8e7ac6bf3a51d1878ee3ff7e6fd0022926dd69cc5cc8d9126e77c4dba809f58059354701188114e836"
+    "00000020890cf1dc60edbf0fd4fb667f28ac785849c031d8b24d5e5a0af56ee2bd8a739bf51081593547011812f32a96"
+    "00000020ff5244613ad20fdc39b7ee6f4fbc7016432d2dbf45c2a950c59665b39c3954b5b525815935470118aa790d66"
+    "00000020aeed520e7c1693de5cfe7531e7d3e73dff7858b09cb6e1ec29229a75c3da2b92453e81593547011830a4314d"
+    "000000202e4a4054e64c3f5810c23ec0144d9793aab2d5a7d77d1660eee24d3d55e8b715b543815935470118da1c00e0"
+    "0000002073152af68778a98fd984a158aeb29d28e094e23c3a7dff02260c345791e52498c3fb8159354701188d5abed9"
+    "0000002022606e744a29f9d4a67ff1fcd2f0e31300ddbd145f8f1db8a68270bfbde77dd88fff8159354701186af175f8"
+    "000000209f5db27969fecc0ef71503279069b2df981ba545592a7b425f353b5060e77f3e7e13825935470118da70378e"
+    "000000202f0d316b08350f5cd998c6a11762d10adb9f951b5f79ce2a073f8187c05f561f1b1c8259354701184834c623"
+    "00000020cf8fc3bad8dad139a3dd6a30481d87e1f760122573168002cc9ef7a58fc53ad387848259354701188a3b54f7"
+    "000000200eae92d9b46d81a011a79726a802d4eb195a7af8b70a09b0e115c391968c50d51c8a825935470118cd786d13"
+    "00";
+
 // Test vector from BIP staletip: Signet stale branch at heights 287767-287785
 // Fork point: height 287766, hash 00000012602fde2eaf33a90523f42fb07ca854c1d26108782dc4592a80507e1c
 // Stale tip: height 287785, hash 0000000024ff924ff932668d497bba7da9157559a68d9c87d2f28d22e5e4a001
@@ -102,6 +130,71 @@ BOOST_AUTO_TEST_CASE(staletip_testvector_roundtrip)
 
     // Verify round-trip produces identical bytes
     BOOST_CHECK_EQUAL(HexStr(ss2), SIGNET_TEST_VECTOR_HEX);
+}
+
+BOOST_AUTO_TEST_CASE(bch_testvector_deserialize)
+{
+    // Decode the test vector
+    auto data = ParseHex(BCH_TEST_VECTOR_HEX);
+    DataStream ss{data};
+
+    // Deserialize
+    StaleTipData tip_data;
+    ss >> tip_data;
+
+    // Verify fork point hash
+    BOOST_CHECK_EQUAL(tip_data.m_hash_fork_point.ToString(),
+        "0000000000000000011865af4122fe3b144e2cbeea86142e8ff2fb4107352d43");
+
+    // Verify branch length
+    BOOST_CHECK_EQUAL(tip_data.m_headers.size(), 18U);
+
+    // Verify have_block
+    BOOST_CHECK_EQUAL(tip_data.m_have_block, false);
+
+    // Verify first header (block 478559)
+    BOOST_CHECK_EQUAL(tip_data.m_headers[0].nVersion, 536870912);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[0].hashMerkleRoot.ToString(),
+        "c896c91a0be4d3eed5568bab4c3084945e5e06669be38ec06b1c8ca4d84baaab");
+    BOOST_CHECK_EQUAL(tip_data.m_headers[0].nTime, 1501611161U);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[0].nBits, 0x18014735U);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[0].nNonce, 3897215522U);
+
+    // Verify last header (block 478576, the stale tip)
+    BOOST_CHECK_EQUAL(tip_data.m_headers[17].nVersion, 536870912);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[17].hashMerkleRoot.ToString(),
+        "d5508c9691c315e1b0090ab7f87a5a19ebd402a82697a711a0816db4d992ae0e");
+    BOOST_CHECK_EQUAL(tip_data.m_headers[17].nTime, 1501727260U);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[17].nBits, 0x18014735U);
+    BOOST_CHECK_EQUAL(tip_data.m_headers[17].nNonce, 325941453U);
+
+    // Reconstruct headers and verify tip hash
+    auto [tip_hash, headers] = tip_data.ReconstructHeaders();
+    BOOST_CHECK_EQUAL(headers.size(), 18U);
+    BOOST_CHECK_EQUAL(tip_hash.ToString(),
+        "000000000000000001416af072f8989829f4c60a1a9658e1cec08411798e4ffa");
+
+    // Verify first reconstructed header has correct prevblock
+    BOOST_CHECK_EQUAL(headers[0].hashPrevBlock.ToString(),
+        "0000000000000000011865af4122fe3b144e2cbeea86142e8ff2fb4107352d43");
+}
+
+BOOST_AUTO_TEST_CASE(bch_testvector_roundtrip)
+{
+    // Decode the test vector
+    auto data = ParseHex(BCH_TEST_VECTOR_HEX);
+    DataStream ss{data};
+
+    // Deserialize
+    StaleTipData tip_data;
+    ss >> tip_data;
+
+    // Re-serialize
+    DataStream ss2{};
+    ss2 << tip_data;
+
+    // Verify round-trip produces identical bytes
+    BOOST_CHECK_EQUAL(HexStr(ss2), BCH_TEST_VECTOR_HEX);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
