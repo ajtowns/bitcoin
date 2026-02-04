@@ -3465,6 +3465,98 @@ return RPCHelpMan{
 }
 
 
+static RPCHelpMan getbip54readiness()
+{
+    return RPCHelpMan{"getbip54readiness",
+        "Returns coinbase BIP54 compliance statistics for recent blocks.\n"
+        "Checks whether each block's coinbase transaction has nLockTime set to\n"
+        "height-1 and nSequence not set to 0xffffffff, as required by BIP 54.\n",
+        {
+            {"count", RPCArg::Type::NUM, RPCArg::Default{100}, "Number of blocks to check (max 2016)"},
+            {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "The block hash to start from (default: chain tip)"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "", {
+                {RPCResult::Type::STR_HEX, "blockhash", "the hash of the latest block checked"},
+                {RPCResult::Type::NUM, "height", "the height of the latest block checked"},
+                {RPCResult::Type::NUM, "blocks", "number of blocks checked"},
+                {RPCResult::Type::NUM, "bip54_compatible", "blocks with BIP54-compatible coinbase"},
+                {RPCResult::Type::OBJ_DYN, "bip54_incompatible", "incompatible blocks keyed by height (limited to 100)", {
+                    {RPCResult::Type::OBJ, "height", "", {
+                        {RPCResult::Type::NUM, "locktime", "coinbase nLockTime value"},
+                        {RPCResult::Type::BOOL, "final", "true if coinbase nSequence is 0xffffffff"},
+                    }},
+                }},
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("getbip54readiness", "")
+            + HelpExampleCli("getbip54readiness", "1000")
+            + HelpExampleCli("getbip54readiness", "2016 \"00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054\"")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        {
+            ChainstateManager& chainman = EnsureAnyChainman(request.context);
+            LOCK(cs_main);
+
+            const int count = request.params[0].isNull() ? 100 : request.params[0].getInt<int>();
+            if (count < 1 || count > 2016) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "count must be between 1 and 2016");
+            }
+
+            const CBlockIndex* start_block;
+            if (request.params[1].isNull()) {
+                start_block = chainman.ActiveChainstate().m_chain.Tip();
+                if (!start_block) {
+                    throw JSONRPCError(RPC_IN_WARMUP, "Chain not yet available");
+                }
+            } else {
+                uint256 hash(ParseHashV(request.params[1], "blockhash"));
+                start_block = chainman.m_blockman.LookupBlockIndex(hash);
+                if (!start_block) {
+                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+                }
+            }
+
+            int compatible = 0;
+            int incompatible = 0;
+            UniValue incompatible_map(UniValue::VOBJ);
+
+            const CBlockIndex* pindex = start_block;
+            for (int i = 0; i < count && pindex && pindex->nHeight > 0; ++i, pindex = pindex->pprev) {
+                CBlock block;
+                if (!chainman.m_blockman.ReadBlock(block, *pindex)) {
+                    throw JSONRPCError(RPC_DATABASE_ERROR, strprintf("Failed to read block at height %d", pindex->nHeight));
+                }
+
+                const CTransaction& coinbase = *block.vtx[0];
+                bool locktime_ok = coinbase.nLockTime == static_cast<uint32_t>(pindex->nHeight - 1);
+                bool sequence_ok = !coinbase.vin.empty() && coinbase.vin[0].nSequence != CTxIn::SEQUENCE_FINAL;
+
+                if (locktime_ok && sequence_ok) {
+                    ++compatible;
+                } else {
+                    ++incompatible;
+                    if (incompatible <= 100) {
+                        UniValue details(UniValue::VOBJ);
+                        details.pushKV("locktime", static_cast<int64_t>(coinbase.nLockTime));
+                        details.pushKV("final", !coinbase.vin.empty() && coinbase.vin[0].nSequence == CTxIn::SEQUENCE_FINAL);
+                        incompatible_map.pushKV(strprintf("%d", pindex->nHeight), details);
+                    }
+                }
+            }
+
+            UniValue result(UniValue::VOBJ);
+            result.pushKV("blockhash", start_block->GetBlockHash().ToString());
+            result.pushKV("height", start_block->nHeight);
+            result.pushKV("blocks", compatible + incompatible);
+            result.pushKV("bip54_compatible", compatible);
+            result.pushKV("bip54_incompatible", incompatible_map);
+            return result;
+        },
+    };
+}
+
 void RegisterBlockchainRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -3480,6 +3572,7 @@ void RegisterBlockchainRPCCommands(CRPCTable& t)
         {"blockchain", &getchaintips},
         {"blockchain", &getdifficulty},
         {"blockchain", &getdeploymentinfo},
+        {"blockchain", &getbip54readiness},
         {"blockchain", &gettxout},
         {"blockchain", &gettxoutsetinfo},
         {"blockchain", &pruneblockchain},
