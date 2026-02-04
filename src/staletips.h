@@ -2,8 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef BITCOIN_STALE_TIPS_H
-#define BITCOIN_STALE_TIPS_H
+#ifndef BITCOIN_STALETIPS_H
+#define BITCOIN_STALETIPS_H
 
 #include <chain.h>
 #include <kernel/cs_main.h>
@@ -110,4 +110,4 @@ public:
         bool want_blocks) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 };
 
-#endif // BITCOIN_STALE_TIPS_H
+#endif // BITCOIN_STALETIPS_H

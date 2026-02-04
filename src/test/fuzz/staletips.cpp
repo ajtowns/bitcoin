@@ -37,7 +37,7 @@ CBlockHeader ConsumeBlockHeaderForStaleTips(FuzzedDataProvider& provider, uint25
     CBlockHeader header;
     header.nVersion = 4;
     header.hashPrevBlock = prev_hash;
-    header.hashMerkleRoot = uint256(provider.ConsumeIntegral<uint32_t>());
+    header.hashMerkleRoot = uint256(provider.ConsumeIntegral<uint8_t>());
     header.nTime = provider.ConsumeIntegral<decltype(header.nTime)>();
     // Occasionally use min difficulty to test testnet rejection path
     header.nBits = provider.ConsumeBool() ? min_difficulty_nbits : default_nbits;

@@ -281,7 +281,7 @@ public:
     const CBlockIndex* GetAncestor(int height) const;
 
     //! Shortcut to check if a block is an ancestor of this block.
-    bool HasAncestor(const CBlockIndex* anc) const 
+    bool HasAncestor(const CBlockIndex* anc) const
     {
         if (!anc) return true;
         return anc->nHeight <= nHeight && anc == GetAncestor(anc->nHeight);
