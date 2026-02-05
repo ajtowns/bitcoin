@@ -3478,7 +3478,7 @@ static RPCHelpMan getbip54readiness()
         "Checks whether each block's coinbase transaction has nLockTime set to\n"
         "height-1 and nSequence not set to 0xffffffff, as required by BIP 54.\n",
         {
-            {"count", RPCArg::Type::NUM, RPCArg::Default{100}, "Number of blocks to check (max 2016)"},
+            {"count", RPCArg::Type::NUM, RPCArg::Default{2016}, "Number of blocks to check (max 100000)"},
             {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "The block hash to start from (default: chain tip)"},
         },
         RPCResult{
@@ -3505,9 +3505,9 @@ static RPCHelpMan getbip54readiness()
             ChainstateManager& chainman = EnsureAnyChainman(request.context);
             LOCK(cs_main);
 
-            const int count = request.params[0].isNull() ? 100 : request.params[0].getInt<int>();
-            if (count < 1 || count > 2016) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "count must be between 1 and 2016");
+            const int count = request.params[0].isNull() ? 2016 : request.params[0].getInt<int>();
+            if (count < 1 || count > 100000) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "count must be between 1 and 100000");
             }
 
             const CBlockIndex* start_block;
@@ -3531,7 +3531,7 @@ static RPCHelpMan getbip54readiness()
             const CBlockIndex* pindex = start_block;
             for (int i = 0; i < count && pindex && pindex->nHeight > 0; ++i, pindex = pindex->pprev) {
                 CBlock block;
-                if (!chainman.m_blockman.ReadBlock(block, *pindex)) {
+                if (!chainman.m_blockman.ReadBlockCoinbase(block, *pindex)) {
                     throw JSONRPCError(RPC_DATABASE_ERROR, strprintf("Failed to read block at height %d", pindex->nHeight));
                 }
 
