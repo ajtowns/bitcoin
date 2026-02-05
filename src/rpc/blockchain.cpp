@@ -188,6 +188,10 @@ UniValue blockToJSON(BlockManager& blockman, const CBlock& block, const CBlockIn
     result.pushKV("strippedsize", ::GetSerializeSize(TX_NO_WITNESS(block)));
     result.pushKV("size", ::GetSerializeSize(TX_WITH_WITNESS(block)));
     result.pushKV("weight", ::GetBlockWeight(block));
+    if (!block.vtx.empty() && block.vtx[0]->vin.size() == 1) {
+        result.pushKV("tx0_locktime", block.vtx[0]->nLockTime);
+        result.pushKV("tx0_seq_final", block.vtx[0]->vin[0].nSequence == CTxIn::SEQUENCE_FINAL);
+    }
     UniValue txs(UniValue::VARR);
     txs.reserve(block.vtx.size());
 
@@ -764,6 +768,8 @@ static RPCHelpMan getblock()
                     {RPCResult::Type::NUM, "version", "The block version"},
                     {RPCResult::Type::STR_HEX, "versionHex", "The block version formatted in hexadecimal"},
                     {RPCResult::Type::STR_HEX, "merkleroot", "The merkle root"},
+                    {RPCResult::Type::NUM, "tx0_locktime", "The coinbase transaction's nLockTime"},
+                    {RPCResult::Type::BOOL, "tx0_seq_final", "Whether the coinbase's first input nSequence is final (0xffffffff)"},
                     {RPCResult::Type::ARR, "tx", "The transaction ids",
                         {{RPCResult::Type::STR_HEX, "", "The transaction id"}}},
                     {RPCResult::Type::NUM_TIME, "time",       "The block time expressed in " + UNIX_EPOCH_TIME},
