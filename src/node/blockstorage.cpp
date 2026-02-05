@@ -1064,6 +1064,29 @@ bool BlockManager::ReadBlock(CBlock& block, const CBlockIndex& index) const
     return ReadBlock(block, block_pos, index.GetBlockHash());
 }
 
+bool BlockManager::ReadBlockCoinbase(CBlock& block, const CBlockIndex& index) const
+{
+    const FlatFilePos block_pos{WITH_LOCK(cs_main, return index.GetBlockPos())};
+    block.SetNull();
+
+    const auto block_data{ReadRawBlock(block_pos)};
+    if (!block_data) return false;
+
+    try {
+        SpanReader reader{*block_data};
+        reader >> AsBase<CBlockHeader>(block);
+        if (ReadCompactSize(reader) > 0) {
+            CTransactionRef coinbase;
+            reader >> TX_WITH_WITNESS(coinbase);
+            block.vtx.push_back(std::move(coinbase));
+        }
+    } catch (const std::exception& e) {
+        LogError("%s: deserialize or I/O error - %s at %s", __func__, e.what(), block_pos.ToString());
+        return false;
+    }
+    return true;
+}
+
 BlockManager::ReadRawBlockResult BlockManager::ReadRawBlock(const FlatFilePos& pos, std::optional<std::pair<size_t, size_t>> block_part) const
 {
     if (pos.nPos < STORAGE_HEADER_BYTES) {
