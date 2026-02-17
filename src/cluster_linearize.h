@@ -679,7 +679,6 @@ private:
         TxIdx parent, child;
         /** (Only if this dependency is active) the would-be top chunk and its feerate that would
          *  be formed if this dependency were to be deactivated. */
-        SetInfo<SetType> top_setinfo;
         SetIdx dep_top_idx;
     };
 
@@ -691,7 +690,7 @@ private:
     /** Information about each transaction (and chunks). Keeps the "holes" from DepGraph during
      *  construction. Indexed by TxIdx. */
     std::vector<TxData> m_tx_data;
-    /** Information about each set (chunk). Indexed by SetIdx. */
+    /** Information about each set (chunk, or active dependency top set). Indexed by SetIdx. */
     std::vector<SetInfo<SetType>> m_set_info;
     /** Information about each dependency. Indexed by DepIdx. */
     std::vector<DepData> m_dep_data;
@@ -726,7 +725,7 @@ private:
 
     /** Update a chunk:
      *  - All transactions have their chunk representative set to `chunk_idx`.
-     *  - All dependencies which have `query` in their top_setinfo get `dep_change` added to it
+     *  - All dependencies which have `query` in their top setinfo get `dep_change` added to it
      *    (if `!Subtract`) or removed from it (if `Subtract`).
      */
     template<bool Subtract>
@@ -745,13 +744,14 @@ private:
                 Assume(dep_entry.parent == tx_idx);
                 // Skip inactive dependencies.
                 if (!dep_entry.active) continue;
-                // If this dependency's top_setinfo contains query, update it to add/remove
+                // If this dependency's topset contains query, update it to add/remove
                 // dep_change.
-                if (dep_entry.top_setinfo.transactions[query]) {
+                auto& top_set_info = m_set_info[dep_entry.dep_top_idx];
+                if (top_set_info.transactions[query]) {
                     if constexpr (Subtract) {
-                        dep_entry.top_setinfo -= dep_change;
+                        top_set_info -= dep_change;
                     } else {
-                        dep_entry.top_setinfo |= dep_change;
+                        top_set_info |= dep_change;
                     }
                 }
             }
@@ -810,7 +810,7 @@ private:
                            /*chunk_idx=*/top_idx, /*dep_change=*/top_part);
         // Make active.
         dep_data.active = true;
-        dep_data.top_setinfo = top_part;
+        m_set_info[child_chunk_idx] = top_part;
         dep_data.dep_top_idx = child_chunk_idx;
         m_chunk_idxs.Reset(child_chunk_idx);
 
@@ -833,7 +833,7 @@ private:
         dep_data.active = false;
         // Update representatives.
         m_cost += m_set_info[parent_tx_data.chunk_idx].transactions.Count();
-        auto top_part = dep_data.top_setinfo;
+        auto top_part = m_set_info[dep_data.dep_top_idx];
         auto bottom_part = m_set_info[parent_tx_data.chunk_idx] - top_part;
         SetIdx bottom_idx = new_chunk_idx;
         auto& bottom_chunk_data = m_set_info[bottom_idx];
@@ -1137,9 +1137,10 @@ public:
                 for (DepIdx dep_idx : children) {
                     const auto& dep_data = m_dep_data[dep_idx];
                     if (!dep_data.active) continue;
+                    auto& dep_top_info = m_set_info[dep_data.dep_top_idx];
                     // Skip if this dependency is ineligible (the top chunk that would be created
                     // does not have higher feerate than the chunk it is currently part of).
-                    auto cmp = FeeRateCompare(dep_data.top_setinfo.feerate, chunk_data.feerate);
+                    auto cmp = FeeRateCompare(dep_top_info.feerate, chunk_data.feerate);
                     if (cmp <= 0) continue;
                     // Generate a random tiebreak for this dependency, and reject it if its tiebreak
                     // is worse than the best so far. This means that among all eligible
@@ -1209,13 +1210,14 @@ public:
                 auto& dep_data = m_dep_data[dep_idx];
                 // Skip inactive child dependencies.
                 if (!dep_data.active) continue;
+                const auto& dep_top_info = m_set_info[dep_data.dep_top_idx];
                 // Skip if this dependency does not have equal top and bottom set feerates. Note
                 // that the top cannot have higher feerate than the bottom, or OptimizeSteps would
                 // have dealt with it.
-                if (dep_data.top_setinfo.feerate << chunk_data.feerate) continue;
+                if (dep_top_info.feerate << chunk_data.feerate) continue;
                 have_any = true;
                 // Skip if this dependency does not have pivot in the right place.
-                if (move_pivot_down == dep_data.top_setinfo.transactions[pivot_idx]) continue;
+                if (move_pivot_down == dep_top_info.transactions[pivot_idx]) continue;
                 // Remember this as our chosen dependency if it has a better tiebreak.
                 uint64_t tiebreak = m_rng.rand64() | 1;
                 if (tiebreak > candidate_tiebreak) {
@@ -1554,7 +1556,7 @@ public:
         }
 
         //
-        // Verify active dependencies' top_setinfo.
+        // Verify active dependencies' top sets.
         //
         for (const auto& [par_idx, chl_idx, dep_idx] : active_dependencies) {
             const auto& dep_data = m_dep_data[dep_idx];
@@ -1579,10 +1581,10 @@ public:
                 }
             }
             assert(!expected_top[chl_idx]);
-            assert(dep_data.top_setinfo.transactions == expected_top);
-            // Verify the top_info's feerate.
-            assert(dep_data.top_setinfo.feerate ==
-                   m_depgraph.FeeRate(dep_data.top_setinfo.transactions));
+            auto& dep_top_info = m_set_info[dep_data.dep_top_idx];
+            assert(dep_top_info.transactions == expected_top);
+            // Verify the top set's feerate.
+            assert(dep_top_info.feerate == m_depgraph.FeeRate(dep_top_info.transactions));
         }
 
         //
