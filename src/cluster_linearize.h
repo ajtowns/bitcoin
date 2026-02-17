@@ -680,6 +680,7 @@ private:
         /** (Only if this dependency is active) the would-be top chunk and its feerate that would
          *  be formed if this dependency were to be deactivated. */
         SetInfo<SetType> top_setinfo;
+        SetIdx dep_top_idx;
     };
 
     /** The set of all TxIdx's of transactions in the cluster indexing into m_tx_data. */
@@ -810,6 +811,7 @@ private:
         // Make active.
         dep_data.active = true;
         dep_data.top_setinfo = top_part;
+        dep_data.dep_top_idx = child_chunk_idx;
         m_chunk_idxs.Reset(child_chunk_idx);
 
         return top_idx;
@@ -821,29 +823,26 @@ private:
         auto& dep_data = m_dep_data[dep_idx];
         Assume(dep_data.active);
         auto& parent_tx_data = m_tx_data[dep_data.parent];
+
+        auto old_chunk_idx = parent_tx_data.chunk_idx;
+        auto new_chunk_idx = dep_data.dep_top_idx;
+        Assume(m_chunk_idxs[old_chunk_idx]);
+        Assume(!m_chunk_idxs[new_chunk_idx]);
+
         // Make inactive.
         dep_data.active = false;
         // Update representatives.
         m_cost += m_set_info[parent_tx_data.chunk_idx].transactions.Count();
         auto top_part = dep_data.top_setinfo;
         auto bottom_part = m_set_info[parent_tx_data.chunk_idx] - top_part;
-        SetIdx bottom_idx = dep_data.child.value;
+        SetIdx bottom_idx = new_chunk_idx;
         auto& bottom_chunk_data = m_set_info[bottom_idx];
         bottom_chunk_data = bottom_part;
-        SetIdx top_idx = dep_data.parent.value;
+        SetIdx top_idx = old_chunk_idx;
         auto& top_chunk_data = m_set_info[top_idx];
         top_chunk_data = top_part;
 
-        auto old_chunk_idx = parent_tx_data.chunk_idx;
-        auto parent_chunk_idx = top_idx;
-        auto child_chunk_idx = bottom_idx;
-        Assume(parent_chunk_idx != child_chunk_idx);
-        Assume(m_chunk_idxs[old_chunk_idx]);
-        Assume(old_chunk_idx == child_chunk_idx || !m_chunk_idxs[child_chunk_idx]);
-        Assume(old_chunk_idx == parent_chunk_idx || !m_chunk_idxs[parent_chunk_idx]);
-        m_chunk_idxs.Reset(old_chunk_idx);
-        m_chunk_idxs.Set(child_chunk_idx);
-        m_chunk_idxs.Set(parent_chunk_idx);
+        m_chunk_idxs.Set(new_chunk_idx);
 
         // See the comment above in Activate(). We perform the opposite operations here,
         // removing instead of adding.
@@ -1005,7 +1004,9 @@ public:
         m_transaction_idxs = depgraph.Positions();
         auto num_transactions = m_transaction_idxs.Count();
         m_tx_data.resize(depgraph.PositionRange());
-        m_set_info.resize(depgraph.PositionRange());
+        m_set_info.resize(num_transactions);
+        size_t num_chunks = 0;
+
         // Reserve the maximum number of (reserved) dependencies the cluster can have, so
         // m_dep_data won't need any reallocations during construction. For a cluster with N
         // transactions, the worst case consists of two sets of transactions, the parents and the
@@ -1014,15 +1015,14 @@ public:
         // and the other can be (N - 1)/2, meaning (N^2 - 1)/4 dependencies. Because N^2 is odd in
         // this case, N^2/4 (with rounding-down division) is the correct value in both cases.
         m_dep_data.reserve((num_transactions * num_transactions) / 4);
-        for (auto tx : m_transaction_idxs) {
+        for (auto tx_idx : m_transaction_idxs) {
             // Fill in transaction data.
-            auto& tx_data = m_tx_data[tx];
-            auto& setinfo = m_set_info[tx];
-            tx_data.chunk_idx = tx;
-            setinfo.transactions = SetType::Singleton(tx);
-            setinfo.feerate = depgraph.FeeRate(tx);
+            auto& tx_data = m_tx_data[tx_idx];
+            // Create a singleton chunk for it.
+            tx_data.chunk_idx = num_chunks;
+            m_set_info[num_chunks++] = SetInfo(depgraph, tx_idx);
             // Add its dependencies.
-            SetType parents = depgraph.GetReducedParents(tx);
+            SetType parents = depgraph.GetReducedParents(tx_idx);
             for (auto par : parents) {
                 auto& par_tx_data = m_tx_data[par];
                 auto dep_idx = m_dep_data.size();
@@ -1030,16 +1030,17 @@ public:
                 auto& dep = m_dep_data.emplace_back();
                 dep.active = false;
                 dep.parent = par;
-                dep.child = tx;
+                dep.child = tx_idx;
                 // Add it as parent of the child.
                 tx_data.parents.Set(par);
                 // Add it as child of the parent.
                 par_tx_data.child_deps.push_back(dep_idx);
-                par_tx_data.children.Set(tx);
+                par_tx_data.children.Set(tx_idx);
             }
         }
+        Assume(num_chunks == num_transactions);
         // Mark all txs as individual chunks.
-        m_chunk_idxs = m_transaction_idxs;
+        m_chunk_idxs = SetType::Fill(num_chunks);
     }
 
     /** Load an existing linearization. Must be called immediately after constructor. The result is
@@ -1074,10 +1075,9 @@ public:
             // Pop an entry from the potentially-suboptimal chunk queue.
             SetIdx chunk = m_suboptimal_chunks.front();
             m_suboptimal_chunks.pop_front();
-            auto& chunk_data = m_tx_data[chunk];
-            // If what was popped is not currently a chunk representative, continue. This may
+            // If what was popped is not currently a chunk, continue. This may
             // happen when it was merged with something else since being added.
-            if (chunk_data.chunk_idx != chunk) continue;
+            if (!m_chunk_idxs[chunk]) continue;
             int flip = m_rng.randbool();
             for (int i = 0; i < 2; ++i) {
                 if (i ^ flip) {
@@ -1292,14 +1292,14 @@ public:
     {
         /** The output linearization. */
         std::vector<DepGraphIndex> ret;
-        ret.reserve(m_transaction_idxs.Count());
-        /** A heap with all chunks (by representative) that can currently be included, sorted by
+        ret.reserve(m_set_info.size());
+        /** A heap with all chunks (by set index) that can currently be included, sorted by
          *  chunk feerate (high to low), chunk size (small to large), and by least maximum element
          *  according to the fallback order (which is the second pair element). */
         std::vector<std::pair<SetIdx, TxIdx>> ready_chunks;
-        /** For every chunk, indexed by representative, the number of unmet dependencies the chunk has on
+        /** For every chunk, indexed by SetIdx, the number of unmet dependencies the chunk has on
          *  other chunks (not including dependencies within the chunk itself). */
-        std::vector<TxIdx> chunk_deps(m_tx_data.size(), 0);
+        std::vector<TxIdx> chunk_deps(m_set_info.size(), 0);
         /** For every transaction, indexed by TxIdx, the number of unmet dependencies the
          *  transaction has. */
         std::vector<TxIdx> tx_deps(m_tx_data.size(), 0);
@@ -1381,7 +1381,6 @@ public:
             auto [chunk_idx, _rnd] = ready_chunks.front();
             std::pop_heap(ready_chunks.begin(), ready_chunks.end(), chunk_cmp_fn);
             ready_chunks.pop_back();
-            Assume(m_tx_data[chunk_idx].chunk_idx == chunk_idx);
             Assume(chunk_deps[chunk_idx] == 0);
             const auto& chunk_txn = m_set_info[chunk_idx].transactions;
             // Build heap of all includable transactions in chunk.
@@ -1423,7 +1422,7 @@ public:
                 }
             }
         }
-        Assume(ret.size() == m_transaction_idxs.Count());
+        Assume(ret.size() == m_set_info.size());
         return ret;
     }
 
@@ -1490,19 +1489,20 @@ public:
         SetType chunk_cover;
         for (SetIdx chunk_idx : m_chunk_idxs) {
             // Only process chunks for now.
-            const auto& chunk_data = m_set_info[chunk_idx];
+            const auto& chunk_info = m_set_info[chunk_idx];
             // Verify that transactions in the chunk point back to it. This guarantees
             // that chunks are non-overlapping.
-            for (auto chunk_tx : chunk_data.transactions) {
+            for (auto chunk_tx : chunk_info.transactions) {
                 assert(m_tx_data[chunk_tx].chunk_idx == chunk_idx);
             }
-            assert(!chunk_cover.Overlaps(chunk_data.transactions));
-            chunk_cover |= chunk_data.transactions;
+            assert(!chunk_cover.Overlaps(chunk_info.transactions));
+            chunk_cover |= chunk_info.transactions;
             // Verify the chunk's transaction set: it must contain the representative, and for
             // every active dependency, if it contains the parent or child, it must contain
             // both. It must have exactly N-1 active dependencies in it, guaranteeing it is
             // acyclic.
-            SetType expected_chunk = SetType::Singleton(chunk_idx);
+            assert(chunk_info.transactions.Any());
+            SetType expected_chunk = SetType::Singleton(chunk_info.transactions.First());
             while (true) {
                 auto old = expected_chunk;
                 size_t active_dep_count{0};
@@ -1518,10 +1518,10 @@ public:
                     break;
                 }
             }
-            assert(chunk_data.transactions == expected_chunk);
+            assert(chunk_info.transactions == expected_chunk);
             // Verify the chunk's feerate.
-            assert(chunk_data.feerate ==
-                   m_depgraph.FeeRate(chunk_data.transactions));
+            assert(chunk_info.feerate ==
+                   m_depgraph.FeeRate(chunk_info.transactions));
         }
         // Verify that together, the chunks cover all transactions.
         assert(chunk_cover == m_depgraph.Positions());
@@ -1534,7 +1534,6 @@ public:
             const auto& tx_data = m_tx_data[tx_idx];
             // Verify it has a valid chunk representative, and that chunk includes this
             // transaction.
-            assert(m_tx_data[tx_data.chunk_idx].chunk_idx == tx_data.chunk_idx);
             assert(m_set_info[tx_data.chunk_idx].transactions[tx_idx]);
             assert(m_chunk_idxs[tx_data.chunk_idx]);
             // Verify parents/children.
@@ -1590,8 +1589,8 @@ public:
         // Verify m_suboptimal_chunks.
         //
         for (size_t i = 0; i < m_suboptimal_chunks.size(); ++i) {
-            auto tx_idx = m_suboptimal_chunks[i];
-            assert(m_transaction_idxs[tx_idx]);
+            auto chunk_idx = m_suboptimal_chunks[i];
+            assert(chunk_idx < m_set_info.size());
         }
 
         //
@@ -1600,12 +1599,10 @@ public:
         SetType nonminimal_idxs;
         for (size_t i = 0; i < m_nonminimal_chunks.size(); ++i) {
             auto [chunk_idx, pivot, flags] = m_nonminimal_chunks[i];
-            assert(m_tx_data[chunk_idx].chunk_idx == chunk_idx);
             assert(m_tx_data[pivot].chunk_idx == chunk_idx);
             assert(!nonminimal_idxs[chunk_idx]);
             nonminimal_idxs.Set(chunk_idx);
         }
-        assert(nonminimal_idxs.IsSubsetOf(m_transaction_idxs));
         assert(nonminimal_idxs.IsSubsetOf(m_chunk_idxs));
     }
 };
