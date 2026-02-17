@@ -755,7 +755,7 @@ private:
     }
 
     /** Make a specified inactive dependency active. Returns the merged chunk index. */
-    SetIdx Activate(DepIdx dep_idx) noexcept
+    TxIdx Activate(DepIdx dep_idx) noexcept
     {
         auto& dep_data = m_dep_data[dep_idx];
         Assume(!dep_data.active);
@@ -856,7 +856,7 @@ private:
         auto& top_chunk_info = m_set_info[top_idx];
         auto& bottom_chunk_info = m_set_info[bottom_idx];
         // Count the number of dependencies between bottom_chunk and top_chunk.
-        uint32_t num_deps{0};
+        TxIdx num_deps{0};
         for (auto tx_idx : top_chunk_info.transactions) {
             auto& tx_data = m_tx_data[tx_idx];
             num_deps += (tx_data.children & bottom_chunk_info.transactions).Count();
@@ -1301,7 +1301,7 @@ public:
             chunk_deps[chl_chunk_idx] += (chl_data.parents - chl_chunk_info.transactions).Count();
         }
         /** Function to compute the highest element of a chunk, by fallback_order. */
-        auto max_fallback_fn = [&](SetIdx chunk_idx) noexcept {
+        auto max_fallback_fn = [&](TxIdx chunk_idx) noexcept {
             auto& chunk = m_set_info[chunk_idx].transactions;
             auto it = chunk.begin();
             DepGraphIndex ret = *it;
