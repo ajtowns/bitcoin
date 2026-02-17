@@ -690,6 +690,9 @@ private:
 
     /** The set of all TxIdx's of transactions in the cluster indexing into m_tx_data. */
     SetType m_transaction_idxs;
+    /** The set of all chunk SetIdx's. This excludes the SetIdxs that refer to active
+     *  dependencies' tops. */
+    SetType m_chunk_idxs;
     /** Information about each transaction (and chunks). Keeps the "holes" from DepGraph during
      *  construction. Indexed by TxIdx. */
     std::vector<TxData> m_tx_data;
@@ -766,6 +769,12 @@ private:
         auto& child_tx_data = m_tx_data[dep_data.child];
         auto& parent_tx_data = m_tx_data[dep_data.parent];
 
+        auto parent_chunk_idx = parent_tx_data.chunk_idx;
+        auto child_chunk_idx = child_tx_data.chunk_idx;
+        Assume(parent_chunk_idx != child_chunk_idx);
+        Assume(m_chunk_idxs[parent_chunk_idx]);
+        Assume(m_chunk_idxs[child_chunk_idx]);
+
         // Gather information about the parent and child chunks.
         Assume(parent_tx_data.chunk_idx != child_tx_data.chunk_idx);
         auto& par_chunk_data = m_tx_data[parent_tx_data.chunk_idx];
@@ -807,6 +816,8 @@ private:
         // Make active.
         dep_data.active = true;
         dep_data.top_setinfo = top_part;
+        m_chunk_idxs.Reset(child_chunk_idx);
+
         return top_idx;
     }
 
@@ -830,6 +841,17 @@ private:
         auto& top_chunk_data = m_tx_data[top_idx];
         top_chunk_data.chunk_setinfo = top_part;
 
+        auto old_chunk_idx = parent_tx_data.chunk_idx;
+        auto parent_chunk_idx = top_idx;
+        auto child_chunk_idx = bottom_idx;
+        Assume(parent_chunk_idx != child_chunk_idx);
+        Assume(m_chunk_idxs[old_chunk_idx]);
+        Assume(old_chunk_idx == child_chunk_idx || !m_chunk_idxs[child_chunk_idx]);
+        Assume(old_chunk_idx == parent_chunk_idx || !m_chunk_idxs[parent_chunk_idx]);
+        m_chunk_idxs.Reset(old_chunk_idx);
+        m_chunk_idxs.Set(child_chunk_idx);
+        m_chunk_idxs.Set(parent_chunk_idx);
+
         // See the comment above in Activate(). We perform the opposite operations here,
         // removing instead of adding.
         //
@@ -850,6 +872,8 @@ private:
      *  possible. */
     SetIdx MergeChunks(SetIdx top_idx, SetIdx bottom_idx) noexcept
     {
+        Assume(m_chunk_idxs[top_idx]);
+        Assume(m_chunk_idxs[bottom_idx]);
         auto& top_chunk = m_tx_data[top_idx];
         Assume(top_chunk.chunk_idx == top_idx);
         auto& bottom_chunk = m_tx_data[bottom_idx];
@@ -1021,6 +1045,8 @@ public:
                 par_tx_data.children.Set(tx);
             }
         }
+        // Mark all txs as individual chunks.
+        m_chunk_idxs = m_transaction_idxs;
     }
 
     /** Load an existing linearization. Must be called immediately after constructor. The result is
@@ -1533,6 +1559,7 @@ public:
             // transaction.
             assert(m_tx_data[tx_data.chunk_idx].chunk_idx == tx_data.chunk_idx);
             assert(m_tx_data[tx_data.chunk_idx].chunk_setinfo.transactions[tx_idx]);
+            assert(m_chunk_idxs[tx_data.chunk_idx]);
             // Verify parents/children.
             assert(tx_data.parents == m_depgraph.GetReducedParents(tx_idx));
             assert(tx_data.children == m_depgraph.GetReducedChildren(tx_idx));
@@ -1602,6 +1629,7 @@ public:
             nonminimal_idxs.Set(chunk_idx);
         }
         assert(nonminimal_idxs.IsSubsetOf(m_transaction_idxs));
+        assert(nonminimal_idxs.IsSubsetOf(m_chunk_idxs));
     }
 };
 
