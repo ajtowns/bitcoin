@@ -658,8 +658,7 @@ private:
     /** An invalid SetIdx. */
     static constexpr SetIdx INVALID_SET_IDX{~uint32_t{0}};
 
-    /** Structure with information about a single transaction. For transactions that are the
-     *  representative for the chunk they are in, this also stores chunk information. */
+    /** Structure with information about a single transaction. */
     struct TxData {
         /** The dependencies to children of this transaction. Immutable after construction. */
         std::vector<DepIdx> child_deps;
@@ -694,10 +693,10 @@ private:
     std::vector<SetInfo<SetType>> m_set_info;
     /** Information about each dependency. Indexed by DepIdx. */
     std::vector<DepData> m_dep_data;
-    /** A FIFO of chunk representatives of chunks that may be improved still. */
+    /** A FIFO of chunk SetIdxs for chunks that may be improved still. */
     VecDeque<SetIdx> m_suboptimal_chunks;
-    /** A FIFO of chunk representatives with a pivot transaction in them, and a flag to indicate
-     *  their status:
+    /** A FIFO of chunk indexes with a pivot transaction in them, and a flag to indicate their
+     *  status:
      *  - bit 1: currently attempting to move the pivot down, rather than up.
      *  - bit 2: this is the second stage, so we have already tried moving the pivot in the other
      *           direction.
@@ -724,17 +723,17 @@ private:
     }
 
     /** Update a chunk:
-     *  - All transactions have their chunk representative set to `chunk_idx`.
-     *  - All dependencies which have `query` in their top setinfo get `dep_change` added to it
+     *  - All transactions have their chunk index set to `chunk_idx`.
+     *  - All dependencies which have `query` in their top set get `dep_change` added to it
      *    (if `!Subtract`) or removed from it (if `Subtract`).
      */
     template<bool Subtract>
-    void UpdateChunk(const SetType& chunk, TxIdx query, SetIdx chunk_idx, const SetInfo<SetType>& dep_change) noexcept
+    void UpdateChunk(const SetType& tx_idxs, TxIdx query, SetIdx chunk_idx, const SetInfo<SetType>& dep_change) noexcept
     {
         // Iterate over all the chunk's transactions.
-        for (auto tx_idx : chunk) {
+        for (auto tx_idx : tx_idxs) {
             auto& tx_data = m_tx_data[tx_idx];
-            // Update the chunk representative.
+            // Update the chunk index for this transaction.
             tx_data.chunk_idx = chunk_idx;
             // Iterate over all active dependencies with tx_idx as parent. Combined with the outer
             // loop this iterates over all internal active dependencies of the chunk.
@@ -744,9 +743,9 @@ private:
                 Assume(dep_entry.parent == tx_idx);
                 // Skip inactive dependencies.
                 if (!dep_entry.active) continue;
-                // If this dependency's topset contains query, update it to add/remove
-                // dep_change.
                 auto& top_set_info = m_set_info[dep_entry.dep_top_idx];
+                // If this dependency's top set contains query, update it to add/remove
+                // dep_change.
                 if (top_set_info.transactions[query]) {
                     if constexpr (Subtract) {
                         top_set_info -= dep_change;
@@ -758,7 +757,7 @@ private:
         }
     }
 
-    /** Make a specified inactive dependency active. Returns the merged chunk representative. */
+    /** Make a specified inactive dependency active. Returns the merged chunk index. */
     SetIdx Activate(DepIdx dep_idx) noexcept
     {
         auto& dep_data = m_dep_data[dep_idx];
@@ -859,32 +858,31 @@ private:
                           /*chunk_idx=*/bottom_idx, /*dep_change=*/top_part);
     }
 
-    /** Activate a dependency from the chunk represented by bottom_idx to the chunk represented by
-     *  top_idx. Return the representative of the merged chunk, or TxIdx(-1) if no merge is
-     *  possible. */
+    /** Activate a dependency from the bottom set to the top set. Return the index of the merged
+     *  chunk, or INVALID_SET_IDX if no merge is possible. */
     SetIdx MergeChunks(SetIdx top_idx, SetIdx bottom_idx) noexcept
     {
         Assume(m_chunk_idxs[top_idx]);
         Assume(m_chunk_idxs[bottom_idx]);
-        auto& top_chunk = m_set_info[top_idx];
-        auto& bottom_chunk = m_set_info[bottom_idx];
+        auto& top_chunk_info = m_set_info[top_idx];
+        auto& bottom_chunk_info = m_set_info[bottom_idx];
         // Count the number of dependencies between bottom_chunk and top_chunk.
         typename TxIdx::value_type num_deps{0};
-        for (auto tx : top_chunk.transactions) {
-            auto& tx_data = m_tx_data[tx];
-            num_deps += (tx_data.children & bottom_chunk.transactions).Count();
+        for (auto tx_idx : top_chunk_info.transactions) {
+            auto& tx_data = m_tx_data[tx_idx];
+            num_deps += (tx_data.children & bottom_chunk_info.transactions).Count();
         }
         if (num_deps == 0) return INVALID_SET_IDX;
         // Uniformly randomly pick one of them and activate it.
         TxIdx pick = m_rng.randrange(num_deps);
-        for (auto tx : top_chunk.transactions) {
-            auto& tx_data = m_tx_data[tx];
-            auto intersect = tx_data.children & bottom_chunk.transactions;
+        for (auto tx_idx : top_chunk_info.transactions) {
+            auto& tx_data = m_tx_data[tx_idx];
+            auto intersect = tx_data.children & bottom_chunk_info.transactions;
             auto count = intersect.Count();
             if (pick < count) {
                 for (auto dep : tx_data.child_deps) {
                     auto& dep_data = m_dep_data[dep];
-                    if (bottom_chunk.transactions[dep_data.child]) {
+                    if (bottom_chunk_info.transactions[dep_data.child]) {
                         if (pick == 0) return Activate(dep);
                         --pick;
                     }
@@ -898,14 +896,14 @@ private:
         return INVALID_SET_IDX;
     }
 
-    /** Perform an upward or downward merge step, on the specified chunk representative. Returns
-     *  the representative of the merged chunk, or TxIdx(-1) if no merge took place. */
+    /** Perform an upward or downward merge step, on the specified chunk. Returns the merged chunk,
+     *  or INVALID_SET_IDX if no merge took place. */
     template<bool DownWard>
     SetIdx MergeStep(SetIdx chunk_idx) noexcept
     {
-        /** Information about the chunk that tx_idx is currently in. */
-        auto& setinfo = m_set_info[chunk_idx];
-        SetType chunk_txn = setinfo.transactions;
+        /** Information about the chunk. */
+        auto& chunk_info = m_set_info[chunk_idx];
+        SetType chunk_txn = chunk_info.transactions;
         // Iterate over all transactions in the chunk, figuring out which other chunk each
         // depends on, but only testing each other chunk once. For those depended-on chunks,
         // remember the highest-feerate (if DownWard) or lowest-feerate (if !DownWard) one.
@@ -918,14 +916,14 @@ private:
         /** The minimum feerate (if downward) or maximum feerate (if upward) to consider when
          *  looking for candidate chunks to merge with. Initially, this is the original chunk's
          *  feerate, but is updated to be the current best candidate whenever one is found. */
-        FeeFrac best_other_chunk_feerate = setinfo.feerate;
-        /** The representative for the best candidate chunk to merge with. -1 if none. */
+        FeeFrac best_other_chunk_feerate = chunk_info.feerate;
+        /** The chunk index for the best candidate chunk to merge with. INVALID_SET_IDX if none. */
         SetIdx best_other_chunk_idx = INVALID_SET_IDX;
         /** We generate random tiebreak values to pick between equal-feerate candidate chunks.
          *  This variable stores the tiebreak of the current best candidate. */
         uint64_t best_other_chunk_tiebreak{0};
-        for (auto tx : chunk_txn) {
-            auto& tx_data = m_tx_data[tx];
+        for (TxIdx tx_idx : chunk_txn) {
+            auto& tx_data = m_tx_data[tx_idx];
             /** The transactions reached by following dependencies from tx that have not been
              *  explored before. */
             auto newly_reached = (DownWard ? tx_data.children : tx_data.parents) - explored;
@@ -933,15 +931,15 @@ private:
             while (newly_reached.Any()) {
                 // Find a chunk inside newly_reached, and remove it from newly_reached.
                 auto reached_chunk_idx = m_tx_data[newly_reached.First()].chunk_idx;
-                auto& reached_chunk = m_set_info[reached_chunk_idx];
-                newly_reached -= reached_chunk.transactions;
+                auto& reached_chunk_info = m_set_info[reached_chunk_idx];
+                newly_reached -= reached_chunk_info.transactions;
                 // See if it has an acceptable feerate.
-                auto cmp = DownWard ? FeeRateCompare(best_other_chunk_feerate, reached_chunk.feerate)
-                                    : FeeRateCompare(reached_chunk.feerate, best_other_chunk_feerate);
+                auto cmp = DownWard ? FeeRateCompare(best_other_chunk_feerate, reached_chunk_info.feerate)
+                                    : FeeRateCompare(reached_chunk_info.feerate, best_other_chunk_feerate);
                 if (cmp > 0) continue;
                 uint64_t tiebreak = m_rng.rand64();
                 if (cmp < 0 || tiebreak >= best_other_chunk_tiebreak) {
-                    best_other_chunk_feerate = reached_chunk.feerate;
+                    best_other_chunk_feerate = reached_chunk_info.feerate;
                     best_other_chunk_idx = reached_chunk_idx;
                     best_other_chunk_tiebreak = tiebreak;
                 }
@@ -965,9 +963,9 @@ private:
     {
         auto chunk_idx = m_tx_data[tx_idx].chunk_idx;
         while (true) {
-            auto merged_idx = MergeStep<DownWard>(chunk_idx);
-            if (merged_idx == INVALID_SET_IDX) break;
-            chunk_idx = merged_idx;
+            auto merged_chunk_idx = MergeStep<DownWard>(chunk_idx);
+            if (merged_chunk_idx == INVALID_SET_IDX) break;
+            chunk_idx = merged_chunk_idx;
         }
         // Add the chunk to the queue of improvable chunks.
         m_suboptimal_chunks.push_back(chunk_idx);
@@ -1018,28 +1016,26 @@ public:
         for (auto tx_idx : m_transaction_idxs) {
             // Fill in transaction data.
             auto& tx_data = m_tx_data[tx_idx];
+            tx_data.parents = depgraph.GetReducedParents(tx_idx);
             // Create a singleton chunk for it.
             tx_data.chunk_idx = num_chunks;
             m_set_info[num_chunks++] = SetInfo(depgraph, tx_idx);
             // Add its dependencies.
-            SetType parents = depgraph.GetReducedParents(tx_idx);
-            for (auto par : parents) {
-                auto& par_tx_data = m_tx_data[par];
+            for (auto parent_idx : tx_data.parents) {
+                auto& par_tx_data = m_tx_data[parent_idx];
                 auto dep_idx = m_dep_data.size();
                 // Construct new dependency.
                 auto& dep = m_dep_data.emplace_back();
                 dep.active = false;
-                dep.parent = par;
+                dep.parent = parent_idx;
                 dep.child = tx_idx;
-                // Add it as parent of the child.
-                tx_data.parents.Set(par);
                 // Add it as child of the parent.
                 par_tx_data.child_deps.push_back(dep_idx);
                 par_tx_data.children.Set(tx_idx);
             }
         }
         Assume(num_chunks == num_transactions);
-        // Mark all txs as individual chunks.
+        // Mark all chunk sets as chunks.
         m_chunk_idxs = SetType::Fill(num_chunks);
     }
 
@@ -1049,8 +1045,8 @@ public:
     void LoadLinearization(std::span<const DepGraphIndex> old_linearization) noexcept
     {
         // Add transactions one by one, in order of existing linearization.
-        for (DepGraphIndex tx : old_linearization) {
-            auto chunk_idx = m_tx_data[tx].chunk_idx;
+        for (DepGraphIndex tx_idx : old_linearization) {
+            auto chunk_idx = m_tx_data[tx_idx].chunk_idx;
             // Merge the chunk upwards, as long as merging succeeds.
             while (true) {
                 chunk_idx = MergeStep<false>(chunk_idx);
@@ -1063,7 +1059,7 @@ public:
     void MakeTopological() noexcept
     {
         Assume(m_suboptimal_chunks.empty());
-        for (SetIdx chunk_idx : m_chunk_idxs) {
+        for (auto chunk_idx : m_chunk_idxs) {
             m_suboptimal_chunks.emplace_back(chunk_idx);
             // Randomize the initial order of suboptimal chunks in the queue.
             SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
@@ -1073,23 +1069,23 @@ public:
         }
         while (!m_suboptimal_chunks.empty()) {
             // Pop an entry from the potentially-suboptimal chunk queue.
-            SetIdx chunk = m_suboptimal_chunks.front();
+            SetIdx chunk_idx = m_suboptimal_chunks.front();
             m_suboptimal_chunks.pop_front();
             // If what was popped is not currently a chunk, continue. This may
             // happen when it was merged with something else since being added.
-            if (!m_chunk_idxs[chunk]) continue;
+            if (!m_chunk_idxs[chunk_idx]) continue;
             int flip = m_rng.randbool();
             for (int i = 0; i < 2; ++i) {
                 if (i ^ flip) {
                     // Attempt to merge the chunk upwards.
-                    auto result_up = MergeStep<false>(chunk);
+                    auto result_up = MergeStep<false>(chunk_idx);
                     if (result_up != INVALID_SET_IDX) {
                         m_suboptimal_chunks.push_back(result_up);
                         break;
                     }
                 } else {
                     // Attempt to merge the chunk downwards.
-                    auto result_down = MergeStep<true>(chunk);
+                    auto result_down = MergeStep<true>(chunk_idx);
                     if (result_down != INVALID_SET_IDX) {
                         m_suboptimal_chunks.push_back(result_down);
                         break;
@@ -1119,19 +1115,19 @@ public:
     {
         while (!m_suboptimal_chunks.empty()) {
             // Pop an entry from the potentially-suboptimal chunk queue.
-            SetIdx chunk{m_suboptimal_chunks.front()};
+            SetIdx chunk_idx = m_suboptimal_chunks.front();
             m_suboptimal_chunks.pop_front();
-            auto& chunk_data = m_set_info[chunk];
-            // If what was popped is not currently a chunk representative, continue. This may
+            auto& chunk_info = m_set_info[chunk_idx];
+            // If what was popped is not currently a chunk, continue. This may
             // happen when a split chunk merges in Improve() with one or more existing chunks that
             // are themselves on the suboptimal queue already.
-            if (!m_chunk_idxs[chunk]) continue;
+            if (!m_chunk_idxs[chunk_idx]) continue;
             // Remember the best dependency seen so far.
             DepIdx candidate_dep = DepIdx(-1);
             uint64_t candidate_tiebreak = 0;
             // Iterate over all transactions.
-            for (auto tx : chunk_data.transactions) {
-                const auto& tx_data = m_tx_data[tx];
+            for (TxIdx tx_idx : chunk_info.transactions) {
+                const auto& tx_data = m_tx_data[tx_idx];
                 // Iterate over all active child dependencies of the transaction.
                 const auto children = std::span{tx_data.child_deps};
                 for (DepIdx dep_idx : children) {
@@ -1140,7 +1136,7 @@ public:
                     auto& dep_top_info = m_set_info[dep_data.dep_top_idx];
                     // Skip if this dependency is ineligible (the top chunk that would be created
                     // does not have higher feerate than the chunk it is currently part of).
-                    auto cmp = FeeRateCompare(dep_top_info.feerate, chunk_data.feerate);
+                    auto cmp = FeeRateCompare(dep_top_info.feerate, chunk_info.feerate);
                     if (cmp <= 0) continue;
                     // Generate a random tiebreak for this dependency, and reject it if its tiebreak
                     // is worse than the best so far. This means that among all eligible
@@ -1191,7 +1187,7 @@ public:
         auto [chunk_idx, pivot_idx, flags] = m_nonminimal_chunks.front();
         m_nonminimal_chunks.pop_front();
         Assume(m_chunk_idxs[chunk_idx]);
-        auto& chunk_data = m_set_info[chunk_idx];
+        auto& chunk_info = m_set_info[chunk_idx];
         /** Whether to move the pivot down rather than up. */
         bool move_pivot_down = flags & 1;
         /** Whether this is already the second stage. */
@@ -1203,7 +1199,7 @@ public:
         uint64_t candidate_tiebreak{0};
         bool have_any = false;
         // Iterate over all transactions.
-        for (auto tx_idx : chunk_data.transactions) {
+        for (TxIdx tx_idx : chunk_info.transactions) {
             const auto& tx_data = m_tx_data[tx_idx];
             // Iterate over all active child dependencies of the transaction.
             for (auto dep_idx : tx_data.child_deps) {
@@ -1214,7 +1210,7 @@ public:
                 // Skip if this dependency does not have equal top and bottom set feerates. Note
                 // that the top cannot have higher feerate than the bottom, or OptimizeSteps would
                 // have dealt with it.
-                if (dep_top_info.feerate << chunk_data.feerate) continue;
+                if (dep_top_info.feerate << chunk_info.feerate) continue;
                 have_any = true;
                 // Skip if this dependency does not have pivot in the right place.
                 if (move_pivot_down == dep_top_info.transactions[pivot_idx]) continue;
@@ -1313,8 +1309,8 @@ public:
             const auto& chl_data = m_tx_data[chl_idx];
             tx_deps[chl_idx] = chl_data.parents.Count();
             auto chl_chunk_idx = chl_data.chunk_idx;
-            const auto& chl_chunk_txn = m_set_info[chl_chunk_idx].transactions;
-            chunk_deps[chl_chunk_idx] += (chl_data.parents - chl_chunk_txn).Count();
+            auto& chl_chunk_info = m_set_info[chl_chunk_idx];
+            chunk_deps[chl_chunk_idx] += (chl_data.parents - chl_chunk_info.transactions).Count();
         }
         /** Function to compute the highest element of a chunk, by fallback_order. */
         auto max_fallback_fn = [&](SetIdx chunk_idx) noexcept {
@@ -1490,7 +1486,6 @@ public:
         //
         SetType chunk_cover;
         for (SetIdx chunk_idx : m_chunk_idxs) {
-            // Only process chunks for now.
             const auto& chunk_info = m_set_info[chunk_idx];
             // Verify that transactions in the chunk point back to it. This guarantees
             // that chunks are non-overlapping.
@@ -1499,9 +1494,9 @@ public:
             }
             assert(!chunk_cover.Overlaps(chunk_info.transactions));
             chunk_cover |= chunk_info.transactions;
-            // Verify the chunk's transaction set: it must contain the representative, and for
-            // every active dependency, if it contains the parent or child, it must contain
-            // both. It must have exactly N-1 active dependencies in it, guaranteeing it is
+            // Verify the chunk's transaction set: start from an arbitrary chunk transaction,
+            // and for every active dependency, if it contains the parent or child, add the
+            // other. It must have exactly N-1 active dependencies in it, guaranteeing it is
             // acyclic.
             assert(chunk_info.transactions.Any());
             SetType expected_chunk = SetType::Singleton(chunk_info.transactions.First());
@@ -1522,22 +1517,20 @@ public:
             }
             assert(chunk_info.transactions == expected_chunk);
             // Verify the chunk's feerate.
-            assert(chunk_info.feerate ==
-                   m_depgraph.FeeRate(chunk_info.transactions));
+            assert(chunk_info.feerate == m_depgraph.FeeRate(chunk_info.transactions));
         }
         // Verify that together, the chunks cover all transactions.
         assert(chunk_cover == m_depgraph.Positions());
 
         //
-        // Verify other transaction data.
+        // Verify transaction data.
         //
         assert(m_transaction_idxs == m_depgraph.Positions());
         for (auto tx_idx : m_transaction_idxs) {
             const auto& tx_data = m_tx_data[tx_idx];
-            // Verify it has a valid chunk representative, and that chunk includes this
-            // transaction.
-            assert(m_set_info[tx_data.chunk_idx].transactions[tx_idx]);
+            // Verify it has a valid chunk index, and that chunk includes this transaction.
             assert(m_chunk_idxs[tx_data.chunk_idx]);
+            assert(m_set_info[tx_data.chunk_idx].transactions[tx_idx]);
             // Verify parents/children.
             assert(tx_data.parents == m_depgraph.GetReducedParents(tx_idx));
             assert(tx_data.children == m_depgraph.GetReducedChildren(tx_idx));
@@ -1560,7 +1553,7 @@ public:
         //
         for (const auto& [par_idx, chl_idx, dep_idx] : active_dependencies) {
             const auto& dep_data = m_dep_data[dep_idx];
-            // Verify the top_info's transactions: it must contain the parent, and for every
+            // Verify the top set's transactions: it must contain the parent, and for every
             // active dependency, except dep_idx itself, if it contains the parent or child, it
             // must contain both. It must have exactly N-1 active dependencies in it, guaranteeing
             // it is acyclic.
