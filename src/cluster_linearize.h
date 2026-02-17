@@ -655,8 +655,6 @@ private:
     struct SetIdxTag { };
     using SetIdx = util::TaggedInt<uint32_t,SetIdxTag>;
 
-    static TxIdx Representative(SetIdx chunk) { return chunk.value; }
-
     /** An invalid SetIdx. */
     static constexpr SetIdx INVALID_SET_IDX{~uint32_t{0}};
 
@@ -1069,15 +1067,12 @@ public:
     void MakeTopological() noexcept
     {
         Assume(m_suboptimal_chunks.empty());
-        for (auto tx : m_transaction_idxs) {
-            auto& tx_data = m_tx_data[tx];
-            if (Representative(tx_data.chunk_idx) == tx) {
-                m_suboptimal_chunks.emplace_back(tx);
-                // Randomize the initial order of suboptimal chunks in the queue.
-                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
-                if (j != m_suboptimal_chunks.size() - 1) {
-                    std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
-                }
+        for (SetIdx chunk_idx : m_chunk_idxs) {
+            m_suboptimal_chunks.emplace_back(chunk_idx);
+            // Randomize the initial order of suboptimal chunks in the queue.
+            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
+            if (j != m_suboptimal_chunks.size() - 1) {
+                std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
             }
         }
         while (!m_suboptimal_chunks.empty()) {
@@ -1114,15 +1109,12 @@ public:
     {
         Assume(m_suboptimal_chunks.empty());
         // Mark chunks suboptimal.
-        for (auto tx : m_transaction_idxs) {
-            auto& tx_data = m_tx_data[tx];
-            if (Representative(tx_data.chunk_idx) == tx) {
-                m_suboptimal_chunks.push_back(tx);
-                // Randomize the initial order of suboptimal chunks in the queue.
-                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
-                if (j != m_suboptimal_chunks.size() - 1) {
-                    std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
-                }
+        for (SetIdx chunk_idx : m_chunk_idxs) {
+            m_suboptimal_chunks.push_back(chunk_idx);
+            // Randomize the initial order of suboptimal chunks in the queue.
+            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
+            if (j != m_suboptimal_chunks.size() - 1) {
+                std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
             }
         }
     }
@@ -1183,16 +1175,14 @@ public:
         m_nonminimal_chunks.reserve(m_transaction_idxs.Count());
         // Gather all chunks, and for each, add it with a random pivot in it, and a random initial
         // direction, to m_nonminimal_chunks.
-        for (auto tx : m_transaction_idxs) {
-            auto& tx_data = m_tx_data[tx];
-            if (Representative(tx_data.chunk_idx) == tx) {
-                TxIdx pivot_idx = PickRandomTx(tx_data.chunk_setinfo.transactions);
-                m_nonminimal_chunks.emplace_back(tx, pivot_idx, m_rng.randbits<1>());
-                // Randomize the initial order of nonminimal chunks in the queue.
-                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_nonminimal_chunks.size());
-                if (j != m_nonminimal_chunks.size() - 1) {
-                    std::swap(m_nonminimal_chunks.back(), m_nonminimal_chunks[j]);
-                }
+        for (SetIdx chunk_idx : m_chunk_idxs) {
+            auto& tx_data = m_tx_data[chunk_idx];
+            TxIdx pivot_idx = PickRandomTx(tx_data.chunk_setinfo.transactions);
+            m_nonminimal_chunks.emplace_back(chunk_idx, pivot_idx, m_rng.randbits<1>());
+            // Randomize the initial order of nonminimal chunks in the queue.
+            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_nonminimal_chunks.size());
+            if (j != m_nonminimal_chunks.size() - 1) {
+                std::swap(m_nonminimal_chunks.back(), m_nonminimal_chunks[j]);
             }
         }
     }
@@ -1319,8 +1309,6 @@ public:
         /** For every transaction, indexed by TxIdx, the number of unmet dependencies the
          *  transaction has. */
         std::vector<TxIdx> tx_deps(m_tx_data.size(), 0);
-        /** The set of all chunk representatives. */
-        SetType chunk_idxs;
         /** A heap with all transactions within the current chunk that can be included, sorted by
          *  tx feerate (high to low), tx size (small to large), and fallback order. */
         std::vector<TxIdx> ready_tx;
@@ -1329,7 +1317,6 @@ public:
             const auto& chl_data = m_tx_data[chl_idx];
             tx_deps[chl_idx] = chl_data.parents.Count();
             auto chl_chunk_idx = chl_data.chunk_idx;
-            chunk_idxs.Set(chl_chunk_idx);
             const auto& chl_chunk_txn = m_tx_data[chl_chunk_idx].chunk_setinfo.transactions;
             chunk_deps[chl_chunk_idx] += (chl_data.parents - chl_chunk_txn).Count();
         }
@@ -1389,7 +1376,7 @@ public:
             return a.second < b.second;
         };
         // Construct a heap with all chunks that have no out-of-chunk dependencies.
-        for (SetIdx chunk_idx : chunk_idxs) {
+        for (SetIdx chunk_idx : m_chunk_idxs) {
             if (chunk_deps[chunk_idx] == 0) {
                 ready_chunks.emplace_back(chunk_idx, max_fallback_fn(chunk_idx));
             }
@@ -1462,10 +1449,8 @@ public:
     std::vector<FeeFrac> GetDiagram() const noexcept
     {
         std::vector<FeeFrac> ret;
-        for (auto tx : m_transaction_idxs) {
-            if (Representative(m_tx_data[tx].chunk_idx) == tx) {
-                ret.push_back(m_tx_data[tx].chunk_setinfo.feerate);
-            }
+        for (SetIdx chunk_idx : m_chunk_idxs) {
+            ret.push_back(m_tx_data[chunk_idx].chunk_setinfo.feerate);
         }
         std::sort(ret.begin(), ret.end(), std::greater{});
         return ret;
@@ -1509,42 +1494,40 @@ public:
         // Verify the chunks against the list of active dependencies
         //
         SetType chunk_cover;
-        for (auto tx_idx: m_depgraph.Positions()) {
+        for (SetIdx chunk_idx : m_chunk_idxs) {
             // Only process chunks for now.
-            if (Representative(m_tx_data[tx_idx].chunk_idx) == tx_idx) {
-                const auto& chunk_data = m_tx_data[tx_idx];
-                // Verify that transactions in the chunk point back to it. This guarantees
-                // that chunks are non-overlapping.
-                for (auto chunk_tx : chunk_data.chunk_setinfo.transactions) {
-                    assert(Representative(m_tx_data[chunk_tx].chunk_idx) == tx_idx);
-                }
-                assert(!chunk_cover.Overlaps(chunk_data.chunk_setinfo.transactions));
-                chunk_cover |= chunk_data.chunk_setinfo.transactions;
-                // Verify the chunk's transaction set: it must contain the representative, and for
-                // every active dependency, if it contains the parent or child, it must contain
-                // both. It must have exactly N-1 active dependencies in it, guaranteeing it is
-                // acyclic.
-                SetType expected_chunk = SetType::Singleton(tx_idx);
-                while (true) {
-                    auto old = expected_chunk;
-                    size_t active_dep_count{0};
-                    for (const auto& [par, chl, _dep] : active_dependencies) {
-                        if (expected_chunk[par] || expected_chunk[chl]) {
-                            expected_chunk.Set(par);
-                            expected_chunk.Set(chl);
-                            ++active_dep_count;
-                        }
-                    }
-                    if (old == expected_chunk) {
-                        assert(expected_chunk.Count() == active_dep_count + 1);
-                        break;
-                    }
-                }
-                assert(chunk_data.chunk_setinfo.transactions == expected_chunk);
-                // Verify the chunk's feerate.
-                assert(chunk_data.chunk_setinfo.feerate ==
-                       m_depgraph.FeeRate(chunk_data.chunk_setinfo.transactions));
+            const auto& chunk_data = m_tx_data[chunk_idx];
+            // Verify that transactions in the chunk point back to it. This guarantees
+            // that chunks are non-overlapping.
+            for (auto chunk_tx : chunk_data.chunk_setinfo.transactions) {
+                assert(m_tx_data[chunk_tx].chunk_idx == chunk_idx);
             }
+            assert(!chunk_cover.Overlaps(chunk_data.chunk_setinfo.transactions));
+            chunk_cover |= chunk_data.chunk_setinfo.transactions;
+            // Verify the chunk's transaction set: it must contain the representative, and for
+            // every active dependency, if it contains the parent or child, it must contain
+            // both. It must have exactly N-1 active dependencies in it, guaranteeing it is
+            // acyclic.
+            SetType expected_chunk = SetType::Singleton(chunk_idx);
+            while (true) {
+                auto old = expected_chunk;
+                size_t active_dep_count{0};
+                for (const auto& [par, chl, _dep] : active_dependencies) {
+                    if (expected_chunk[par] || expected_chunk[chl]) {
+                        expected_chunk.Set(par);
+                        expected_chunk.Set(chl);
+                        ++active_dep_count;
+                    }
+                }
+                if (old == expected_chunk) {
+                    assert(expected_chunk.Count() == active_dep_count + 1);
+                    break;
+                }
+            }
+            assert(chunk_data.chunk_setinfo.transactions == expected_chunk);
+            // Verify the chunk's feerate.
+            assert(chunk_data.chunk_setinfo.feerate ==
+                   m_depgraph.FeeRate(chunk_data.chunk_setinfo.transactions));
         }
         // Verify that together, the chunks cover all transactions.
         assert(chunk_cover == m_depgraph.Positions());
