@@ -1178,7 +1178,6 @@ public:
         // Pop an entry from the potentially-non-minimal chunk queue.
         auto [chunk_idx, pivot_idx, flags] = m_nonminimal_chunks.front();
         m_nonminimal_chunks.pop_front();
-        Assume(m_chunk_idxs[chunk_idx]);
         auto& chunk_info = m_set_info[chunk_idx];
         /** Whether to move the pivot down rather than up. */
         bool move_pivot_down = flags & 1;
