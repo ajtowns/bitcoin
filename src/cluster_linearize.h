@@ -762,23 +762,21 @@ private:
     {
         auto& dep_data = m_dep_data[dep_idx];
         Assume(!dep_data.active);
-        auto& child_tx_data = m_tx_data[dep_data.child];
-        auto& parent_tx_data = m_tx_data[dep_data.parent];
 
-        auto parent_chunk_idx = parent_tx_data.chunk_idx;
-        auto child_chunk_idx = child_tx_data.chunk_idx;
+        // Gather and check information about the parent and child transactions.
+        auto& parent_data = m_tx_data[dep_data.parent];
+        auto& child_data = m_tx_data[dep_data.child];
+        Assume(parent_data.children[dep_data.child]);
+        // Get the set index of the chunks the parent and child are currently in. The parent chunk
+        // will become the top set of the newly activated dependency, while the child chunk will be
+        // grown to become the merged chunk.
+        auto parent_chunk_idx = parent_data.chunk_idx;
+        auto child_chunk_idx = child_data.chunk_idx;
         Assume(parent_chunk_idx != child_chunk_idx);
         Assume(m_chunk_idxs[parent_chunk_idx]);
         Assume(m_chunk_idxs[child_chunk_idx]);
-
-        // Gather information about the parent and child chunks.
-        Assume(parent_tx_data.chunk_idx != child_tx_data.chunk_idx);
-        SetIdx top_idx = parent_tx_data.chunk_idx;
-        auto top_part = m_set_info[parent_tx_data.chunk_idx];
-        auto bottom_part = m_set_info[child_tx_data.chunk_idx];
-        // Update the parent chunk to also contain the child.
-        m_set_info[parent_tx_data.chunk_idx] |= bottom_part;
-        m_cost += m_set_info[parent_tx_data.chunk_idx].transactions.Count();
+        auto& top_info = m_set_info[parent_chunk_idx];
+        auto& bottom_info = m_set_info[child_chunk_idx];
 
         // Consider the following example:
         //
@@ -795,25 +793,27 @@ private:
         // dependency being activated (E->C here) in its top set, will have the opposite part added
         // to it. This is true for B->A and F->E, but not for C->A and F->D.
         //
-        // Let UpdateChunk traverse the old parent chunk top_part (ABC in example), and add
-        // bottom_part (DEF) to every dependency's top_set which has the parent (C) in it. The
-        // representative of each of these transactions was already top_idx, so that is not being
-        // changed here.
-        UpdateChunk<false>(/*chunk=*/top_part.transactions, /*query=*/dep_data.parent,
-                           /*chunk_idx=*/top_idx, /*dep_change=*/bottom_part);
-        // Let UpdateChunk traverse the old child chunk bottom_part (DEF in example), and add
-        // top_part (ABC) to every dependency's top_set which has the child (E) in it. At the same
-        // time, change the representative of each of these transactions to be top_idx, which
-        // becomes the representative for the merged chunk.
-        UpdateChunk<false>(/*chunk=*/bottom_part.transactions, /*query=*/dep_data.child,
-                           /*chunk_idx=*/top_idx, /*dep_change=*/top_part);
+        // Let UpdateChunk traverse the old parent chunk top_info (ABC in example), and add
+        // bottom_info (DEF) to every dependency's top set which has the parent (C) in it. At the
+        // same time, change the chunk_idx for each to be child_chunk_idx, which becomes the set for
+        // the merged chunk.
+        UpdateChunk<false>(/*tx_idxs=*/top_info.transactions, /*query=*/dep_data.parent,
+                           /*chunk_idx=*/child_chunk_idx, /*dep_change=*/bottom_info);
+        // Let UpdateChunk traverse the old child chunk bottom_info (DEF in example), and add
+        // top_info (ABC) to every dependency's top set which has the child (E) in it. The chunk
+        // these are part of isn't being changed here (already child_chunk_idx for each).
+        UpdateChunk<false>(/*tx_idxs=*/bottom_info.transactions, /*query=*/dep_data.child,
+                           /*chunk_idx=*/child_chunk_idx, /*dep_change=*/top_info);
+        // Merge top_info into bottom_info, which becomes the merged chunk.
+        bottom_info |= top_info;
+        m_cost += bottom_info.transactions.Count();
+        // Make parent chunk the set for the new active dependency.
+        dep_data.dep_top_idx = parent_chunk_idx;
+        m_chunk_idxs.Reset(parent_chunk_idx);
         // Make active.
         dep_data.active = true;
-        m_set_info[child_chunk_idx] = top_part;
-        dep_data.dep_top_idx = child_chunk_idx;
-        m_chunk_idxs.Reset(child_chunk_idx);
-
-        return top_idx;
+        // Return the newly merged chunk.
+        return child_chunk_idx;
     }
 
     /** Make a specified active dependency inactive. */
@@ -821,41 +821,33 @@ private:
     {
         auto& dep_data = m_dep_data[dep_idx];
         Assume(dep_data.active);
-        auto& parent_tx_data = m_tx_data[dep_data.parent];
-
-        auto old_chunk_idx = parent_tx_data.chunk_idx;
-        auto new_chunk_idx = dep_data.dep_top_idx;
-        Assume(m_chunk_idxs[old_chunk_idx]);
-        Assume(!m_chunk_idxs[new_chunk_idx]);
-
         // Make inactive.
         dep_data.active = false;
-        // Update representatives.
-        m_cost += m_set_info[parent_tx_data.chunk_idx].transactions.Count();
-        auto top_part = m_set_info[dep_data.dep_top_idx];
-        auto bottom_part = m_set_info[parent_tx_data.chunk_idx] - top_part;
-        SetIdx bottom_idx = new_chunk_idx;
-        auto& bottom_chunk_data = m_set_info[bottom_idx];
-        bottom_chunk_data = bottom_part;
-        SetIdx top_idx = old_chunk_idx;
-        auto& top_chunk_data = m_set_info[top_idx];
-        top_chunk_data = top_part;
 
-        m_chunk_idxs.Set(new_chunk_idx);
-
-        // See the comment above in Activate(). We perform the opposite operations here,
-        // removing instead of adding.
-        //
-        // Let UpdateChunk traverse the old parent chunk top_part, and remove bottom_part from
-        // every dependency's top_set which has the parent in it. At the same time, change the
-        // representative of each of these transactions to be top_idx.
-        UpdateChunk<true>(/*chunk=*/top_part.transactions, /*query=*/dep_data.parent,
-                          /*chunk_idx=*/top_idx, /*dep_change=*/bottom_part);
-        // Let UpdateChunk traverse the old child chunk bottom_part, and remove top_part from every
-        // dependency's top_set which has the child in it. At the same time, change the
-        // representative of each of these transactions to be bottom_idx.
-        UpdateChunk<true>(/*chunk=*/bottom_part.transactions, /*query=*/dep_data.child,
-                          /*chunk_idx=*/bottom_idx, /*dep_change=*/top_part);
+        // Gather and check information about the parent transactions.
+        auto& parent_data = m_tx_data[dep_data.parent];
+        Assume(parent_data.children[dep_data.child]);
+        // Get the top set of the active dependency (which will become the parent chunk) and the
+        // chunk set the transactions are currently in (which will become the bottom chunk).
+        auto parent_chunk_idx = dep_data.dep_top_idx;
+        auto child_chunk_idx = parent_data.chunk_idx;
+        Assume(parent_chunk_idx != child_chunk_idx);
+        Assume(m_chunk_idxs[child_chunk_idx]);
+        Assume(!m_chunk_idxs[parent_chunk_idx]); // top set, not a chunk
+        auto& top_info = m_set_info[parent_chunk_idx];
+        auto& bottom_info = m_set_info[child_chunk_idx];
+        // Remove the active dependency.
+        dep_data.dep_top_idx = INVALID_SET_IDX;
+        m_chunk_idxs.Set(parent_chunk_idx);
+        m_cost += bottom_info.transactions.Count();
+        // Subtract the top_info from the bottom_info, as it will become the child chunk.
+        bottom_info -= top_info;
+        // See the comment above in Activate(). We perform the opposite operations here, removing
+        // instead of adding.
+        UpdateChunk<true>(/*tx_idxs=*/top_info.transactions, /*query=*/dep_data.parent,
+                          /*chunk_idx=*/parent_chunk_idx, /*dep_change=*/bottom_info);
+        UpdateChunk<true>(/*tx_idxs=*/bottom_info.transactions, /*query=*/dep_data.child,
+                          /*chunk_idx=*/child_chunk_idx, /*dep_change=*/top_info);
     }
 
     /** Activate a dependency from the bottom set to the top set. Return the index of the merged
