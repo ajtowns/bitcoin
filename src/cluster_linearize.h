@@ -17,6 +17,7 @@
 #include <random.h>
 #include <span.h>
 #include <util/feefrac.h>
+#include <util/taggedint.h>
 #include <util/vecdeque.h>
 
 namespace cluster_linearize {
@@ -646,9 +647,18 @@ private:
     InsecureRandomContext m_rng;
 
     /** Data type to represent indexing into m_tx_data. */
-    using TxIdx = DepGraphIndex;
+    struct TxIdxTag { };
+    using TxIdx = util::TaggedInt<DepGraphIndex,TxIdxTag>;
     /** Data type to represent indexing into m_dep_data. */
     using DepIdx = uint32_t;
+    /** Data type to represent indexing into m_dep_data for sets. */
+    struct SetIdxTag { };
+    using SetIdx = util::TaggedInt<uint32_t,SetIdxTag>;
+
+    static TxIdx Representative(SetIdx chunk) { return chunk.value; }
+
+    /** An invalid SetIdx. */
+    static constexpr SetIdx INVALID_SET_IDX{~uint32_t{0}};
 
     /** Structure with information about a single transaction. For transactions that are the
      *  representative for the chunk they are in, this also stores chunk information. */
@@ -661,7 +671,7 @@ private:
         SetType children;
         /** Which transaction holds the chunk_setinfo for the chunk this transaction is in
          *  (the representative for the chunk). */
-        TxIdx chunk_idx;
+        SetIdx chunk_idx;
         /** (Only if this transaction is the representative for the chunk it is in) the total
          *  chunk set and feerate. */
         SetInfo<SetType> chunk_setinfo;
@@ -686,14 +696,14 @@ private:
     /** Information about each dependency. Indexed by DepIdx. */
     std::vector<DepData> m_dep_data;
     /** A FIFO of chunk representatives of chunks that may be improved still. */
-    VecDeque<TxIdx> m_suboptimal_chunks;
+    VecDeque<SetIdx> m_suboptimal_chunks;
     /** A FIFO of chunk representatives with a pivot transaction in them, and a flag to indicate
      *  their status:
      *  - bit 1: currently attempting to move the pivot down, rather than up.
      *  - bit 2: this is the second stage, so we have already tried moving the pivot in the other
      *           direction.
      */
-    VecDeque<std::tuple<TxIdx, TxIdx, unsigned>> m_nonminimal_chunks;
+    VecDeque<std::tuple<SetIdx, TxIdx, unsigned>> m_nonminimal_chunks;
 
     /** The number of updated transactions in activations/deactivations. */
     uint64_t m_cost{0};
@@ -720,7 +730,7 @@ private:
      *    (if `!Subtract`) or removed from it (if `Subtract`).
      */
     template<bool Subtract>
-    void UpdateChunk(const SetType& chunk, TxIdx query, TxIdx chunk_idx, const SetInfo<SetType>& dep_change) noexcept
+    void UpdateChunk(const SetType& chunk, TxIdx query, SetIdx chunk_idx, const SetInfo<SetType>& dep_change) noexcept
     {
         // Iterate over all the chunk's transactions.
         for (auto tx_idx : chunk) {
@@ -749,7 +759,7 @@ private:
     }
 
     /** Make a specified inactive dependency active. Returns the merged chunk representative. */
-    TxIdx Activate(DepIdx dep_idx) noexcept
+    SetIdx Activate(DepIdx dep_idx) noexcept
     {
         auto& dep_data = m_dep_data[dep_idx];
         Assume(!dep_data.active);
@@ -760,7 +770,7 @@ private:
         Assume(parent_tx_data.chunk_idx != child_tx_data.chunk_idx);
         auto& par_chunk_data = m_tx_data[parent_tx_data.chunk_idx];
         auto& chl_chunk_data = m_tx_data[child_tx_data.chunk_idx];
-        TxIdx top_idx = parent_tx_data.chunk_idx;
+        SetIdx top_idx = parent_tx_data.chunk_idx;
         auto top_part = par_chunk_data.chunk_setinfo;
         auto bottom_part = chl_chunk_data.chunk_setinfo;
         // Update the parent chunk to also contain the child.
@@ -813,10 +823,10 @@ private:
         m_cost += chunk_data.chunk_setinfo.transactions.Count();
         auto top_part = dep_data.top_setinfo;
         auto bottom_part = chunk_data.chunk_setinfo - top_part;
-        TxIdx bottom_idx = dep_data.child;
+        SetIdx bottom_idx = dep_data.child.value;
         auto& bottom_chunk_data = m_tx_data[bottom_idx];
         bottom_chunk_data.chunk_setinfo = bottom_part;
-        TxIdx top_idx = dep_data.parent;
+        SetIdx top_idx = dep_data.parent.value;
         auto& top_chunk_data = m_tx_data[top_idx];
         top_chunk_data.chunk_setinfo = top_part;
 
@@ -838,19 +848,19 @@ private:
     /** Activate a dependency from the chunk represented by bottom_idx to the chunk represented by
      *  top_idx. Return the representative of the merged chunk, or TxIdx(-1) if no merge is
      *  possible. */
-    TxIdx MergeChunks(TxIdx top_idx, TxIdx bottom_idx) noexcept
+    SetIdx MergeChunks(SetIdx top_idx, SetIdx bottom_idx) noexcept
     {
         auto& top_chunk = m_tx_data[top_idx];
         Assume(top_chunk.chunk_idx == top_idx);
         auto& bottom_chunk = m_tx_data[bottom_idx];
         Assume(bottom_chunk.chunk_idx == bottom_idx);
         // Count the number of dependencies between bottom_chunk and top_chunk.
-        TxIdx num_deps{0};
+        typename TxIdx::value_type num_deps{0};
         for (auto tx : top_chunk.chunk_setinfo.transactions) {
             auto& tx_data = m_tx_data[tx];
             num_deps += (tx_data.children & bottom_chunk.chunk_setinfo.transactions).Count();
         }
-        if (num_deps == 0) return TxIdx(-1);
+        if (num_deps == 0) return INVALID_SET_IDX;
         // Uniformly randomly pick one of them and activate it.
         TxIdx pick = m_rng.randrange(num_deps);
         for (auto tx : top_chunk.chunk_setinfo.transactions) {
@@ -871,13 +881,13 @@ private:
             pick -= count;
         }
         Assume(false);
-        return TxIdx(-1);
+        return INVALID_SET_IDX;
     }
 
     /** Perform an upward or downward merge step, on the specified chunk representative. Returns
      *  the representative of the merged chunk, or TxIdx(-1) if no merge took place. */
     template<bool DownWard>
-    TxIdx MergeStep(TxIdx chunk_idx) noexcept
+    SetIdx MergeStep(SetIdx chunk_idx) noexcept
     {
         /** Information about the chunk that tx_idx is currently in. */
         auto& chunk_data = m_tx_data[chunk_idx];
@@ -896,7 +906,7 @@ private:
          *  feerate, but is updated to be the current best candidate whenever one is found. */
         FeeFrac best_other_chunk_feerate = chunk_data.chunk_setinfo.feerate;
         /** The representative for the best candidate chunk to merge with. -1 if none. */
-        TxIdx best_other_chunk_idx = TxIdx(-1);
+        SetIdx best_other_chunk_idx = INVALID_SET_IDX;
         /** We generate random tiebreak values to pick between equal-feerate candidate chunks.
          *  This variable stores the tiebreak of the current best candidate. */
         uint64_t best_other_chunk_tiebreak{0};
@@ -924,13 +934,13 @@ private:
             }
         }
         // Stop if there are no candidate chunks to merge with.
-        if (best_other_chunk_idx == TxIdx(-1)) return TxIdx(-1);
+        if (best_other_chunk_idx == INVALID_SET_IDX) return INVALID_SET_IDX;
         if constexpr (DownWard) {
             chunk_idx = MergeChunks(chunk_idx, best_other_chunk_idx);
         } else {
             chunk_idx = MergeChunks(best_other_chunk_idx, chunk_idx);
         }
-        Assume(chunk_idx != TxIdx(-1));
+        Assume(chunk_idx != INVALID_SET_IDX);
         return chunk_idx;
     }
 
@@ -942,7 +952,7 @@ private:
         auto chunk_idx = m_tx_data[tx_idx].chunk_idx;
         while (true) {
             auto merged_idx = MergeStep<DownWard>(chunk_idx);
-            if (merged_idx == TxIdx(-1)) break;
+            if (merged_idx == INVALID_SET_IDX) break;
             chunk_idx = merged_idx;
         }
         // Add the chunk to the queue of improvable chunks.
@@ -1024,7 +1034,7 @@ public:
             // Merge the chunk upwards, as long as merging succeeds.
             while (true) {
                 chunk_idx = MergeStep<false>(chunk_idx);
-                if (chunk_idx == TxIdx(-1)) break;
+                if (chunk_idx == INVALID_SET_IDX) break;
             }
         }
     }
@@ -1035,10 +1045,10 @@ public:
         Assume(m_suboptimal_chunks.empty());
         for (auto tx : m_transaction_idxs) {
             auto& tx_data = m_tx_data[tx];
-            if (tx_data.chunk_idx == tx) {
+            if (Representative(tx_data.chunk_idx) == tx) {
                 m_suboptimal_chunks.emplace_back(tx);
                 // Randomize the initial order of suboptimal chunks in the queue.
-                TxIdx j = m_rng.randrange<TxIdx>(m_suboptimal_chunks.size());
+                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
                 if (j != m_suboptimal_chunks.size() - 1) {
                     std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
                 }
@@ -1046,7 +1056,7 @@ public:
         }
         while (!m_suboptimal_chunks.empty()) {
             // Pop an entry from the potentially-suboptimal chunk queue.
-            TxIdx chunk = m_suboptimal_chunks.front();
+            SetIdx chunk = m_suboptimal_chunks.front();
             m_suboptimal_chunks.pop_front();
             auto& chunk_data = m_tx_data[chunk];
             // If what was popped is not currently a chunk representative, continue. This may
@@ -1057,14 +1067,14 @@ public:
                 if (i ^ flip) {
                     // Attempt to merge the chunk upwards.
                     auto result_up = MergeStep<false>(chunk);
-                    if (result_up != TxIdx(-1)) {
+                    if (result_up != INVALID_SET_IDX) {
                         m_suboptimal_chunks.push_back(result_up);
                         break;
                     }
                 } else {
                     // Attempt to merge the chunk downwards.
                     auto result_down = MergeStep<true>(chunk);
-                    if (result_down != TxIdx(-1)) {
+                    if (result_down != INVALID_SET_IDX) {
                         m_suboptimal_chunks.push_back(result_down);
                         break;
                     }
@@ -1080,10 +1090,10 @@ public:
         // Mark chunks suboptimal.
         for (auto tx : m_transaction_idxs) {
             auto& tx_data = m_tx_data[tx];
-            if (tx_data.chunk_idx == tx) {
+            if (Representative(tx_data.chunk_idx) == tx) {
                 m_suboptimal_chunks.push_back(tx);
                 // Randomize the initial order of suboptimal chunks in the queue.
-                TxIdx j = m_rng.randrange<TxIdx>(m_suboptimal_chunks.size());
+                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
                 if (j != m_suboptimal_chunks.size() - 1) {
                     std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
                 }
@@ -1096,7 +1106,7 @@ public:
     {
         while (!m_suboptimal_chunks.empty()) {
             // Pop an entry from the potentially-suboptimal chunk queue.
-            TxIdx chunk = m_suboptimal_chunks.front();
+            SetIdx chunk{m_suboptimal_chunks.front()};
             m_suboptimal_chunks.pop_front();
             auto& chunk_data = m_tx_data[chunk];
             // If what was popped is not currently a chunk representative, continue. This may
@@ -1149,11 +1159,11 @@ public:
         // direction, to m_nonminimal_chunks.
         for (auto tx : m_transaction_idxs) {
             auto& tx_data = m_tx_data[tx];
-            if (tx_data.chunk_idx == tx) {
+            if (Representative(tx_data.chunk_idx) == tx) {
                 TxIdx pivot_idx = PickRandomTx(tx_data.chunk_setinfo.transactions);
                 m_nonminimal_chunks.emplace_back(tx, pivot_idx, m_rng.randbits<1>());
                 // Randomize the initial order of nonminimal chunks in the queue.
-                TxIdx j = m_rng.randrange<TxIdx>(m_nonminimal_chunks.size());
+                SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_nonminimal_chunks.size());
                 if (j != m_nonminimal_chunks.size() - 1) {
                     std::swap(m_nonminimal_chunks.back(), m_nonminimal_chunks[j]);
                 }
@@ -1223,7 +1233,7 @@ public:
         // Try to activate a dependency between the new bottom and the new top (opposite from the
         // dependency that was just deactivated).
         auto merged_chunk_idx = MergeChunks(child_chunk_idx, parent_chunk_idx);
-        if (merged_chunk_idx != TxIdx(-1)) {
+        if (merged_chunk_idx != INVALID_SET_IDX) {
             // A self-merge happened.
             // Re-insert the chunk into the queue, in the same direction. Note that the chunk_idx
             // will have changed.
@@ -1276,7 +1286,7 @@ public:
         /** A heap with all chunks (by representative) that can currently be included, sorted by
          *  chunk feerate (high to low), chunk size (small to large), and by least maximum element
          *  according to the fallback order (which is the second pair element). */
-        std::vector<std::pair<TxIdx, TxIdx>> ready_chunks;
+        std::vector<std::pair<SetIdx, TxIdx>> ready_chunks;
         /** For every chunk, indexed by representative, the number of unmet dependencies the chunk has on
          *  other chunks (not including dependencies within the chunk itself). */
         std::vector<TxIdx> chunk_deps(m_tx_data.size(), 0);
@@ -1298,7 +1308,7 @@ public:
             chunk_deps[chl_chunk_idx] += (chl_data.parents - chl_chunk_txn).Count();
         }
         /** Function to compute the highest element of a chunk, by fallback_order. */
-        auto max_fallback_fn = [&](TxIdx chunk_idx) noexcept {
+        auto max_fallback_fn = [&](SetIdx chunk_idx) noexcept {
             auto& chunk = m_tx_data[chunk_idx].chunk_setinfo.transactions;
             auto it = chunk.begin();
             DepGraphIndex ret = *it;
@@ -1353,7 +1363,7 @@ public:
             return a.second < b.second;
         };
         // Construct a heap with all chunks that have no out-of-chunk dependencies.
-        for (TxIdx chunk_idx : chunk_idxs) {
+        for (SetIdx chunk_idx : chunk_idxs) {
             if (chunk_deps[chunk_idx] == 0) {
                 ready_chunks.emplace_back(chunk_idx, max_fallback_fn(chunk_idx));
             }
@@ -1427,7 +1437,7 @@ public:
     {
         std::vector<FeeFrac> ret;
         for (auto tx : m_transaction_idxs) {
-            if (m_tx_data[tx].chunk_idx == tx) {
+            if (Representative(m_tx_data[tx].chunk_idx) == tx) {
                 ret.push_back(m_tx_data[tx].chunk_setinfo.feerate);
             }
         }
@@ -1475,12 +1485,12 @@ public:
         SetType chunk_cover;
         for (auto tx_idx: m_depgraph.Positions()) {
             // Only process chunks for now.
-            if (m_tx_data[tx_idx].chunk_idx == tx_idx) {
+            if (Representative(m_tx_data[tx_idx].chunk_idx) == tx_idx) {
                 const auto& chunk_data = m_tx_data[tx_idx];
                 // Verify that transactions in the chunk point back to it. This guarantees
                 // that chunks are non-overlapping.
                 for (auto chunk_tx : chunk_data.chunk_setinfo.transactions) {
-                    assert(m_tx_data[chunk_tx].chunk_idx == tx_idx);
+                    assert(Representative(m_tx_data[chunk_tx].chunk_idx) == tx_idx);
                 }
                 assert(!chunk_cover.Overlaps(chunk_data.chunk_setinfo.transactions));
                 chunk_cover |= chunk_data.chunk_setinfo.transactions;
