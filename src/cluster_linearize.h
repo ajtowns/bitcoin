@@ -17,7 +17,6 @@
 #include <random.h>
 #include <span.h>
 #include <util/feefrac.h>
-#include <util/taggedint.h>
 #include <util/vecdeque.h>
 
 namespace cluster_linearize {
@@ -647,16 +646,14 @@ private:
     InsecureRandomContext m_rng;
 
     /** Data type to represent indexing into m_tx_data. */
-    struct TxIdxTag { };
-    using TxIdx = util::TaggedInt<DepGraphIndex,TxIdxTag>;
+    using TxIdx = DepGraphIndex;
     /** Data type to represent indexing into m_dep_data. */
     using DepIdx = uint32_t;
     /** Data type to represent indexing into m_set_info. */
-    struct SetIdxTag { };
-    using SetIdx = util::TaggedInt<uint32_t,SetIdxTag>;
+    using SetIdx = uint32_t;
 
     /** An invalid SetIdx. */
-    static constexpr SetIdx INVALID_SET_IDX{~uint32_t{0}};
+    static constexpr SetIdx INVALID_SET_IDX = SetIdx(-1);
 
     /** Structure with information about a single transaction. */
     struct TxData {
@@ -859,7 +856,7 @@ private:
         auto& top_chunk_info = m_set_info[top_idx];
         auto& bottom_chunk_info = m_set_info[bottom_idx];
         // Count the number of dependencies between bottom_chunk and top_chunk.
-        typename TxIdx::value_type num_deps{0};
+        uint32_t num_deps{0};
         for (auto tx_idx : top_chunk_info.transactions) {
             auto& tx_data = m_tx_data[tx_idx];
             num_deps += (tx_data.children & bottom_chunk_info.transactions).Count();
@@ -914,7 +911,7 @@ private:
         /** We generate random tiebreak values to pick between equal-feerate candidate chunks.
          *  This variable stores the tiebreak of the current best candidate. */
         uint64_t best_other_chunk_tiebreak{0};
-        for (TxIdx tx_idx : chunk_txn) {
+        for (auto tx_idx : chunk_txn) {
             auto& tx_data = m_tx_data[tx_idx];
             /** The transactions reached by following dependencies from tx that have not been
              *  explored before. */
@@ -1054,7 +1051,7 @@ public:
         for (auto chunk_idx : m_chunk_idxs) {
             m_suboptimal_chunks.emplace_back(chunk_idx);
             // Randomize the initial order of suboptimal chunks in the queue.
-            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
+            SetIdx j = m_rng.randrange<SetIdx>(m_suboptimal_chunks.size());
             if (j != m_suboptimal_chunks.size() - 1) {
                 std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
             }
@@ -1092,10 +1089,10 @@ public:
     {
         Assume(m_suboptimal_chunks.empty());
         // Mark chunks suboptimal.
-        for (SetIdx chunk_idx : m_chunk_idxs) {
+        for (auto chunk_idx : m_chunk_idxs) {
             m_suboptimal_chunks.push_back(chunk_idx);
             // Randomize the initial order of suboptimal chunks in the queue.
-            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_suboptimal_chunks.size());
+            SetIdx j = m_rng.randrange<SetIdx>(m_suboptimal_chunks.size());
             if (j != m_suboptimal_chunks.size() - 1) {
                 std::swap(m_suboptimal_chunks.back(), m_suboptimal_chunks[j]);
             }
@@ -1118,7 +1115,7 @@ public:
             DepIdx candidate_dep = DepIdx(-1);
             uint64_t candidate_tiebreak = 0;
             // Iterate over all transactions.
-            for (TxIdx tx_idx : chunk_info.transactions) {
+            for (auto tx_idx : chunk_info.transactions) {
                 const auto& tx_data = m_tx_data[tx_idx];
                 // Iterate over all active child dependencies of the transaction.
                 const auto children = std::span{tx_data.child_deps};
@@ -1159,11 +1156,11 @@ public:
         m_nonminimal_chunks.reserve(m_transaction_idxs.Count());
         // Gather all chunks, and for each, add it with a random pivot in it, and a random initial
         // direction, to m_nonminimal_chunks.
-        for (SetIdx chunk_idx : m_chunk_idxs) {
+        for (auto chunk_idx : m_chunk_idxs) {
             TxIdx pivot_idx = PickRandomTx(m_set_info[chunk_idx].transactions);
             m_nonminimal_chunks.emplace_back(chunk_idx, pivot_idx, m_rng.randbits<1>());
             // Randomize the initial order of nonminimal chunks in the queue.
-            SetIdx j = m_rng.randrange<typename SetIdx::value_type>(m_nonminimal_chunks.size());
+            SetIdx j = m_rng.randrange<SetIdx>(m_nonminimal_chunks.size());
             if (j != m_nonminimal_chunks.size() - 1) {
                 std::swap(m_nonminimal_chunks.back(), m_nonminimal_chunks[j]);
             }
@@ -1190,7 +1187,7 @@ public:
         uint64_t candidate_tiebreak{0};
         bool have_any = false;
         // Iterate over all transactions.
-        for (TxIdx tx_idx : chunk_info.transactions) {
+        for (auto tx_idx : chunk_info.transactions) {
             const auto& tx_data = m_tx_data[tx_idx];
             // Iterate over all active child dependencies of the transaction.
             for (auto dep_idx : tx_data.child_deps) {
@@ -1431,7 +1428,7 @@ public:
     std::vector<FeeFrac> GetDiagram() const noexcept
     {
         std::vector<FeeFrac> ret;
-        for (SetIdx chunk_idx : m_chunk_idxs) {
+        for (auto chunk_idx : m_chunk_idxs) {
             ret.push_back(m_set_info[chunk_idx].feerate);
         }
         std::sort(ret.begin(), ret.end(), std::greater{});
@@ -1476,7 +1473,7 @@ public:
         // Verify the chunks against the list of active dependencies
         //
         SetType chunk_cover;
-        for (SetIdx chunk_idx : m_chunk_idxs) {
+        for (auto chunk_idx : m_chunk_idxs) {
             const auto& chunk_info = m_set_info[chunk_idx];
             // Verify that transactions in the chunk point back to it. This guarantees
             // that chunks are non-overlapping.
