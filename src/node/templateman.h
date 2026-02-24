@@ -1,0 +1,163 @@
+// Copyright (c) 2025-present The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#ifndef BITCOIN_NODE_TEMPLATEMAN_H
+#define BITCOIN_NODE_TEMPLATEMAN_H
+
+#include <primitives/transaction.h>
+#include <streams.h>
+#include <uint256.h>
+#include <util/hasher.h>
+
+#include <cstdint>
+#include <deque>
+#include <set>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace node {
+
+static constexpr int SHORTTXIDS_LENGTH = 6;
+
+/** Maximum number of templates to keep. */
+static constexpr size_t MAX_TEMPLATES{10};
+
+/** Template weight limit (larger than consensus to capture more txs). */
+static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
+
+/** Entry in the shared template tx pool. Ordered by wtxid. */
+struct TemplateTx {
+    CTransactionRef tx;
+    mutable uint32_t num_templates{0}; //!< refcount: number of templates referencing this tx
+    mutable size_t scannable_idx{0};   //!< index into m_scannable_txns
+
+    friend auto operator<=>(const TemplateTx& a, const TemplateTx& b)
+    {
+        return a.tx->GetWitnessHash() <=> b.tx->GetWitnessHash();
+    }
+    friend bool operator==(const TemplateTx& a, const TemplateTx& b)
+    {
+        return a.tx->GetWitnessHash() == b.tx->GetWitnessHash();
+    }
+
+    /** Allow lookup by Wtxid in the set via std::less<>. */
+    friend auto operator<=>(const TemplateTx& a, const Wtxid& b)
+    {
+        return a.tx->GetWitnessHash() <=> b;
+    }
+    friend bool operator==(const TemplateTx& a, const Wtxid& b)
+    {
+        return a.tx->GetWitnessHash() == b;
+    }
+};
+
+using TemplateTxSet = std::set<TemplateTx, std::less<>>;
+using TemplateTxRef = TemplateTxSet::iterator;
+
+class Template {
+public:
+    std::vector<TemplateTxRef> m_txs;    //!< ordered tx list
+    uint256 m_hash;                      //!< SHA256 of concatenated wtxids
+
+    /** Compute template hash: SHA256 of concatenated wtxids. */
+    void ComputeHash();
+};
+
+/** Pre-encoded delta from a basis template to this template. */
+using TemplateDelta = std::vector<std::byte>;
+
+/** A locally-generated block template for the sendtemplate protocol. */
+class LocalTemplate : public Template {
+public:
+    /** Lazily-computed deltas from basis templates, keyed by basis hash. */
+    mutable std::unordered_map<uint256, TemplateDelta, SaltedUint256Hasher> m_deltas;
+
+    /** Get (or compute) the delta from a basis template to this one. */
+    const TemplateDelta& GetDelta(const Template& basis) const;
+
+    /**
+     * Build a tmplt message payload.
+     *
+     * If no basis template: flat list of 6-byte short IDs.
+     * If basis template: CompactIntVec delta encoding + appended raw
+     * 6-byte IDs for new transactions.
+     */
+    DataStream MakeTmpltMsg(uint64_t nonce, const LocalTemplate* basis) const;
+};
+
+/**
+ * Manages block templates for the sendtemplate protocol.
+ *
+ * Maintains a shared tx pool (refcounted) across all templates,
+ * and provides provider-side template generation and encoding.
+ */
+class TemplateManager
+{
+    TemplateTxSet m_pool;
+    std::deque<LocalTemplate> m_templates;
+
+    /**
+     * Vector of (wtxid, iterator) pairs for cache-local linear scans
+     * of all transactions in m_pool.
+     * The inline wtxid avoids dereferencing the set node during scans,
+     * so that use in compact block reconstruction is fast.
+     */
+    std::vector<std::pair<Wtxid, TemplateTxRef>> m_scannable_txns;
+
+    /** Find transaction in the pool, adding if necessary. Bumps refcount. */
+    TemplateTxRef AddTx(CTransactionRef tx);
+
+    /** Find transactions in the pool, adding if necessary. Bumps refcounts. */
+    std::vector<TemplateTxRef> AddTxs(std::span<CTransactionRef> txs);
+
+    /** Decrement refcounts and erase txs with zero refs. */
+    void RemoveTxs(std::vector<TemplateTxRef>&& vec);
+
+    /** Trim old templates beyond MAX_TEMPLATES. */
+    void TrimLocalTemplates();
+
+public:
+    /**
+     * Generate a new template from block transactions (sans coinbase).
+     * Computes template hash, adds txs to pool, and trims old templates.
+     */
+    void GenerateTemplate(std::span<CTransactionRef> txs);
+
+    /** Look up a template by its hash. */
+    const LocalTemplate* GetTemplate(const uint256& hash) const
+    {
+        for (const auto& tmpl : m_templates) {
+            if (tmpl.m_hash == hash) return &tmpl;
+        }
+        return nullptr;
+    }
+
+    /** Get the most recent template (or nullptr if none). */
+    const LocalTemplate* GetBestTemplate() const
+    {
+        if (m_templates.empty()) return nullptr;
+        return &m_templates.back();
+    }
+
+    /**
+     * Resolve transaction positions to actual transaction references.
+     * Used for tmplttxn responses.
+     */
+    static std::vector<CTransactionRef> GetTxsByPosition(const LocalTemplate& tmpl, const std::vector<uint16_t>& positions);
+
+    /** Cache-local (wtxid, iter) vector for compact block reconstruction. */
+    const auto& GetScannableTxns() const { return m_scannable_txns; }
+
+    /** Number of transactions in the shared pool. */
+    size_t PoolSize() const { return m_pool.size(); }
+
+    /** Number of stored templates. */
+    size_t NumTemplates() const { return m_templates.size(); }
+};
+
+} // namespace node
+
+#endif // BITCOIN_NODE_TEMPLATEMAN_H
