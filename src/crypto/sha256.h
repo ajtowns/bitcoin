@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <span>
 #include <string>
 
 /** A hasher class for SHA-256. */
@@ -22,6 +23,7 @@ public:
 
     CSHA256();
     CSHA256& Write(const unsigned char* data, size_t len);
+    CSHA256& Write(std::span<const unsigned char> s) { return Write(s.data(), s.size()); }
     void Finalize(unsigned char hash[OUTPUT_SIZE]);
     CSHA256& Reset();
 };
