@@ -47,6 +47,7 @@ enum LogFlags : CategoryMask {
     KERNEL = (CategoryMask{1} << 29),
     PRIVBROADCAST = (CategoryMask{1} << 30),
     MINER = (CategoryMask{1} << 31),
+    SHARETMPL = (CategoryMask{1} << 32),
     ALL = ~NONE,
 };
 

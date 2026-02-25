@@ -32,6 +32,7 @@
 #include <netmessagemaker.h>
 #include <node/blockstorage.h>
 #include <node/connection_types.h>
+#include <node/miner.h>
 #include <node/protocol_version.h>
 #include <node/templateman.h>
 #include <node/timeoffsets.h>
@@ -531,7 +532,7 @@ public:
     void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
     bool HasAllDesirableServiceFlags(ServiceFlags services) const override;
     bool ProcessMessages(CNode& node, std::atomic<bool>& interrupt) override
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_template_mutex);
     bool SendMessages(CNode& node) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, !m_tx_download_mutex);
 
@@ -560,7 +561,7 @@ public:
 private:
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, std::chrono::microseconds time_received,
                         const std::atomic<bool>& interruptMsgProc)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_template_mutex);
 
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
     void ConsiderEviction(CNode& pto, Peer& peer, std::chrono::seconds time_in_seconds) EXCLUSIVE_LOCKS_REQUIRED(cs_main, g_msgproc_mutex);
@@ -871,6 +872,9 @@ private:
                                                 uint64_t network_key) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
 
+    /** Mutex protecting m_templateman. */
+    mutable Mutex m_template_mutex;
+
     // All of the following cache a recent block, and are protected by m_most_recent_block_mutex
     Mutex m_most_recent_block_mutex;
     std::shared_ptr<const CBlock> m_most_recent_block GUARDED_BY(m_most_recent_block_mutex);
@@ -1012,6 +1016,35 @@ private:
     /** Offset into vExtraTxnForCompact to insert the next tx */
     size_t vExtraTxnForCompactIt GUARDED_BY(g_msgproc_mutex) = 0;
 
+    /** ExtraTransactions that iterates vExtraTxnForCompact then template pool txns. */
+    class CombinedExtraTransactions : public ExtraTransactions
+    {
+        const std::vector<std::pair<Wtxid, CTransactionRef>>& m_extra;
+        const std::vector<std::pair<Wtxid, node::TemplateTxRef>>& m_template;
+        size_t m_extra_idx{0};
+        size_t m_template_idx{0};
+    public:
+        CombinedExtraTransactions(
+            const std::vector<std::pair<Wtxid, CTransactionRef>>& extra,
+            const std::vector<std::pair<Wtxid, node::TemplateTxRef>>& tmpl)
+            : m_extra{extra}, m_template{tmpl} { }
+
+        WitRef next() override
+        {
+            if (m_template_idx < m_template.size()) {
+                auto& [wtxid, ref] = m_template[m_template_idx++];
+                return {&wtxid, &ref->tx};
+            }
+            while (m_extra_idx < m_extra.size()) {
+                auto& item = m_extra[m_extra_idx++];
+                if (item.second != nullptr) {
+                    return {&item.first, &item.second};
+                }
+            }
+            return {nullptr, nullptr};
+        }
+    };
+
     /** Check whether the last unknown block a peer advertised is not yet known. */
     void ProcessBlockAvailability(NodeId nodeid) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
     /** Update tracking information about which blocks a peer is assumed to have. */
@@ -1101,6 +1134,13 @@ private:
     void PushAddress(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     void LogBlockHeader(const CBlockIndex& index, const CNode& peer, bool via_compact_block);
+
+    node::TemplateManager m_templateman GUARDED_BY(m_template_mutex);
+
+    /** Generate a new template if enough time has passed. */
+    void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+    ReadStatus InitCompactBlockData(PartiallyDownloadedBlock& partial_block, const CBlockHeaderAndShortTxIDs& cmpctblock)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
     /// The transactions to be broadcast privately.
     PrivateBroadcast m_tx_for_private_broadcast;
@@ -4719,7 +4759,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 }
 
                 PartiallyDownloadedBlock& partialBlock = *(*queuedBlockIt)->partialBlock;
-                ReadStatus status = partialBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = InitCompactBlockData(partialBlock, cmpctblock);
                 if (status == READ_STATUS_INVALID) {
                     RemoveBlockRequest(pindex->GetBlockHash(), pfrom.GetId()); // Reset in-flight state in case Misbehaving does not result in a disconnect
                     Misbehaving(peer, "invalid compact block");
@@ -4770,7 +4810,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 // Optimistically try to reconstruct anyway since we might be
                 // able to without any round trips.
                 PartiallyDownloadedBlock tempBlock;
-                ReadStatus status = tempBlock.InitData(cmpctblock, m_mempool, vExtraTxnForCompact);
+                ReadStatus status = InitCompactBlockData(tempBlock, cmpctblock);
                 if (status != READ_STATUS_OK) {
                     // TODO: don't ignore failures
                     return;
@@ -5250,10 +5290,68 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
+void PeerManagerImpl::MaybeGenerateNewTemplate()
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockNotHeld(m_template_mutex);
+
+    auto now = NodeClock::now();
+    bool have_templates;
+    {
+        LOCK(m_template_mutex);
+        if (!m_templateman.CheckTimer(now)) return;
+        have_templates = m_templateman.NumTemplates() > 0;
+    }
+
+    if (!have_templates) {
+        // Note: if any of these checks hit, we'll only recheck again in 30s intervals
+        if (m_chainman.IsInitialBlockDownload()) {
+            LogDebug(BCLog::SHARETMPL, "Skipping template generation (initial block download)");
+            return;
+        } else if (!m_mempool.GetLoadTried()) {
+            LogDebug(BCLog::SHARETMPL, "Skipping template generation (mempool not loaded)");
+            return;
+        } else if (WITH_LOCK(cs_main, return !CanDirectFetch())) {
+            LogDebug(BCLog::SHARETMPL, "Skipping template generation (tip too old)");
+            return;
+        }
+    }
+
+    const auto assemble_options = []() {
+        node::BlockAssembler::Options opt;
+        opt.nBlockMaxWeight = node::MAX_TEMPLATE_WEIGHT;
+        opt.block_reserved_weight = MINIMUM_BLOCK_RESERVED_WEIGHT;
+        opt.blockMinFeeRate = CFeeRate(0);
+        opt.test_block_validity = false;
+        opt.print_modified_fee = false;
+        return opt;
+    }();
+    node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options, node::BlockAssembler::ALLOW_OVERSIZED_BLOCKS};
+    auto block_template = assembler.CreateNewBlock();
+
+    auto& vtx = block_template->block.vtx;
+    assert(!vtx.empty() && vtx[0]->IsCoinBase());
+    auto txs = std::span{vtx}.subspan(1); // skip coinbase
+
+    LogDebug(BCLog::SHARETMPL, "Generated template for compact block reconstruction (%d txs)", txs.size());
+
+    LOCK(m_template_mutex);
+    m_templateman.GenerateTemplate(txs);
+}
+
+ReadStatus PeerManagerImpl::InitCompactBlockData(PartiallyDownloadedBlock& partial_block, const CBlockHeaderAndShortTxIDs& cmpctblock)
+{
+    AssertLockHeld(g_msgproc_mutex);
+    LOCK(m_template_mutex);
+    return partial_block.InitData(cmpctblock, m_mempool, CombinedExtraTransactions(vExtraTxnForCompact, m_templateman.GetScannableTxns()));
+}
+
 bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptMsgProc)
 {
     AssertLockNotHeld(m_tx_download_mutex);
     AssertLockHeld(g_msgproc_mutex);
+
+    MaybeGenerateNewTemplate();
 
     PeerRef maybe_peer{GetPeerRef(node.GetId())};
     if (maybe_peer == nullptr) return false;

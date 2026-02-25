@@ -9,7 +9,9 @@
 #include <streams.h>
 #include <uint256.h>
 #include <util/hasher.h>
+#include <util/time.h>
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <set>
@@ -24,6 +26,9 @@ static constexpr int SHORTTXIDS_LENGTH = 6;
 
 /** Maximum number of templates to keep. */
 static constexpr size_t MAX_TEMPLATES{10};
+
+/** How frequently to update templates for compact block reconstruction. */
+static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
 
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
@@ -98,6 +103,7 @@ class TemplateManager
 {
     TemplateTxSet m_pool;
     std::deque<LocalTemplate> m_templates;
+    NodeClock::time_point m_next_update{NodeClock::time_point::min()};
 
     /**
      * Vector of (wtxid, iterator) pairs for cache-local linear scans
@@ -156,6 +162,14 @@ public:
 
     /** Number of stored templates. */
     size_t NumTemplates() const { return m_templates.size(); }
+
+    /** Check if it's time to generate a new template, and if so, advance the timer. */
+    bool CheckTimer(NodeClock::time_point now)
+    {
+        if (now < m_next_update) return false;
+        m_next_update = now + TEMPLATE_UPDATE_INTERVAL;
+        return true;
+    }
 };
 
 } // namespace node
