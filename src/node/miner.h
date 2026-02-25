@@ -77,10 +77,15 @@ private:
     const CTxMemPool* const m_mempool;
     Chainstate& m_chainstate;
 
+    struct AllowOversizedBlocks_tag { explicit AllowOversizedBlocks_tag() = default; };
+
 public:
     explicit BlockAssembler(Chainstate& chainstate,
                             const CTxMemPool* mempool,
                             BlockCreateOptions create_options);
+
+    static constexpr AllowOversizedBlocks_tag ALLOW_OVERSIZED_BLOCKS{};
+    explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, BlockCreateOptions create_options, AllowOversizedBlocks_tag);
 
     /** Construct a new block template */
     std::unique_ptr<CBlockTemplate> CreateNewBlock();

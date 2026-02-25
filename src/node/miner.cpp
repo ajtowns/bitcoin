@@ -119,6 +119,14 @@ BlockAssembler::BlockAssembler(Chainstate& chainstate,
 {
 }
 
+BlockAssembler::BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, BlockCreateOptions options, AllowOversizedBlocks_tag)
+    : chainparams{chainstate.m_chainman.GetParams()},
+      m_mempool{options.use_mempool ? mempool : nullptr},
+      m_chainstate{chainstate},
+      m_options{FlattenMiningOptions(std::move(options))}
+{
+}
+
 void BlockAssembler::resetBlock()
 {
     // Reserve space for fixed-size block header, txs count, and coinbase tx.
