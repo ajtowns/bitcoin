@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 
 /** Message header.
  * (4) message start.
@@ -268,6 +269,23 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  * BIP 434 Peer feature negotiation
  */
 inline constexpr const char* FEATURE{"feature"};
+/**
+ * Request a block template from a peer. Optional basis hash allows
+ * delta encoding against a previously-received template.
+ */
+inline constexpr const char* GETTMPLT{"gettmplt"};
+/**
+ * Block template message: contains short tx IDs (flat or delta-encoded).
+ */
+inline constexpr const char* TMPLT{"tmplt"};
+/**
+ * Request full transactions by position from a previously-received template.
+ */
+inline constexpr const char* GETTMPLTTXN{"gettmplttxn"};
+/**
+ * Response with full transactions for a template.
+ */
+inline constexpr const char* TMPLTTXN{"tmplttxn"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -308,12 +326,17 @@ inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
+    NetMsgType::GETTMPLT,
+    NetMsgType::TMPLT,
+    NetMsgType::GETTMPLTTXN,
+    NetMsgType::TMPLTTXN,
 })};
 
 static constexpr size_t MAX_FEATUREID_LENGTH{80};
 static constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
+inline constexpr std::string_view BIN25_2_1{"BIN25-2.1"};
 }
 
 /** nServices flags */

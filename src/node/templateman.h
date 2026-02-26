@@ -8,6 +8,8 @@
 #include <primitives/transaction.h>
 #include <streams.h>
 #include <uint256.h>
+#include <util/bitset.h>
+#include <util/check.h>
 #include <util/hasher.h>
 #include <util/time.h>
 
@@ -91,6 +93,55 @@ public:
      * 6-byte IDs for new transactions.
      */
     DataStream MakeTmpltMsg(uint64_t nonce, const LocalTemplate* basis) const;
+};
+
+/** Bitset-based tracking of template positions.
+ *
+ *  Positions are stored as a vector of bitsets (each covering 1024 positions).
+ *  ProcessMessage populates via Queue(); SendMessages drains via GetNextChunk().
+ */
+class MissingTemplateTxns
+{
+protected:
+    static constexpr unsigned CHUNK_SIZE{1024};
+    std::vector<BitSet<CHUNK_SIZE>> m_positions;
+
+public:
+    bool empty() const { return m_positions.empty(); }
+
+    /** Release all state and free memory. */
+    void Reset()
+    {
+        std::vector<BitSet<CHUNK_SIZE>>{}.swap(m_positions);
+    }
+
+    /** Return all set positions in order. */
+    std::vector<int32_t> GetPositions() const;
+
+};
+
+/** Provider side: ProcessMessage populates via Queue(); SendMessages drains
+ *  via GetNextChunk().
+ */
+class RequestedTemplateTxns : public MissingTemplateTxns
+{
+    uint256 m_template_hash;
+public:
+    const uint256& template_hash() const { return m_template_hash; }
+
+    void Reset()
+    {
+        MissingTemplateTxns::Reset();
+        m_template_hash.SetNull();
+    }
+
+    /** Populate from sorted absolute positions. Replaces any prior queue.
+     *  Returns false (and leaves the queue empty) if any position is out of range. */
+    [[nodiscard]] bool Queue(const uint256& hash, const LocalTemplate& tmpl, const std::vector<uint16_t>& positions);
+
+    /** Drain up to max_bytes of transactions, resolving positions via tmpl.
+     *  Returns the collected transactions. Clears state when fully drained. */
+    std::vector<CTransactionRef> GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes);
 };
 
 struct TemplateInfo {

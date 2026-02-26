@@ -6,6 +6,7 @@
 
 #include <crypto/sha256.h>
 #include <crypto/siphash.h>
+#include <primitives/transaction.h>
 #include <serialize.h>
 #include <util/compactintvec.h>
 
@@ -187,6 +188,63 @@ std::vector<CTransactionRef> TemplateManager::GetTxsByPosition(const LocalTempla
         }
     }
     return result;
+}
+
+bool RequestedTemplateTxns::Queue(const uint256& hash, const LocalTemplate& tmpl, const std::vector<uint16_t>& positions)
+{
+    m_template_hash = hash;
+    m_positions.clear();
+    size_t limit = CHUNK_SIZE;
+    BitSet<CHUNK_SIZE> chunk;
+    for (uint16_t p : positions) {
+        if (p >= tmpl.m_txs.size()) {
+            Reset();
+            return false;
+        }
+        while (limit <= p) {
+            m_positions.push_back(chunk);
+            chunk = BitSet<CHUNK_SIZE>{};
+            limit += CHUNK_SIZE;
+        }
+        chunk.Set(p % CHUNK_SIZE);
+    }
+    if (chunk.Any()) {
+        m_positions.push_back(chunk);
+    }
+    return true;
+}
+
+std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes)
+{
+    std::vector<CTransactionRef> txs;
+    size_t msg_size = 0;
+    bool hit_limit = false;
+
+    for (size_t chunk_idx = 0; chunk_idx < m_positions.size() && !hit_limit; ++chunk_idx) {
+        auto& chunk = m_positions[chunk_idx];
+        if (chunk.None()) continue;
+
+        for (unsigned bit : chunk) {
+            size_t abs_pos = chunk_idx * CHUNK_SIZE + bit;
+            if (!Assume(abs_pos < tmpl.m_txs.size())) {
+                Reset();
+                return {};
+            }
+            const CTransactionRef& tx = tmpl.m_txs[abs_pos]->tx;
+            size_t tx_size = GetSerializeSize(TX_WITH_WITNESS(tx));
+            txs.push_back(tx);
+            msg_size += tx_size;
+            chunk.Reset(bit);
+            if (msg_size >= max_bytes) {
+                hit_limit = true;
+                break;
+            }
+        }
+    }
+
+    if (!hit_limit) Reset();
+
+    return txs;
 }
 
 } // namespace node
