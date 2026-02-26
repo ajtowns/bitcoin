@@ -1949,6 +1949,197 @@ class msg_feature:
         return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
 
 
+class msg_gettmplt:
+    """Request a block template from a peer."""
+    __slots__ = ("basis_hash",)
+    msgtype = b"gettmplt"
+
+    def __init__(self, basis_hash=0):
+        self.basis_hash = basis_hash
+
+    def deserialize(self, f):
+        data = f.read()
+        if len(data) >= 32:
+            self.basis_hash = uint256_from_str(data[:32])
+        else:
+            self.basis_hash = 0
+
+    def serialize(self):
+        if self.basis_hash:
+            return ser_uint256(self.basis_hash)
+        return b""
+
+    def __repr__(self):
+        return f"msg_gettmplt(basis_hash={self.basis_hash:064x})"
+
+
+class msg_tmplt:
+    """Block template message with short tx IDs."""
+    __slots__ = ("nonce", "template_hash", "basis_hash", "tx_count", "raw_payload")
+    msgtype = b"tmplt"
+
+    def __init__(self):
+        self.nonce = 0
+        self.template_hash = 0
+        self.basis_hash = 0
+        self.tx_count = 0
+        self.raw_payload = b""
+
+    def deserialize(self, f):
+        self.template_hash = deser_uint256(f)
+        self.nonce = int.from_bytes(f.read(8), "little")
+        self.basis_hash = deser_uint256(f)
+        if self.basis_hash == 0:
+            # Flat encoding: compact_size count, then count * 6-byte short IDs
+            self.tx_count = deser_compact_size(f)
+            # XXX: should decode individual short IDs rather than treating as opaque blob
+            self.raw_payload = f.read()
+        else:
+            # XXX: should decode CompactIntVec delta + appended short IDs
+            self.raw_payload = f.read()
+
+    def serialize(self):
+        r = ser_uint256(self.template_hash)
+        r += self.nonce.to_bytes(8, "little")
+        r += ser_uint256(self.basis_hash)
+        if self.basis_hash == 0:
+            r += ser_compact_size(self.tx_count)
+        # XXX: should serialize decoded fields rather than opaque blob
+        r += self.raw_payload
+        return r
+
+    def __repr__(self):
+        return f"msg_tmplt(nonce={self.nonce}, template_hash={self.template_hash:064x}, tx_count={self.tx_count})"
+
+
+class msg_gettmplttxn:
+    """Request full transactions by position from a template."""
+    __slots__ = ("template_hash", "positions")
+    msgtype = b"gettmplttxn"
+
+    def __init__(self, template_hash=0, positions=None):
+        self.template_hash = template_hash
+        self.positions = positions if positions is not None else []
+
+    def deserialize(self, f):
+        self.template_hash = deser_uint256(f)
+        self.positions = compact_uint_vec_deserialize(f)
+
+    def serialize(self):
+        r = ser_uint256(self.template_hash)
+        # Convert absolute positions to differential encoding
+        diff_indexes = []
+        for i, pos in enumerate(self.positions):
+            if i == 0:
+                diff_indexes.append(pos)
+            else:
+                diff_indexes.append(pos - self.positions[i - 1] - 1)
+        r += compact_uint_vec_serialize(diff_indexes)
+        return r
+
+    def __repr__(self):
+        return f"msg_gettmplttxn(template_hash={self.template_hash:064x}, positions={self.positions})"
+
+
+class msg_tmplttxn:
+    """Response with full transactions for a template."""
+    __slots__ = ("template_hash", "transactions")
+    msgtype = b"tmplttxn"
+
+    def __init__(self):
+        self.template_hash = 0
+        self.transactions = []
+
+    def deserialize(self, f):
+        self.template_hash = deser_uint256(f)
+        self.transactions = deser_vector(f, CTransaction)
+
+    def serialize(self):
+        r = ser_uint256(self.template_hash)
+        r += ser_vector(self.transactions, "serialize_with_witness")
+        return r
+
+    def __repr__(self):
+        return f"msg_tmplttxn(template_hash={self.template_hash:064x}, txs={len(self.transactions)})"
+
+
+def compact_uint_vec_serialize(vals):
+    """Serialize a list of unsigned ints using CompactUIntVec bit-stream encoding.
+
+    Matches the C++ CompactUSIntVecFormatter<false> from util/compactintvec.h.
+    """
+    bits = []
+    for v in vals:
+        i = 0
+        m = 1
+        while v >= m:
+            v -= m
+            m *= 16
+            i += 1
+        bits.extend([0] * i)   # i zero bits (unary length prefix)
+        bits.append(1)          # terminator bit
+        # i*4 bits of value, MSB first
+        for b in range(i * 4 - 1, -1, -1):
+            bits.append((v >> b) & 1)
+    bits.extend([0] * 9)       # end-of-sequence marker
+
+    # Pack bits into bytes, MSB first, pad with zeros
+    result = bytearray()
+    for byte_start in range(0, len(bits), 8):
+        byte_val = 0
+        for bit_idx in range(8):
+            if byte_start + bit_idx < len(bits):
+                byte_val |= bits[byte_start + bit_idx] << (7 - bit_idx)
+        result.append(byte_val)
+    return bytes(result)
+
+
+def compact_uint_vec_deserialize(f):
+    """Deserialize a CompactUIntVec from a stream.
+
+    Matches the C++ CompactUSIntVecFormatter<false>::Unser.
+    """
+    # Read remaining data into a bit reader
+    data = f.read()
+    bit_pos = 0
+
+    def read_bits(n):
+        nonlocal bit_pos
+        val = 0
+        for _ in range(n):
+            byte_idx = bit_pos // 8
+            bit_idx = 7 - (bit_pos % 8)
+            if byte_idx < len(data):
+                val = (val << 1) | ((data[byte_idx] >> bit_idx) & 1)
+            bit_pos += 1
+        return val
+
+    vals = []
+    while True:
+        i = 0
+        m = 1
+        v = 0
+        while i < 9 and read_bits(1) == 0:
+            v += m
+            i += 1
+            m *= 16
+        if i >= 9:
+            break
+        t = read_bits(i * 4)
+        v += t
+        vals.append(v)
+
+    # Convert differential to absolute positions
+    positions = []
+    pos = 0
+    for idx, d in enumerate(vals):
+        if idx > 0:
+            pos += 1
+        pos += d
+        positions.append(pos)
+    return positions
+
+
 class TestFrameworkScript(unittest.TestCase):
     def test_addrv2_encode_decode(self):
         def check_addrv2(ip, net):
