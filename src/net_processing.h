@@ -34,6 +34,7 @@ class DataStream;
 class uint256;
 
 namespace node {
+struct TemplateInfo;
 class Warnings;
 } // namespace node
 
@@ -119,6 +120,9 @@ public:
 
     /** Get peer manager info. */
     virtual PeerManagerInfo GetInfo() const = 0;
+
+    /** Get template manager info. */
+    virtual void GetTemplateInfo(node::TemplateInfo& info) const = 0;
 
     /** Get info about transactions currently being privately broadcast. */
     virtual std::vector<PrivateBroadcast::TxBroadcastInfo> GetPrivateBroadcastInfo() const = 0;

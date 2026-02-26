@@ -93,6 +93,15 @@ public:
     DataStream MakeTmpltMsg(uint64_t nonce, const LocalTemplate* basis) const;
 };
 
+struct TemplateInfo {
+    size_t num_templates{0};
+    size_t max_templates{0};
+    size_t pool_size{0};
+    size_t latest_tx_count{0};
+    std::chrono::seconds update_interval{};
+    NodeClock::time_point next_update{};
+};
+
 /**
  * Manages block templates for the sendtemplate protocol.
  *
@@ -169,6 +178,21 @@ public:
         if (now < m_next_update) return false;
         m_next_update = now + TEMPLATE_UPDATE_INTERVAL;
         return true;
+    }
+
+    /** Get template manager statistics. */
+    TemplateInfo GetInfo() const
+    {
+        TemplateInfo stats;
+        stats.num_templates = m_templates.size();
+        stats.max_templates = MAX_TEMPLATES;
+        stats.pool_size = m_pool.size();
+        if (!m_templates.empty()) {
+            stats.latest_tx_count = m_templates.back().m_txs.size();
+        }
+        stats.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
+        stats.next_update = m_next_update;
+        return stats;
     }
 };
 

@@ -12,6 +12,7 @@
 #include <core_io.h>
 #include <net_permissions.h>
 #include <net_processing.h>
+#include <node/templateman.h>
 #include <net_types.h>
 #include <netbase.h>
 #include <node/context.h>
@@ -1194,6 +1195,46 @@ static RPCHelpMan getrawaddrman()
     };
 }
 
+static RPCHelpMan gettemplateinfo()
+{
+    return RPCHelpMan{"gettemplateinfo",
+        "EXPERIMENTAL warning: this call may be changed in future releases.\n"
+        "\nReturns information about block templates maintained for compact block reconstruction.\n",
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::NUM, "templates", "Number of templates in memory"},
+                {RPCResult::Type::NUM, "max_templates", "Maximum templates kept"},
+                {RPCResult::Type::NUM, "transactions", "Number of transactions in shared pool"},
+                {RPCResult::Type::NUM, "latest_template_tx", "Transaction count in most recent template"},
+                {RPCResult::Type::NUM, "update_interval", "Seconds between template updates"},
+                {RPCResult::Type::NUM_TIME, "next_update", "UNIX epoch time of next scheduled update"},
+            }},
+        RPCExamples{
+            HelpExampleCli("gettemplateinfo", "")
+            + HelpExampleRpc("gettemplateinfo", "")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+        {
+            const NodeContext& node{EnsureAnyNodeContext(request.context)};
+            const PeerManager& peerman{EnsurePeerman(node)};
+
+            node::TemplateInfo info;
+            peerman.GetTemplateInfo(info);
+
+            UniValue ret(UniValue::VOBJ);
+            ret.pushKV("templates", info.num_templates);
+            ret.pushKV("max_templates", info.max_templates);
+            ret.pushKV("transactions", info.pool_size);
+            ret.pushKV("latest_template_tx", info.latest_tx_count);
+            ret.pushKV("update_interval", info.update_interval.count());
+            ret.pushKV("next_update", TicksSinceEpoch<std::chrono::seconds>(info.next_update));
+            return ret;
+        },
+    };
+}
+
 void RegisterNetRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -1215,6 +1256,7 @@ void RegisterNetRPCCommands(CRPCTable& t)
         {"hidden", &addpeeraddress},
         {"hidden", &sendmsgtopeer},
         {"hidden", &getrawaddrman},
+        {"hidden", &gettemplateinfo},
     };
     for (const auto& c : commands) {
         t.appendCommand(c.name, &c);
