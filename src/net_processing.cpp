@@ -656,6 +656,17 @@ private:
     bool ProcessOrphanTx(Peer& peer)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, g_msgproc_mutex, !m_tx_download_mutex);
 
+    /** Try to submit one transaction from a peer's template to the mempool.
+     *  Returns true if a tx was considered (regardless of acceptance). */
+    bool ConsiderTemplateTransactions(Peer& peer)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex,
+                                 !m_peer_mutex, !m_tx_download_mutex);
+
+    /** Submit a single peer-template tx to ATMP and return the next_mempool_check time. */
+    std::pair<bool, NodeClock::time_point> ConsiderTemplateTx(Peer& peer, CTransactionRef tx,
+                                             NodeClock::time_point now)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_tx_download_mutex);
+
     /** Process a single headers message from a peer.
      *
      * @param[in]   pfrom     CNode of the peer
@@ -5555,6 +5566,64 @@ ReadStatus PeerManagerImpl::InitCompactBlockData(PartiallyDownloadedBlock& parti
     return partial_block.InitData(cmpctblock, m_mempool, CombinedExtraTransactions(vExtraTxnForCompact, m_templateman.GetScannableTxns()));
 }
 
+bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockNotHeld(m_template_mutex);
+
+    auto now = NodeClock::now();
+    CTransactionRef tx;
+    size_t pos{0}, total{0};
+    {
+        LOCK(m_template_mutex);
+        tx = m_templateman.GetNextTemplateTx(peer.m_id, now, m_mempool, pos, total);
+    }
+    if (!tx) return false;
+
+    auto [accepted, next] = ConsiderTemplateTx(peer, tx, now);
+    WITH_LOCK(m_template_mutex, m_templateman.BumpMempoolCheck(tx->GetWitnessHash(), next));
+
+    LogDebug(BCLog::SHARETMPL, "%s template tx %d/%d wtxid=%s peer=%d",
+             (accepted ? "Accepted" : "Rejected"), pos + 1, total,
+             tx->GetWitnessHash().ToString(), peer.m_id);
+    return true;
+}
+
+std::pair<bool, NodeClock::time_point> PeerManagerImpl::ConsiderTemplateTx(Peer& peer, CTransactionRef tx,
+                                                          NodeClock::time_point now)
+{
+    AssertLockHeld(g_msgproc_mutex);
+
+    const auto result = WITH_LOCK(::cs_main, return m_chainman.ProcessTransaction(tx));
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        LOCK(m_tx_download_mutex);
+        ProcessValidTx(peer.m_id, tx, result.m_replaced_transactions);
+        return {true, now + 120s};
+    }
+
+    // GetNextTemplateTx skips mempool txs, but the tx could have entered
+    // the mempool between that check and the ProcessTransaction call above.
+    if (result.m_result_type == MempoolAcceptResult::ResultType::MEMPOOL_ENTRY ||
+        result.m_result_type == MempoolAcceptResult::ResultType::DIFFERENT_WITNESS) {
+        return {false, now + 120s};
+    }
+
+    // INVALID: graduated retry based on failure reason
+    switch (result.m_state.GetResult()) {
+    case TxValidationResult::TX_CONFLICT:
+    case TxValidationResult::TX_RECONSIDERABLE:
+        return {false, now + 180s};
+    case TxValidationResult::TX_MISSING_INPUTS:
+        return {false, now + 600s};
+    case TxValidationResult::TX_PREMATURE_SPEND:
+        return {false, now + 1200s};
+    default:
+        // Consensus/policy failures: never retry
+        return {false, NodeClock::time_point::max()};
+    }
+}
+
 bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptMsgProc)
 {
     AssertLockNotHeld(m_tx_download_mutex);
@@ -5590,6 +5659,9 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
         LOCK(peer.m_getdata_requests_mutex);
         if (!peer.m_getdata_requests.empty()) return true;
     }
+
+    // Attempt to add txs from peer's template to the mempool
+    if (ConsiderTemplateTransactions(peer)) return true;
 
     // Don't bother if send buffer is too full to respond anyway
     if (node.fPauseSend) return false;

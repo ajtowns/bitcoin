@@ -54,6 +54,7 @@ struct TemplateTx {
     CTransactionRef tx;
     mutable uint32_t num_templates{0}; //!< refcount: number of templates referencing this tx
     mutable size_t scannable_idx{0};   //!< index into m_scannable_txns
+    mutable NodeClock::time_point next_mempool_check{NodeClock::time_point::min()}; //!< earliest time to retry ATMP
 
     friend auto operator<=>(const TemplateTx& a, const TemplateTx& b)
     {
@@ -190,6 +191,7 @@ class PeerTemplate : public Template {
 public:
     NodeId m_nodeid;
     NodeClock::time_point m_time;
+    mutable size_t m_last_validated_idx{0}; //!< next position to try for mempool validation
 
     PeerTemplate() = default;
     PeerTemplate(NodeId nodeid, NodeClock::time_point now, PartialPeerTemplate&& partial);
@@ -339,6 +341,18 @@ public:
 
     /** Expire completed peer templates older than cutoff. */
     void TrimPeerTemplates(NodeClock::time_point cutoff);
+
+    /** Return the next peer-template tx ready for mempool validation, or nullptr.
+     *  Advances the peer's m_last_validated_idx, skipping txs not yet ready
+     *  and txs already in the mempool.
+     *  If non-null, sets pos_out and total_out for progress reporting. */
+    CTransactionRef GetNextTemplateTx(NodeId nodeid, NodeClock::time_point now,
+                                      const CTxMemPool& mempool,
+                                      size_t& pos_out, size_t& total_out);
+
+    /** Update next_mempool_check for a tx in the shared pool.
+     *  No-op if the tx has been evicted. */
+    void BumpMempoolCheck(const Wtxid& wtxid, NodeClock::time_point next);
 
     /** Get template manager statistics. */
     TemplateInfo GetInfo() const

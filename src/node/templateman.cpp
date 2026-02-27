@@ -610,4 +610,47 @@ void TemplateManager::TrimPeerTemplates(NodeClock::time_point cutoff)
     }
 }
 
+CTransactionRef TemplateManager::GetNextTemplateTx(NodeId nodeid, NodeClock::time_point now,
+                                                    const CTxMemPool& mempool,
+                                                    size_t& pos_out, size_t& total_out)
+{
+    const auto* pt = GetPeerTemplate(nodeid);
+    if (!pt) return nullptr;
+
+    total_out = pt->m_txs.size();
+
+    // Scan forward from last validated position
+    while (pt->m_last_validated_idx < pt->m_txs.size()) {
+        const auto& ttx = *pt->m_txs[pt->m_last_validated_idx];
+
+        // Skip txs with future next_mempool_check
+        if (now < ttx.next_mempool_check) {
+            ++pt->m_last_validated_idx;
+            continue;
+        }
+
+        // Skip txs already in the mempool (should be the most common case)
+        const Wtxid& wtxid = ttx.tx->GetWitnessHash();
+        if (mempool.exists(wtxid)) {
+            ttx.next_mempool_check = now + 120s;
+            ++pt->m_last_validated_idx;
+            continue;
+        }
+
+        pos_out = pt->m_last_validated_idx;
+        ++pt->m_last_validated_idx;
+        return ttx.tx;
+    }
+
+    return nullptr;
+}
+
+void TemplateManager::BumpMempoolCheck(const Wtxid& wtxid, NodeClock::time_point next)
+{
+    auto it = m_pool.find(wtxid);
+    if (it != m_pool.end()) {
+        it->next_mempool_check = next;
+    }
+}
+
 } // namespace node
