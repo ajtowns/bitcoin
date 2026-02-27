@@ -2,23 +2,34 @@
 # Copyright (c) The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test chunked tmplttxn sending via the sendtemplate protocol.
+"""Test the sendtemplate protocol (provide and receive sides).
 
-Tests:
+Provide-side tests (node sends templates to test peer):
 - test_chunked_tmplttxn: Verify gettmplttxn response is sent in multiple
   byte-limited chunks via MaybeSendTemplateTxns in SendMessages.
 - test_out_of_range_disconnect: Verify peer is disconnected when requesting
   a position beyond the template size.
 - test_template_eviction: Verify the node handles template eviction gracefully
   when a tmplttxn queue is still pending.
+
+Receive-side tests (test peer sends templates to node):
+- test_receive_template_mempool: Test peer provides a template to the node;
+  node reconstructs it, populates mempool via ConsiderTemplateTransactions.
+- test_receive_template_partial_match: Some txs already in node's mempool;
+  node matches them via short IDs, requests only the missing ones.
 """
 
 import time
 
 from test_framework.messages import (
+    calculate_shortid,
     msg_feature,
     msg_gettmplt,
     msg_gettmplttxn,
+    msg_tmplt,
+    msg_tmplttxn,
+    ser_uint256,
+    sha256,
 )
 from test_framework.p2p import P2PInterface
 from test_framework.test_framework import BitcoinTestFramework
@@ -33,6 +44,44 @@ BIN25_2_1_FEATURE = "BIN25-2.1"
 
 # Template update interval in seconds (from templateman.h)
 TEMPLATE_UPDATE_INTERVAL = 30
+
+# Template request interval in seconds (from templateman.h)
+TEMPLATE_REQUEST_INTERVAL = 120
+
+
+def build_tmplt(txs, nonce=0):
+    """Build a msg_tmplt from a list of CTransaction objects (flat encoding).
+
+    Computes template_hash = SHA256(concatenated wtxids), derives SipHash
+    keys from SHA256(template_hash || nonce), and produces 6-byte short IDs.
+    Returns a msg_tmplt with basis_hash=0 (full/flat template).
+    """
+    # Compute template hash: SHA256 of concatenated wtxids (as 32-byte LE)
+    wtxid_data = b""
+    for tx in txs:
+        wtxid_data += ser_uint256(tx.wtxid_int)
+    template_hash_bytes = sha256(wtxid_data)
+    template_hash = int.from_bytes(template_hash_bytes, 'little')
+
+    # Derive SipHash keys: SHA256(template_hash_bytes || nonce_le)
+    key_input = template_hash_bytes + nonce.to_bytes(8, 'little')
+    key_hash = sha256(key_input)
+    k0 = int.from_bytes(key_hash[0:8], 'little')
+    k1 = int.from_bytes(key_hash[8:16], 'little')
+
+    # Compute 6-byte short IDs
+    raw_payload = b""
+    for tx in txs:
+        shortid = calculate_shortid(k0, k1, tx.wtxid_int)
+        raw_payload += shortid.to_bytes(6, 'little')
+
+    msg = msg_tmplt()
+    msg.template_hash = template_hash
+    msg.nonce = nonce
+    msg.basis_hash = 0
+    msg.tx_count = len(txs)
+    msg.raw_payload = raw_payload
+    return msg
 
 
 class TemplateP2P(P2PInterface):
@@ -66,6 +115,45 @@ class TemplateP2P(P2PInterface):
         self.wait_until(lambda: len(self.tmplttxn_received) >= count, timeout=timeout)
 
 
+class TemplateProviderP2P(TemplateP2P):
+    """P2P interface that acts as a template provider.
+
+    Responds to the node's gettmplt with a pre-built tmplt message, and
+    to gettmplttxn with the requested transactions.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.template_txs = []      # list of CTransaction in template order
+        self.template_msg = None     # msg_tmplt to send
+        self.gettmplt_received = []
+        self.gettmplttxn_received = []
+
+    def set_template(self, txs, tmplt_msg):
+        """Arm the provider with a template."""
+        self.template_txs = txs
+        self.template_msg = tmplt_msg
+
+    def on_gettmplt(self, message):
+        self.gettmplt_received.append(message)
+        if self.template_msg:
+            self.send_without_ping(self.template_msg)
+
+    def on_gettmplttxn(self, message):
+        self.gettmplttxn_received.append(message)
+        # Respond with the requested transactions
+        resp = msg_tmplttxn()
+        resp.template_hash = message.template_hash
+        resp.transactions = [self.template_txs[i] for i in message.positions]
+        self.send_without_ping(resp)
+
+    def wait_for_gettmplt(self, count=1, timeout=60):
+        self.wait_until(lambda: len(self.gettmplt_received) >= count, timeout=timeout)
+
+    def wait_for_gettmplttxn(self, count=1, timeout=60):
+        self.wait_until(lambda: len(self.gettmplttxn_received) >= count, timeout=timeout)
+
+
 class SendTemplateTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
@@ -76,6 +164,8 @@ class SendTemplateTest(BitcoinTestFramework):
         self.test_chunked_tmplttxn()
         self.test_out_of_range_disconnect()
         self.test_template_eviction()
+        self.test_receive_template_mempool()
+        self.test_receive_template_partial_match()
 
     def trigger_template_generation(self, peer):
         """Bump mocktime past the template update interval and ping to trigger."""
@@ -222,6 +312,142 @@ class SendTemplateTest(BitcoinTestFramework):
 
         peer.peer_disconnect()
         peer.wait_for_disconnect()
+
+
+    def test_receive_template_mempool(self):
+        """Test receiving a template from a peer and populating the mempool."""
+        self.log.info("Test receive-side: peer provides template, node populates mempool")
+        node = self.nodes[0]
+
+        # Clear the mempool so we start fresh
+        self.generate(node, 1)
+        assert_equal(node.getmempoolinfo()["size"], 0)
+
+        self.log.info("Create transactions (don't submit to node)")
+        num_txs = 20
+        txs = []
+        for _ in range(num_txs):
+            tx_info = self.wallet.create_self_transfer()
+            txs.append(tx_info["tx"])
+
+        self.log.info("Build template message from the transactions")
+        tmplt_msg = build_tmplt(txs)
+        self.log.info(f"Template: {num_txs} txs, hash={tmplt_msg.template_hash:064x}")
+
+        self.log.info("Connect provider peer with BIN25-2.1 negotiation")
+        provider = node.add_p2p_connection(TemplateProviderP2P())
+        provider.set_template(txs, tmplt_msg)
+
+        self.log.info("Wait for node to send gettmplt")
+        # BIN25-2.1 sets m_next_gettmplt = now(). MaybeRequestTemplate fires
+        # when now > m_next_gettmplt, so bump mocktime past it.
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplt()
+        self.log.info(f"Received gettmplt: {provider.gettmplt_received[0]}")
+
+        self.log.info("Wait for node to request missing transactions")
+        # After receiving tmplt, node can't match any short IDs (empty mempool),
+        # so it sends gettmplttxn for all positions. The provider auto-responds.
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplttxn()
+        gettmplttxn = provider.gettmplttxn_received[0]
+        self.log.info(f"Node requested {len(gettmplttxn.positions)} txs")
+        assert_equal(len(gettmplttxn.positions), num_txs)
+        assert_equal(gettmplttxn.template_hash, tmplt_msg.template_hash)
+
+        self.log.info("Verify peer template is registered")
+        # Need another ping to process the tmplttxn response and finalize
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        tmpl_info = node.gettemplateinfo()
+        self.log.info(f"Template info: {tmpl_info}")
+        assert_greater_than(tmpl_info["peer_templates"], 0)
+
+        self.log.info("Drive mempool population via ConsiderTemplateTransactions")
+        # Each ProcessMessages call submits one tx. Bump mocktime each
+        # iteration to ensure time-gated checks pass.
+        def mempool_populated():
+            node.bumpmocktime(1)
+            return node.getmempoolinfo()["size"] >= num_txs
+        provider.wait_until(mempool_populated, timeout=60)
+
+        mempool_size = node.getmempoolinfo()["size"]
+        self.log.info(f"Mempool populated: {mempool_size} txs")
+        assert_equal(mempool_size, num_txs)
+
+        # Verify the right txids ended up in the mempool
+        mempool_txids = set(node.getrawmempool())
+        expected_txids = {tx.txid_hex for tx in txs}
+        assert_equal(mempool_txids, expected_txids)
+
+        provider.peer_disconnect()
+        provider.wait_for_disconnect()
+
+    def test_receive_template_partial_match(self):
+        """Test that short ID matching works for txs already in the mempool."""
+        self.log.info("Test receive-side: partial match via short IDs")
+        node = self.nodes[0]
+
+        # Clear the mempool
+        self.generate(node, 1)
+        assert_equal(node.getmempoolinfo()["size"], 0)
+
+        self.log.info("Create transactions")
+        num_txs = 10
+        txs = []
+        for _ in range(num_txs):
+            tx_info = self.wallet.create_self_transfer()
+            txs.append(tx_info["tx"])
+
+        self.log.info("Submit first half to node's mempool")
+        num_presubmit = num_txs // 2
+        for tx in txs[:num_presubmit]:
+            node.sendrawtransaction(tx.serialize_with_witness().hex())
+        assert_equal(node.getmempoolinfo()["size"], num_presubmit)
+
+        self.log.info("Build template from all transactions")
+        tmplt_msg = build_tmplt(txs)
+
+        self.log.info("Connect provider peer")
+        provider = node.add_p2p_connection(TemplateProviderP2P())
+        provider.set_template(txs, tmplt_msg)
+
+        self.log.info("Wait for gettmplt and gettmplttxn")
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplt()
+
+        # Node processes tmplt, matches pre-submitted txs by short ID,
+        # requests only the missing ones.
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplttxn()
+        gettmplttxn = provider.gettmplttxn_received[0]
+        num_requested = len(gettmplttxn.positions)
+        self.log.info(f"Node requested {num_requested} txs (had {num_presubmit} already)")
+        # Should only request the txs not already in the mempool
+        assert_equal(num_requested, num_txs - num_presubmit)
+
+        self.log.info("Drive mempool population for remaining txs")
+        node.bumpmocktime(1)
+        provider.sync_with_ping()  # finalize the peer template
+        def mempool_populated():
+            node.bumpmocktime(1)
+            return node.getmempoolinfo()["size"] >= num_txs
+        provider.wait_until(mempool_populated, timeout=60)
+
+        mempool_size = node.getmempoolinfo()["size"]
+        self.log.info(f"Mempool populated: {mempool_size} txs")
+        assert_equal(mempool_size, num_txs)
+
+        mempool_txids = set(node.getrawmempool())
+        expected_txids = {tx.txid_hex for tx in txs}
+        assert_equal(mempool_txids, expected_txids)
+
+        provider.peer_disconnect()
+        provider.wait_for_disconnect()
 
 
 if __name__ == '__main__':
