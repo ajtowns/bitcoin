@@ -325,6 +325,23 @@ const PeerTemplate* TemplateManager::GetPeerTemplate(NodeId nodeid) const
     return nullptr;
 }
 
+const PeerTemplate* TemplateManager::GetPeerTemplate(NodeId nodeid, const uint256& hash) const
+{
+    // Check cache first — the most recent template is usually the one we want
+    auto it = m_peer_template_cache.find(nodeid);
+    if (it != m_peer_template_cache.end() && it->second && it->second->m_hash == hash) {
+        return it->second;
+    }
+
+    // Linear scan for older templates from this peer
+    for (size_t i = 0; i < m_peer_templates.size(); ++i) {
+        if (m_peer_templates[i].m_nodeid == nodeid && m_peer_templates[i].m_hash == hash) {
+            return &m_peer_templates[i];
+        }
+    }
+    return nullptr;
+}
+
 void TemplateManager::AddPeerTemplate(PeerTemplate&& pt)
 {
     if (m_peer_templates.size() == m_peer_templates.capacity()) {

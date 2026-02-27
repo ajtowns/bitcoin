@@ -40,6 +40,12 @@ static constexpr size_t MAX_TEMPLATES{10};
 /** How frequently to update templates for compact block reconstruction. */
 static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
 
+/** How frequently to request templates from a peer. */
+static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::seconds{120}};
+
+/** How long to keep completed peer templates (as delta bases). */
+static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{150}};
+
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 
@@ -292,6 +298,10 @@ public:
     /** Find the most recent completed template from a peer, or nullptr.
      *  O(n) scan of m_peer_templates. */
     const PeerTemplate* GetPeerTemplate(NodeId nodeid) const;
+
+    /** Find a completed template from a peer with a specific hash, or nullptr.
+     *  O(n) scan of m_peer_templates. */
+    const PeerTemplate* GetPeerTemplate(NodeId nodeid, const uint256& hash) const;
 
     /** Create (or reset) a partial peer template, optionally filling from a basis.
      *  For flat tmplt: basis = nullptr, delta_ints empty.
