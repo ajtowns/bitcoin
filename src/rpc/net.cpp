@@ -1210,6 +1210,8 @@ static RPCHelpMan gettemplateinfo()
                 {RPCResult::Type::NUM, "latest_template_tx", "Transaction count in most recent template"},
                 {RPCResult::Type::NUM, "update_interval", "Seconds between template updates"},
                 {RPCResult::Type::NUM_TIME, "next_update", "UNIX epoch time of next scheduled update"},
+                {RPCResult::Type::NUM, "peer_templates", "Completed peer templates in memory"},
+                {RPCResult::Type::NUM, "partial_peer_templates", "In-progress peer templates"},
             }},
         RPCExamples{
             HelpExampleCli("gettemplateinfo", "")
@@ -1230,6 +1232,8 @@ static RPCHelpMan gettemplateinfo()
             ret.pushKV("latest_template_tx", info.latest_tx_count);
             ret.pushKV("update_interval", info.update_interval.count());
             ret.pushKV("next_update", TicksSinceEpoch<std::chrono::seconds>(info.next_update));
+            ret.pushKV("peer_templates", info.num_peer_templates);
+            ret.pushKV("partial_peer_templates", info.num_partial_peer_templates);
             return ret;
         },
     };

@@ -202,6 +202,8 @@ struct TemplateInfo {
     size_t latest_tx_count{0};
     std::chrono::seconds update_interval{};
     NodeClock::time_point next_update{};
+    size_t num_peer_templates{0};
+    size_t num_partial_peer_templates{0};
 };
 
 /**
@@ -350,6 +352,8 @@ public:
         }
         stats.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
         stats.next_update = m_next_update;
+        stats.num_peer_templates = m_peer_templates.size();
+        stats.num_partial_peer_templates = m_partial_peer_templates.size();
         return stats;
     }
 };
