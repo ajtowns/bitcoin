@@ -45,6 +45,8 @@ static constexpr bool DEFAULT_TXRECONCILIATION_ENABLE{false};
 static const uint32_t DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN{100};
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
 static const bool DEFAULT_PEERBLOCKFILTERS = false;
+/** Whether template sharing (BIN25-2.1) is enabled by default. */
+static const bool DEFAULT_SENDTEMPLATE = true;
 /** Maximum number of outstanding CMPCTBLOCK requests for the same block. */
 static const unsigned int MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK = 3;
 /** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
@@ -80,6 +82,8 @@ public:
     struct Options {
         //! Whether this node is running in -blocksonly mode
         bool ignore_incoming_txs{DEFAULT_BLOCKSONLY};
+        //! Whether template sharing (BIN25-2.1) is enabled
+        bool enable_templates{DEFAULT_SENDTEMPLATE};
         //! Whether transaction reconciliation protocol is enabled
         bool reconcile_txs{DEFAULT_TXRECONCILIATION_ENABLE};
         //! Number of non-mempool transactions to keep around for block reconstruction. Includes

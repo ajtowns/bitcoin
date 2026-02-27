@@ -84,6 +84,21 @@ def build_tmplt(txs, nonce=0):
     return msg
 
 
+class FeatureProbeP2P(P2PInterface):
+    """P2P interface that records received feature messages."""
+
+    def __init__(self):
+        super().__init__()
+        self.features_received = []
+
+    def peer_connect_send_version(self, services):
+        super().peer_connect_send_version(services)
+        self.on_connection_send_msg.nVersion = FEATURE_VERSION
+
+    def on_feature(self, message):
+        self.features_received.append(message)
+
+
 class TemplateP2P(P2PInterface):
     """P2P interface that negotiates template support and collects responses."""
 
@@ -161,11 +176,46 @@ class SendTemplateTest(BitcoinTestFramework):
 
     def run_test(self):
         self.wallet = MiniWallet(self.nodes[0])
+        self.test_disabled()
         self.test_chunked_tmplttxn()
         self.test_out_of_range_disconnect()
         self.test_template_eviction()
         self.test_receive_template_mempool()
         self.test_receive_template_partial_match()
+
+    def test_disabled(self):
+        """Test that BIN25-2.1 is not announced when templates are disabled."""
+        node = self.nodes[0]
+
+        self.log.info("Test -sendtemplate=0 disables feature announcement")
+        self.restart_node(0, extra_args=["-sendtemplate=0"])
+        node.setmocktime(int(time.time()))
+        peer = node.add_p2p_connection(FeatureProbeP2P())
+        peer.sync_with_ping()
+        has_bin25 = any(f.feature_id == BIN25_2_1_FEATURE for f in peer.features_received)
+        assert not has_bin25, "BIN25-2.1 should not be announced with -sendtemplate=0"
+        peer.peer_disconnect()
+        peer.wait_for_disconnect()
+
+        self.log.info("Test -blocksonly disables feature announcement")
+        self.restart_node(0, extra_args=["-blocksonly"])
+        node.setmocktime(int(time.time()))
+        peer = node.add_p2p_connection(FeatureProbeP2P())
+        peer.sync_with_ping()
+        has_bin25 = any(f.feature_id == BIN25_2_1_FEATURE for f in peer.features_received)
+        assert not has_bin25, "BIN25-2.1 should not be announced in -blocksonly mode"
+        peer.peer_disconnect()
+        peer.wait_for_disconnect()
+
+        self.log.info("Test normal mode announces BIN25-2.1")
+        self.restart_node(0)
+        node.setmocktime(int(time.time()))
+        peer = node.add_p2p_connection(FeatureProbeP2P())
+        peer.sync_with_ping()
+        has_bin25 = any(f.feature_id == BIN25_2_1_FEATURE for f in peer.features_received)
+        assert has_bin25, "BIN25-2.1 should be announced in normal mode"
+        peer.peer_disconnect()
+        peer.wait_for_disconnect()
 
     def trigger_template_generation(self, peer):
         """Bump mocktime past the template update interval and ping to trigger."""

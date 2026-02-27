@@ -3829,7 +3829,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             }
         }
 
-        if (greatest_common_version >= FEATURE_VERSION) {
+        if (greatest_common_version >= FEATURE_VERSION && m_opts.enable_templates) {
             // announce supported features
             MakeAndPushFeature(pfrom, NetMsgFeature::BIN25_2_1);
         }
@@ -4075,6 +4075,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
 
         if (feature_id == NetMsgFeature::BIN25_2_1) {
+            if (!m_opts.enable_templates) return;
             LogDebug(BCLog::SHARETMPL, "peer %d supports BIN25-2.1 templates", pfrom.GetId());
             peer.m_next_gettmplt = NodeClock::now();
             return;
@@ -5513,6 +5514,9 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
 
+    if (!m_opts.enable_templates) return;
+    if (m_opts.ignore_incoming_txs) return; // generating templates would leak own txs
+
     auto now = NodeClock::now();
     bool have_templates;
     {
@@ -5570,6 +5574,8 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
 {
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
+
+    if (m_opts.ignore_incoming_txs) return false; // don't accept txs this way either
 
     auto now = NodeClock::now();
     CTransactionRef tx;
