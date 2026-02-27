@@ -5,22 +5,30 @@
 #ifndef BITCOIN_NODE_TEMPLATEMAN_H
 #define BITCOIN_NODE_TEMPLATEMAN_H
 
+#include <blockencodings.h>
 #include <primitives/transaction.h>
 #include <streams.h>
 #include <uint256.h>
 #include <util/bitset.h>
 #include <util/check.h>
 #include <util/hasher.h>
+#include <util/overloaded.h>
 #include <util/time.h>
+#include <util/vecdeque.h>
 
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+class CTxMemPool;
+typedef int64_t NodeId;
 
 namespace node {
 
@@ -98,7 +106,6 @@ public:
 /** Bitset-based tracking of template positions.
  *
  *  Positions are stored as a vector of bitsets (each covering 1024 positions).
- *  ProcessMessage populates via Queue(); SendMessages drains via GetNextChunk().
  */
 class MissingTemplateTxns
 {
@@ -144,6 +151,44 @@ public:
     std::vector<CTransactionRef> GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes);
 };
 
+/** Receiver side: ExtendMissing() marks ranges as missing; ReceivedTxn()
+ *  clears individual matched positions; FillTxs() fills from tmplttxn chunks.
+ */
+class WantedTemplateTxns : public MissingTemplateTxns
+{
+public:
+    /** Mark positions from..to (inclusive) as missing. Allocates chunks as needed. */
+    void ExtendMissing(int32_t from, int32_t to);
+
+    /** Mark a single position as received (clear its bit). */
+    void ReceivedTxn(int32_t pos);
+
+    /** Fill the next missing positions in tmpl.m_txs from refs.
+     *  Iterates set bits in order, placing each ref at that position, clearing the bit.
+     *  Returns the number of positions filled. */
+    size_t FillTxs(Template& tmpl, std::span<const TemplateTxRef> refs);
+};
+
+/** A partially-received template from a peer, being populated via tmplttxn chunks. */
+class PartialPeerTemplate : public Template {
+public:
+    size_t m_tx_count;              //!< expected total (from tmplt message)
+    size_t m_filled{0};             //!< how many slots are filled so far
+    WantedTemplateTxns m_missing;   //!< tracks unfilled positions
+
+    bool IsComplete() const { return m_filled == m_tx_count; }
+};
+
+/** A completed template received from a peer. */
+class PeerTemplate : public Template {
+public:
+    NodeId m_nodeid;
+    NodeClock::time_point m_time;
+
+    PeerTemplate() = default;
+    PeerTemplate(NodeId nodeid, NodeClock::time_point now, PartialPeerTemplate&& partial);
+};
+
 struct TemplateInfo {
     size_t num_templates{0};
     size_t max_templates{0};
@@ -173,6 +218,13 @@ class TemplateManager
      */
     std::vector<std::pair<Wtxid, TemplateTxRef>> m_scannable_txns;
 
+    std::map<NodeId, PartialPeerTemplate> m_partial_peer_templates;
+    /** Completed peer templates. Newest at front (push_front), oldest at back (pop_back). */
+    VecDeque<PeerTemplate> m_peer_templates;
+    /** Cache from NodeId to most recent PeerTemplate. Invalidated on reallocation. */
+    mutable std::unordered_map<NodeId, const PeerTemplate*> m_peer_template_cache;
+
+
     /** Find transaction in the pool, adding if necessary. Bumps refcount. */
     TemplateTxRef AddTx(CTransactionRef tx);
 
@@ -184,6 +236,12 @@ class TemplateManager
 
     /** Trim old templates beyond MAX_TEMPLATES. */
     void TrimLocalTemplates();
+
+    /** Add a completed peer template. Handles cache invalidation on reallocation. */
+    void AddPeerTemplate(PeerTemplate&& pt);
+
+    /** Clean up partial template state for a peer. */
+    void ForgetPartialTemplate(NodeId nodeid);
 
 public:
     /**
@@ -230,6 +288,45 @@ public:
         m_next_update = now + TEMPLATE_UPDATE_INTERVAL;
         return true;
     }
+
+    /** Find the most recent completed template from a peer, or nullptr.
+     *  O(n) scan of m_peer_templates. */
+    const PeerTemplate* GetPeerTemplate(NodeId nodeid) const;
+
+    /** Create (or reset) a partial peer template, optionally filling from a basis.
+     *  For flat tmplt: basis = nullptr, delta_ints empty.
+     *  For delta tmplt: fills positions from basis using decoded delta instructions.
+     *  Returns false if delta offsets are out of range. */
+    [[nodiscard]] bool PartialInitFromBasis(NodeId nodeid, const uint256& hash,
+                                             const Template* basis, const std::vector<int32_t>& delta_ints);
+
+    /** Fill unfilled positions by matching short IDs against mempool, template pool,
+     *  and extra transactions. short_ids are in order of unfilled positions.
+     *  Returns false on absence, hash mismatch, or wrong number of short IDs. */
+    [[nodiscard]] bool PartialFillShortIDs(NodeId nodeid, const uint256& hash,
+                                            uint64_t nonce,
+                                            const std::vector<uint64_t>& short_ids,
+                                            const CTxMemPool& mempool,
+                                            ExtraTransactions& extra_txns);
+
+    /** Fill the next missing positions from a tmplttxn chunk.
+     *  Returns false on error (no partial, hash mismatch, more txs than positions). */
+    [[nodiscard]] bool PartialFillTxns(NodeId nodeid, const uint256& hash,
+                                        std::span<CTransactionRef> txs);
+
+    /** If the partial is complete, validate hash and move to completed peer templates.
+     *  Returns true if OK (still in progress or completed successfully).
+     *  Returns false if complete but computed hash doesn't match (discards partial). */
+    [[nodiscard]] bool PartialTryFinalize(NodeId nodeid);
+
+    /** Get missing positions for a partial, or nullopt if no partial exists. */
+    std::optional<std::vector<int32_t>> GetPartialMissing(NodeId nodeid, const uint256& hash) const;
+
+    /** Clean up all template state for a peer (partial + cache). */
+    void ForgetPeer(NodeId nodeid);
+
+    /** Expire completed peer templates older than cutoff. */
+    void TrimPeerTemplates(NodeClock::time_point cutoff);
 
     /** Get template manager statistics. */
     TemplateInfo GetInfo() const

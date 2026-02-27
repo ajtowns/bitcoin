@@ -8,6 +8,7 @@
 #include <crypto/siphash.h>
 #include <primitives/transaction.h>
 #include <serialize.h>
+#include <txmempool.h>
 #include <util/compactintvec.h>
 
 namespace node {
@@ -245,6 +246,351 @@ std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemp
     if (!hit_limit) Reset();
 
     return txs;
+}
+
+void WantedTemplateTxns::ExtendMissing(int32_t from, int32_t to)
+{
+    if (from > to) return;
+
+    // Ensure enough chunks are allocated
+    size_t needed_chunks = to / CHUNK_SIZE + 1;
+    while (m_positions.size() < needed_chunks) {
+        m_positions.emplace_back();
+    }
+
+    for (int32_t pos = from; pos <= to; ++pos) {
+        m_positions[pos / CHUNK_SIZE].Set(pos % CHUNK_SIZE);
+    }
+}
+
+void WantedTemplateTxns::ReceivedTxn(int32_t pos)
+{
+    size_t chunk_idx = pos / CHUNK_SIZE;
+    if (Assume(chunk_idx < m_positions.size())) {
+        m_positions[chunk_idx].Reset(pos % CHUNK_SIZE);
+    }
+}
+
+std::vector<int32_t> MissingTemplateTxns::GetPositions() const
+{
+    std::vector<int32_t> positions;
+    for (size_t chunk_idx = 0; chunk_idx < m_positions.size(); ++chunk_idx) {
+        for (unsigned bit : m_positions[chunk_idx]) {
+            positions.push_back(static_cast<int32_t>(chunk_idx * CHUNK_SIZE + bit));
+        }
+    }
+    return positions;
+}
+
+size_t WantedTemplateTxns::FillTxs(Template& tmpl, std::span<const TemplateTxRef> refs)
+{
+    size_t ref_idx = 0;
+
+    for (size_t chunk_idx = 0; chunk_idx < m_positions.size() && ref_idx < refs.size(); ++chunk_idx) {
+        auto& chunk = m_positions[chunk_idx];
+        if (chunk.None()) continue;
+
+        for (unsigned bit : chunk) {
+            if (ref_idx >= refs.size()) break;
+            size_t abs_pos = chunk_idx * CHUNK_SIZE + bit;
+            tmpl.m_txs[abs_pos] = refs[ref_idx++];
+            chunk.Reset(bit);
+        }
+    }
+
+    return ref_idx;
+}
+
+PeerTemplate::PeerTemplate(NodeId nodeid, NodeClock::time_point now, PartialPeerTemplate&& partial)
+    : m_nodeid{nodeid}, m_time{now}
+{
+    m_txs = std::move(partial.m_txs);
+    m_hash = partial.m_hash;
+}
+
+const PeerTemplate* TemplateManager::GetPeerTemplate(NodeId nodeid) const
+{
+    auto it = m_peer_template_cache.find(nodeid);
+    if (it != m_peer_template_cache.end()) return it->second;
+
+    // Cache miss: linear scan, cache result (including nullptr)
+    for (size_t i = 0; i < m_peer_templates.size(); ++i) {
+        if (m_peer_templates[i].m_nodeid == nodeid) {
+            const auto* ptr = &m_peer_templates[i];
+            m_peer_template_cache[nodeid] = ptr;
+            return ptr;
+        }
+    }
+    m_peer_template_cache[nodeid] = nullptr;
+    return nullptr;
+}
+
+void TemplateManager::AddPeerTemplate(PeerTemplate&& pt)
+{
+    if (m_peer_templates.size() == m_peer_templates.capacity()) {
+        m_peer_template_cache.clear();
+    }
+    m_peer_templates.push_front(std::move(pt));
+    m_peer_template_cache[m_peer_templates.front().m_nodeid] = &m_peer_templates.front();
+}
+
+bool TemplateManager::PartialInitFromBasis(NodeId nodeid, const uint256& hash,
+                                            const Template* basis, const std::vector<int32_t>& delta_ints)
+{
+    // Create (or reset) the partial for this peer
+    ForgetPartialTemplate(nodeid);
+
+    PartialPeerTemplate partial;
+    partial.m_hash = hash;
+    partial.m_tx_count = 0;
+    partial.m_filled = 0;
+
+    if (!basis || delta_ints.empty()) {
+        Assume(delta_ints.empty());
+        // Everything deferred to PartialFillShortIDs
+    } else {
+        partial.m_txs.reserve(delta_ints.size());
+        int32_t last_missing = 0;
+        int32_t basis_pos = 0;
+        const int32_t basis_size = basis->m_txs.size();
+        int32_t pos = -1;
+        for (auto d : delta_ints) {
+            ++pos;
+            if (d == -1) {
+                // new tx, will be matched via short IDs
+                partial.m_txs.push_back(m_pool.end());
+                continue;
+            }
+            if (last_missing < pos) {
+                partial.m_missing.ExtendMissing(last_missing, pos - 1);
+            }
+            basis_pos += d;
+            if (basis_pos < 0 || basis_pos >= basis_size) {
+                RemoveTxs(std::move(partial.m_txs));
+                return false;
+            }
+            ++partial.m_filled;
+            partial.m_txs.push_back(basis->m_txs[basis_pos]);
+            ++partial.m_txs.back()->num_templates;
+            ++basis_pos;
+            last_missing = pos + 1;
+        }
+        if (last_missing <= pos) {
+            partial.m_missing.ExtendMissing(last_missing, pos);
+        }
+        partial.m_tx_count = partial.m_txs.size();
+    }
+
+    m_partial_peer_templates[nodeid] = std::move(partial);
+    return true;
+}
+
+bool TemplateManager::PartialFillShortIDs(NodeId nodeid, const uint256& hash,
+                                           uint64_t nonce,
+                                           const std::vector<uint64_t>& short_ids,
+                                           const CTxMemPool& mempool,
+                                           ExtraTransactions& extra_txns)
+{
+    AssertLockNotHeld(mempool.cs);
+
+    auto it = m_partial_peer_templates.find(nodeid);
+    if (it == m_partial_peer_templates.end()) return false;
+    auto& partial = it->second;
+    if (partial.m_hash != hash) return false;
+
+    if (short_ids.empty()) {
+        if (partial.m_tx_count == partial.m_filled) {
+            return true; // basis was a perfect match
+        } else {
+            return false; // should have provided short ids for us
+        }
+    }
+
+    // Extend partial to final size: tx_count = filled + short_ids
+    int32_t tx_count = partial.m_filled + short_ids.size();
+    int32_t old_size = partial.m_txs.size();
+
+    // Are there too few shortids to fill known missing elements?
+    if (tx_count < old_size) return false;
+
+    // Are there more shortids than known previously missing elements?
+    if (tx_count > old_size) {
+        partial.m_txs.resize(tx_count, m_pool.end());
+        partial.m_missing.ExtendMissing(old_size, tx_count - 1);
+    }
+    partial.m_tx_count = tx_count;
+
+    // short_ids are in order of unfilled positions
+    auto missing = partial.m_missing.GetPositions();
+    if (!Assume(missing.size() == short_ids.size())) return false;
+
+    ShortIDHasher hasher(partial.m_hash, nonce);
+
+    // Build short ID to position map
+    std::unordered_map<uint64_t, int32_t> sid_to_pos(missing.size());
+    for (size_t i = 0; i < missing.size(); ++i) {
+        auto [sit, inserted] = sid_to_pos.emplace(short_ids[i], i);
+        // Duplicate short IDs: leave both unfilled (will be requested via gettmplttxn)
+        if (!inserted) {
+            sid_to_pos.erase(sit);
+        }
+        // Anti-DoS: reject if hash table distribution is highly uneven
+        if (sid_to_pos.bucket_size(sid_to_pos.bucket(short_ids[i])) > 12) {
+            return false;
+        }
+    }
+
+    // Match candidates against short IDs
+    using Hit = std::variant<bool, CTransactionRef, TemplateTxRef>;
+    std::vector<Hit> have_txn(short_ids.size());
+    size_t match_count = 0;
+
+    auto try_match = [&](const Wtxid& wtxid, const auto& tx) {
+        uint64_t sid = hasher.GetShortID(wtxid);
+        auto find_it = sid_to_pos.find(sid);
+        if (find_it == sid_to_pos.end()) return;
+        int32_t pos = find_it->second;
+        auto& have = have_txn[pos];
+        if (std::holds_alternative<bool>(have)) {
+            if (!std::get<bool>(have)) {
+                have = tx;
+                ++match_count;
+            }
+        } else if (std::holds_alternative<CTransactionRef>(have)) {
+            if (std::get<CTransactionRef>(have)->GetWitnessHash() != wtxid) {
+                // Two different txs match the same short ID: collision, leave unfilled
+                have = true;
+                --match_count;
+            }
+        } else if (std::holds_alternative<TemplateTxRef>(have)) {
+            if (std::get<TemplateTxRef>(have)->tx->GetWitnessHash() != wtxid) {
+                // Two different txs match the same short ID: collision, leave unfilled
+                have = true;
+                --match_count;
+            }
+        }
+    };
+
+    // Scan template pool (good chance of having all the desired txs)
+    for (const auto& [wtxid, ref] : m_scannable_txns) {
+        try_match(wtxid, ref);
+        if (match_count == sid_to_pos.size()) break;
+    }
+
+    // Scan mempool
+    if (match_count < sid_to_pos.size()) {
+        LOCK(mempool.cs);
+        for (const auto& [wtxid, txit] : mempool.txns_randomized) {
+            try_match(wtxid, txit->GetSharedTx());
+            if (match_count == sid_to_pos.size()) break;
+        }
+    }
+
+    // Scan extra transactions
+    while (match_count < sid_to_pos.size()) {
+        auto [wtxid, tx] = extra_txns.next();
+        if (!tx) break;
+        try_match(*wtxid, *tx);
+    }
+
+    // Collect matched txs
+    for (size_t i = 0; i < missing.size(); ++i) {
+        auto pos = missing[i];
+        std::visit(util::Overloaded(
+            [&](bool) { /* nothing to do */ },
+            [&](CTransactionRef tx) {
+                partial.m_txs[pos] = AddTx(std::move(tx));
+                partial.m_missing.ReceivedTxn(pos);
+                ++partial.m_filled;
+            },
+            [&](TemplateTxRef ttx) {
+                partial.m_txs[pos] = ttx;
+                ++ttx->num_templates;
+                partial.m_missing.ReceivedTxn(pos);
+                ++partial.m_filled;
+            }), std::move(have_txn[i])
+        );
+    }
+
+    return true;
+}
+
+bool TemplateManager::PartialFillTxns(NodeId nodeid, const uint256& hash,
+                                       std::span<CTransactionRef> txs)
+{
+    auto it = m_partial_peer_templates.find(nodeid);
+    if (it == m_partial_peer_templates.end()) return false;
+    auto& partial = it->second;
+    if (partial.m_hash != hash) return false;
+
+    if (partial.m_filled + txs.size() > partial.m_txs.size()) return false;
+
+    auto refs = AddTxs(txs);
+
+    size_t filled = partial.m_missing.FillTxs(partial, refs);
+    Assume(filled == refs.size());
+    partial.m_filled += filled;
+
+    return true;
+}
+
+bool TemplateManager::PartialTryFinalize(NodeId nodeid)
+{
+    auto it = m_partial_peer_templates.find(nodeid);
+    if (it == m_partial_peer_templates.end()) return true; // no partial, nothing to do
+
+    auto& partial = it->second;
+    if (!partial.IsComplete()) return true; // still in progress
+
+    // Verify reconstructed hash matches announced hash
+    uint256 announced = partial.m_hash;
+    partial.ComputeHash();
+    if (partial.m_hash != announced) {
+        ForgetPartialTemplate(nodeid);
+        return false;
+    }
+
+    PeerTemplate completed(nodeid, NodeClock::now(), std::move(it->second));
+    m_partial_peer_templates.erase(it);
+
+    AddPeerTemplate(std::move(completed));
+    return true;
+}
+
+std::optional<std::vector<int32_t>> TemplateManager::GetPartialMissing(NodeId nodeid, const uint256& hash) const
+{
+    auto it = m_partial_peer_templates.find(nodeid);
+    if (it == m_partial_peer_templates.end()) return std::nullopt;
+    if (it->second.m_hash != hash) return std::nullopt;
+    return it->second.m_missing.GetPositions();
+}
+
+void TemplateManager::ForgetPartialTemplate(NodeId nodeid)
+{
+    auto it = m_partial_peer_templates.find(nodeid);
+    if (it == m_partial_peer_templates.end()) return;
+
+    RemoveTxs(std::move(it->second.m_txs));
+    m_partial_peer_templates.erase(it);
+}
+
+void TemplateManager::ForgetPeer(NodeId nodeid)
+{
+    ForgetPartialTemplate(nodeid);
+    m_peer_template_cache.erase(nodeid);
+}
+
+void TemplateManager::TrimPeerTemplates(NodeClock::time_point cutoff)
+{
+    while (!m_peer_templates.empty() && m_peer_templates.back().m_time < cutoff) {
+        auto& back = m_peer_templates.back();
+        auto it = m_peer_template_cache.find(back.m_nodeid);
+        if (it != m_peer_template_cache.end() && it->second == &back) {
+            m_peer_template_cache.erase(it);
+        }
+        RemoveTxs(std::move(back.m_txs));
+        m_peer_templates.pop_back();
+    }
 }
 
 } // namespace node
