@@ -10,6 +10,7 @@
 #include <streams.h>
 #include <uint256.h>
 #include <util/bitset.h>
+#include <random.h>
 #include <util/check.h>
 #include <util/hasher.h>
 #include <util/overloaded.h>
@@ -292,10 +293,10 @@ public:
     size_t NumTemplates() const { return m_templates.size(); }
 
     /** Check if it's time to generate a new template, and if so, advance the timer. */
-    bool CheckTimer(NodeClock::time_point now)
+    bool CheckTimer(NodeClock::time_point now, FastRandomContext& rng)
     {
         if (now < m_next_update) return false;
-        m_next_update = now + TEMPLATE_UPDATE_INTERVAL;
+        m_next_update = now + TEMPLATE_UPDATE_INTERVAL / 2 + rng.randrange<std::chrono::milliseconds>(TEMPLATE_UPDATE_INTERVAL);
         return true;
     }
 

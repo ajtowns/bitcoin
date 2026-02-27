@@ -218,9 +218,10 @@ class SendTemplateTest(BitcoinTestFramework):
         peer.wait_for_disconnect()
 
     def trigger_template_generation(self, peer):
-        """Bump mocktime past the template update interval and ping to trigger."""
+        """Bump mocktime past the template update interval (with jitter headroom) and ping."""
         node = self.nodes[0]
-        node.bumpmocktime(TEMPLATE_UPDATE_INTERVAL + 1)
+        # Jittered interval is in [INTERVAL/2, INTERVAL*3/2), so bump past the max.
+        node.bumpmocktime(TEMPLATE_UPDATE_INTERVAL * 3 // 2 + 1)
         peer.sync_with_ping()
 
     def test_chunked_tmplttxn(self):

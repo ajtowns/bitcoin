@@ -5521,7 +5521,7 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     bool have_templates;
     {
         LOCK(m_template_mutex);
-        if (!m_templateman.CheckTimer(now)) return;
+        if (!m_templateman.CheckTimer(now, m_rng)) return;
         have_templates = m_templateman.NumTemplates() > 0;
     }
 
@@ -6135,7 +6135,7 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     auto now = NodeClock::now();
     if (now <= peer.m_next_gettmplt) return;
 
-    peer.m_next_gettmplt = now + node::TEMPLATE_REQUEST_INTERVAL;
+    peer.m_next_gettmplt = now + node::TEMPLATE_REQUEST_INTERVAL / 2 + m_rng.randrange<std::chrono::milliseconds>(node::TEMPLATE_REQUEST_INTERVAL);
 
     uint256 basis_hash;
     {
