@@ -196,6 +196,10 @@ static RPCHelpMan getpeerinfo()
                                                               "best capture connection behaviors."},
                     {RPCResult::Type::STR, "transport_protocol_type", "Type of transport protocol: \n" + Join(TRANSPORT_TYPE_DOC, ",\n") + ".\n"},
                     {RPCResult::Type::STR, "session_id", "The session ID for this connection, or \"\" if there is none (\"v2\" transport protocol only).\n"},
+                    {RPCResult::Type::STR, "template_status", /*optional=*/true,
+                     "Template sharing status: \"active\" (requesting templates), "
+                     "\"inactive\" (supports but not currently selected), "
+                     "\"unsupported\" (does not support BIN25-2.1)."},
                 }},
             }},
         },
@@ -306,6 +310,9 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("connection_type", ConnectionTypeAsString(stats.m_conn_type));
         obj.pushKV("transport_protocol_type", TransportTypeAsString(stats.m_transport_type));
         obj.pushKV("session_id", stats.m_session_id);
+        if (!statestats.m_template_status.empty()) {
+            obj.pushKV("template_status", statestats.m_template_status);
+        }
 
         ret.push_back(std::move(obj));
     }

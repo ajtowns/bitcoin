@@ -422,8 +422,13 @@ struct Peer {
      *  ProcessMessage populates via Queue(); MaybeSendTemplateTxns drains via GetNextChunk(). */
     node::RequestedTemplateTxns m_tmplttxn GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
-    /** When to send next gettmplt. max() = peer doesn't support templates. */
-    NodeClock::time_point m_next_gettmplt GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
+    /** When to send next gettmplt. max() = peer doesn't support templates.
+     *  Atomic because GetNodeStateStats reads it without g_msgproc_mutex. */
+    std::atomic<NodeClock::time_point> m_next_gettmplt{NodeClock::time_point::max()};
+
+    /** Whether this inbound peer is currently in the active template-requesting set.
+     *  Atomic because FinalizeNode reads it without g_msgproc_mutex. */
+    std::atomic<bool> m_gettmplt_active_inbound{false};
 
     /** Time offset computed during the version handshake based on the
      * timestamp the peer sent in the version message. */
@@ -876,6 +881,9 @@ private:
 
     /** Number of peers with wtxid relay. */
     std::atomic<int> m_wtxid_relay_peers{0};
+
+    /** Number of inbound peers actively being requested for templates. */
+    std::atomic<int> m_active_inbound_template_peers{0};
 
     /** Number of outbound peers with m_chain_sync.m_protect. */
     int m_outbound_peers_with_protect_from_disconnect GUARDED_BY(cs_main) = 0;
@@ -1769,6 +1777,9 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(peer != nullptr);
         m_wtxid_relay_peers -= peer->m_wtxid_relay;
         assert(m_wtxid_relay_peers >= 0);
+        if (peer->m_gettmplt_active_inbound) {
+            --m_active_inbound_template_peers;
+        }
     }
     CNodeState *state = State(nodeid);
     assert(state != nullptr);
@@ -1808,6 +1819,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(m_peers_downloading_from == 0);
         assert(m_outbound_peers_with_protect_from_disconnect == 0);
         assert(m_wtxid_relay_peers == 0);
+        assert(m_active_inbound_template_peers == 0);
         WITH_LOCK(m_tx_download_mutex, m_txdownloadman.CheckIsEmpty());
     }
     } // cs_main
@@ -1921,6 +1933,14 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
         }
     }
     stats.time_offset = peer->m_time_offset;
+
+    if (peer->m_next_gettmplt.load() == NodeClock::time_point::max()) {
+        stats.m_template_status = "unsupported";
+    } else if (!peer->m_is_inbound || peer->m_gettmplt_active_inbound) {
+        stats.m_template_status = "active";
+    } else {
+        stats.m_template_status = "inactive";
+    }
 
     return true;
 }
@@ -5368,7 +5388,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::TMPLT) {
-        if (peer.m_next_gettmplt == NodeClock::time_point::max()) {
+        if (peer.m_next_gettmplt.load() == NodeClock::time_point::max()) {
             LogDebug(BCLog::SHARETMPL, "received unrequested tmplt, %s", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
@@ -5438,7 +5458,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         return;
     }
     if (msg_type == NetMsgType::TMPLTTXN) {
-        if (peer.m_next_gettmplt == NodeClock::time_point::max()) {
+        if (peer.m_next_gettmplt.load() == NodeClock::time_point::max()) {
             LogDebug(BCLog::SHARETMPL, "received unrequested tmplttxn, %s", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
@@ -6133,8 +6153,20 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     AssertLockNotHeld(m_template_mutex);
 
     auto now = NodeClock::now();
-    if (now <= peer.m_next_gettmplt) return;
+    if (now <= peer.m_next_gettmplt.load()) return;
 
+    // Inbound activation: eligible but inactive → try to fill a slot
+    if (peer.m_is_inbound && !peer.m_gettmplt_active_inbound) {
+        if (m_active_inbound_template_peers >= node::MAX_INBOUND_TEMPLATE_PEERS) return;
+
+        peer.m_gettmplt_active_inbound = true;
+        ++m_active_inbound_template_peers;
+        LogDebug(BCLog::SHARETMPL, "activated inbound peer=%d for templates (%d/%d)",
+                 peer.m_id, m_active_inbound_template_peers.load(),
+                 node::MAX_INBOUND_TEMPLATE_PEERS);
+    }
+
+    // Normal request logic
     peer.m_next_gettmplt = now + node::TEMPLATE_REQUEST_INTERVAL / 2 + m_rng.randrange<std::chrono::milliseconds>(node::TEMPLATE_REQUEST_INTERVAL);
 
     uint256 basis_hash;
@@ -6151,6 +6183,18 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     }
     LogDebug(BCLog::SHARETMPL, "Sent gettmplt to peer=%d (basis=%s)",
              node.GetId(), basis_hash.IsNull() ? "none" : basis_hash.ToString());
+
+    // Inbound deactivation: randomly rotate out
+    if (peer.m_is_inbound) {
+        if (m_active_inbound_template_peers < node::MAX_INBOUND_TEMPLATE_PEERS) return;
+        if (m_rng.randrange(node::INBOUND_TEMPLATE_ROTATION_FREQ) != 0) return;
+
+        peer.m_gettmplt_active_inbound = false;
+        --m_active_inbound_template_peers;
+        LogDebug(BCLog::SHARETMPL, "rotated out inbound peer=%d (%d/%d)",
+                 peer.m_id, m_active_inbound_template_peers.load(),
+                 node::MAX_INBOUND_TEMPLATE_PEERS);
+    }
 }
 
 namespace {

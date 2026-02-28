@@ -44,6 +44,12 @@ static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
 /** How frequently to request templates from a peer. */
 static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::seconds{120}};
 
+/** Maximum number of inbound peers to actively request templates from. */
+static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
+
+/** Average number of request cycles before rotating out an active inbound. */
+static constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
+
 /** How long to keep completed peer templates (as delta bases). */
 static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{150}};
 

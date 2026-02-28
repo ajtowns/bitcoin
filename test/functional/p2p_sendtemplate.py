@@ -48,6 +48,9 @@ TEMPLATE_UPDATE_INTERVAL = 30
 # Template request interval in seconds (from templateman.h)
 TEMPLATE_REQUEST_INTERVAL = 120
 
+# Max inbound peers to actively request templates from (from templateman.h)
+MAX_INBOUND_TEMPLATE_PEERS = 10
+
 
 def build_tmplt(txs, nonce=0):
     """Build a msg_tmplt from a list of CTransaction objects (flat encoding).
@@ -182,6 +185,7 @@ class SendTemplateTest(BitcoinTestFramework):
         self.test_template_eviction()
         self.test_receive_template_mempool()
         self.test_receive_template_partial_match()
+        self.test_inbound_rotation()
 
     def test_disabled(self):
         """Test that BIN25-2.1 is not announced when templates are disabled."""
@@ -499,6 +503,84 @@ class SendTemplateTest(BitcoinTestFramework):
 
         provider.peer_disconnect()
         provider.wait_for_disconnect()
+
+    def test_inbound_rotation(self):
+        """Test that inbound peer selection rotates among eligible peers."""
+        self.log.info("Test inbound template peer rotation")
+        node = self.nodes[0]
+
+        # Restart to get a clean peer state
+        self.restart_node(0)
+        node.setmocktime(int(time.time()))
+
+        # Ensure we have a template for the node to request
+        self.generate(self.wallet, 1)
+        self.wallet.send_self_transfer(from_node=node)
+
+        self.log.info("Connect 15 inbound peers with BIN25-2.1 support")
+        num_peers = 15
+        peers = []
+        for _ in range(num_peers):
+            peer = node.add_p2p_connection(TemplateProviderP2P())
+            peer.sync_with_ping()
+            peers.append(peer)
+
+        # Trigger template generation so the node has something to request
+        node.bumpmocktime(TEMPLATE_UPDATE_INTERVAL * 2)
+        peers[0].sync_with_ping()
+
+        self.log.info("Bump mocktime past first request interval")
+        node.bumpmocktime(TEMPLATE_REQUEST_INTERVAL * 2)
+        for peer in peers:
+            peer.sync_with_ping()
+
+        # Count which peers received gettmplt
+        active_peers = [i for i, p in enumerate(peers) if len(p.gettmplt_received) > 0]
+        self.log.info(f"After first cycle: {len(active_peers)} peers received gettmplt: {active_peers}")
+        assert_equal(len(active_peers), MAX_INBOUND_TEMPLATE_PEERS)
+
+        # Verify template_status in getpeerinfo
+        peerinfo = node.getpeerinfo()
+        active_count = sum(1 for p in peerinfo if p.get("template_status") == "active")
+        inactive_count = sum(1 for p in peerinfo if p.get("template_status") == "inactive")
+        self.log.info(f"RPC template_status: {active_count} active, {inactive_count} inactive")
+        assert_equal(active_count, MAX_INBOUND_TEMPLATE_PEERS)
+        assert_equal(inactive_count, num_peers - MAX_INBOUND_TEMPLATE_PEERS)
+
+        self.log.info("Run multiple request cycles to trigger rotation")
+        initial_active = set(active_peers)
+        ever_active = set(active_peers)
+
+        # Run ~40 request cycles. With 1/8 deactivation probability per cycle
+        # and 10 active peers, we expect ~1.25 rotations per cycle on average.
+        # Over 40 cycles that's ~50 rotations, enough to activate all 15 peers.
+        for _ in range(40):
+            node.bumpmocktime(TEMPLATE_REQUEST_INTERVAL * 2)
+            for peer in peers:
+                peer.sync_with_ping()
+
+        # Check which peers have ever received a gettmplt
+        for i, peer in enumerate(peers):
+            if len(peer.gettmplt_received) > 0:
+                ever_active.add(i)
+
+        current_active = [i for i, p in enumerate(peers) if len(p.gettmplt_received) > 0]
+        self.log.info(f"After rotation cycles: {len(ever_active)} peers were ever active")
+
+        # All 15 peers should have been activated at some point
+        assert_equal(len(ever_active), num_peers)
+
+        # Some rotation should have occurred: the current set shouldn't be
+        # identical to the initial set (overwhelmingly likely with 40 cycles)
+        # Check by verifying that at least one initially-inactive peer got requests
+        initially_inactive = set(range(num_peers)) - initial_active
+        newly_activated = initially_inactive & ever_active
+        self.log.info(f"Initially inactive peers that were later activated: {newly_activated}")
+        assert_greater_than(len(newly_activated), 0)
+
+        for peer in peers:
+            peer.peer_disconnect()
+            peer.wait_for_disconnect()
 
 
 if __name__ == '__main__':
