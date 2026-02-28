@@ -674,6 +674,7 @@ private:
      *  Returns true if a tx was considered (regardless of acceptance). */
     bool ConsiderTemplateTransactions(Peer& peer)
         EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex,
+                                 !m_most_recent_block_mutex,
                                  !m_peer_mutex, !m_tx_download_mutex);
 
     /** Submit a single peer-template tx to ATMP and return the next_mempool_check time. */
@@ -5399,10 +5400,30 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             return;
         }
 
-        uint256 hash;
+        uint256 hash, tip_hash;
         uint64_t nonce;
         uint256 basis_hash;
-        vRecv >> hash >> nonce >> basis_hash;
+        vRecv >> hash >> tip_hash >> nonce >> basis_hash;
+
+        // Validate tip_hash under cs_main
+        const CBlockIndex* tip_index = nullptr;
+        {
+            LOCK(::cs_main);
+            if (!tip_hash.IsNull()) {
+                UpdateBlockAvailability(pfrom.GetId(), tip_hash);
+                tip_index = m_chainman.m_blockman.LookupBlockIndex(tip_hash);
+                if (!tip_index) {
+                    LogDebug(BCLog::SHARETMPL, "tmplt from peer %d references unknown tip %s, ignoring",
+                             pfrom.GetId(), tip_hash.ToString());
+                    return;
+                }
+                if (tip_index->nHeight < m_chainman.ActiveChain().Height() - 1) {
+                    LogDebug(BCLog::SHARETMPL, "tmplt from peer %d references stale tip %s (height %d, ours %d), ignoring",
+                             pfrom.GetId(), tip_hash.ToString(), tip_index->nHeight, m_chainman.ActiveChain().Height());
+                    return;
+                }
+            }
+        }
 
         std::vector<int32_t> delta_ints;
         if (!basis_hash.IsNull()) {
@@ -5411,6 +5432,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         std::vector<uint64_t> short_ids;
         vRecv >> Using<VectorFormatter<CustomUintFormatter<node::SHORTTXIDS_LENGTH>>>(short_ids);
+
+        LogDebug(BCLog::SHARETMPL, "received tmplt from peer %d (%d short IDs, tip=%s, basis=%s)",
+                 pfrom.GetId(), short_ids.size(), tip_hash.ToString(),
+                 basis_hash.IsNull() ? "none" : basis_hash.ToString());
 
         LOCK(m_template_mutex);
 
@@ -5424,7 +5449,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             }
         }
 
-        if (!m_templateman.PartialInitFromBasis(pfrom.GetId(), hash, basis, delta_ints)) {
+        if (!m_templateman.PartialInitFromBasis(pfrom.GetId(), hash, tip_index, basis, delta_ints)) {
             LogDebug(BCLog::SHARETMPL, "tmplt delta out of range, %s", pfrom.DisconnectMsg(fLogIPs));
             pfrom.fDisconnect = true;
             return;
@@ -5585,6 +5610,15 @@ void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::mic
     node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, assemble_options, node::BlockAssembler::ALLOW_OVERSIZED_BLOCKS};
     auto block_template = assembler.CreateNewBlock();
 
+    const CBlockIndex* tip;
+    {
+        LOCK(::cs_main);
+        tip = m_chainman.ActiveChain().Tip();
+        if (tip->GetBlockHash() != block_template->block.hashPrevBlock) {
+            tip = m_chainman.m_blockman.LookupBlockIndex(block_template->block.hashPrevBlock);
+        }
+    }
+
     auto& vtx = block_template->block.vtx;
     assert(!vtx.empty() && vtx[0]->IsCoinBase());
     auto txs = std::span{vtx}.subspan(1); // skip coinbase
@@ -5592,7 +5626,7 @@ void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::mic
     LogDebug(BCLog::SHARETMPL, "Generated template for key %d (%d txs)", key, txs.size());
 
     LOCK(m_template_mutex);
-    m_templateman.GenerateTemplate(key, now, txs);
+    m_templateman.GenerateTemplate(key, now, tip, txs);
     // Invalidate cache entries for this key
     std::erase_if(m_tmplt_cache, [key](const auto& p) {
         return p.first.first == key;
@@ -5635,7 +5669,11 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     size_t pos{0}, total{0};
     {
         LOCK(m_template_mutex);
-        tx = m_templateman.GetNextTemplateTx(peer.m_id, now, m_mempool, pos, total);
+        LOCK(m_most_recent_block_mutex);
+        tx = m_templateman.GetNextTemplateTx(peer.m_id, now, m_mempool,
+                                              m_most_recent_block_hash,
+                                              m_most_recent_block_txs.get(),
+                                              pos, total);
     }
     if (!tx) return false;
 

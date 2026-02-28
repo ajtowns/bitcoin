@@ -1975,18 +1975,20 @@ class msg_gettmplt:
 
 class msg_tmplt:
     """Block template message with short tx IDs."""
-    __slots__ = ("nonce", "template_hash", "basis_hash", "tx_count", "raw_payload")
+    __slots__ = ("nonce", "template_hash", "tip_hash", "basis_hash", "tx_count", "raw_payload")
     msgtype = b"tmplt"
 
     def __init__(self):
         self.nonce = 0
         self.template_hash = 0
+        self.tip_hash = 0
         self.basis_hash = 0
         self.tx_count = 0
         self.raw_payload = b""
 
     def deserialize(self, f):
         self.template_hash = deser_uint256(f)
+        self.tip_hash = deser_uint256(f)
         self.nonce = int.from_bytes(f.read(8), "little")
         self.basis_hash = deser_uint256(f)
         if self.basis_hash == 0:
@@ -2000,6 +2002,7 @@ class msg_tmplt:
 
     def serialize(self):
         r = ser_uint256(self.template_hash)
+        r += ser_uint256(self.tip_hash)
         r += self.nonce.to_bytes(8, "little")
         r += ser_uint256(self.basis_hash)
         if self.basis_hash == 0:
@@ -2009,7 +2012,7 @@ class msg_tmplt:
         return r
 
     def __repr__(self):
-        return f"msg_tmplt(nonce={self.nonce}, template_hash={self.template_hash:064x}, tx_count={self.tx_count})"
+        return f"msg_tmplt(nonce={self.nonce}, template_hash={self.template_hash:064x}, tip={self.tip_hash:064x}, tx_count={self.tx_count})"
 
 
 class msg_gettmplttxn:

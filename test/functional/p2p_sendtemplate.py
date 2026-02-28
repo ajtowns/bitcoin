@@ -55,18 +55,20 @@ TEMPLATE_REQUEST_INTERVAL = 120
 MAX_INBOUND_TEMPLATE_PEERS = 10
 
 
-def build_tmplt(txs, nonce=0):
+def build_tmplt(txs, nonce=0, tip_hash=0):
     """Build a msg_tmplt from a list of CTransaction objects (flat encoding).
 
-    Computes template_hash = SHA256(concatenated wtxids), derives SipHash
-    keys from SHA256(template_hash || nonce), and produces 6-byte short IDs.
-    Returns a msg_tmplt with basis_hash=0 (full/flat template).
+    Computes template_hash = SHA256(tip_hash || concatenated wtxids), derives
+    SipHash keys from SHA256(template_hash || nonce), and produces 6-byte
+    short IDs. Returns a msg_tmplt with basis_hash=0 (full/flat template).
     """
-    # Compute template hash: SHA256 of concatenated wtxids (as 32-byte LE)
-    wtxid_data = b""
+    # Compute template hash: SHA256 of tip_hash (if set) then concatenated wtxids (as 32-byte LE)
+    hash_data = b""
+    if tip_hash:
+        hash_data += ser_uint256(tip_hash)
     for tx in txs:
-        wtxid_data += ser_uint256(tx.wtxid_int)
-    template_hash_bytes = sha256(wtxid_data)
+        hash_data += ser_uint256(tx.wtxid_int)
+    template_hash_bytes = sha256(hash_data)
     template_hash = int.from_bytes(template_hash_bytes, 'little')
 
     # Derive SipHash keys: SHA256(template_hash_bytes || nonce_le)
@@ -83,6 +85,7 @@ def build_tmplt(txs, nonce=0):
 
     msg = msg_tmplt()
     msg.template_hash = template_hash
+    msg.tip_hash = tip_hash
     msg.nonce = nonce
     msg.basis_hash = 0
     msg.tx_count = len(txs)
@@ -189,6 +192,8 @@ class SendTemplateTest(BitcoinTestFramework):
         self.test_receive_template_mempool()
         self.test_receive_template_partial_match()
         self.test_inbound_rotation()
+        self.test_stale_tip_rejection()
+        self.test_unknown_tip_rejection()
 
     def test_disabled(self):
         """Test that BIN25-2.1 is not announced when templates are disabled."""
@@ -384,7 +389,8 @@ class SendTemplateTest(BitcoinTestFramework):
             txs.append(tx_info["tx"])
 
         self.log.info("Build template message from the transactions")
-        tmplt_msg = build_tmplt(txs)
+        tip_hash = int(node.getbestblockhash(), 16)
+        tmplt_msg = build_tmplt(txs, tip_hash=tip_hash)
         self.log.info(f"Template: {num_txs} txs, hash={tmplt_msg.template_hash:064x}")
 
         self.log.info("Connect provider peer with BIN25-2.1 negotiation")
@@ -461,7 +467,8 @@ class SendTemplateTest(BitcoinTestFramework):
         assert_equal(node.getmempoolinfo()["size"], num_presubmit)
 
         self.log.info("Build template from all transactions")
-        tmplt_msg = build_tmplt(txs)
+        tip_hash = int(node.getbestblockhash(), 16)
+        tmplt_msg = build_tmplt(txs, tip_hash=tip_hash)
 
         self.log.info("Connect provider peer")
         provider = node.add_p2p_connection(TemplateProviderP2P())
@@ -569,6 +576,87 @@ class SendTemplateTest(BitcoinTestFramework):
         for peer in peers:
             peer.peer_disconnect()
             peer.wait_for_disconnect()
+
+    def test_stale_tip_rejection(self):
+        """Test that templates referencing a stale tip are rejected."""
+        self.log.info("Test receive-side: stale tip rejection")
+        node = self.nodes[0]
+
+        # Restart to get a clean state
+        self.restart_node(0)
+        node.setmocktime(int(time.time()))
+
+        # Mine enough blocks for coinbase maturity and to create a stale tip
+        self.generate(self.wallet, 10)
+        assert_equal(node.getmempoolinfo()["size"], 0)
+
+        # Get a block hash that is 2+ blocks behind the tip (stale)
+        chain_height = node.getblockcount()
+        stale_hash_hex = node.getblockhash(chain_height - 2)
+        stale_tip = int(stale_hash_hex, 16)
+
+        self.log.info(f"Current height: {chain_height}, stale tip height: {chain_height - 2}")
+
+        # Create a transaction and build a template with the stale tip
+        tx_info = self.wallet.create_self_transfer()
+        txs = [tx_info["tx"]]
+        tmplt_msg = build_tmplt(txs, tip_hash=stale_tip)
+
+        self.log.info("Connect provider peer with stale tip template")
+        provider = node.add_p2p_connection(TemplateProviderP2P())
+        provider.set_template(txs, tmplt_msg)
+
+        self.log.info("Wait for gettmplt")
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplt()
+
+        self.log.info("Verify no gettmplttxn is sent (template should be ignored)")
+        # Give the node a chance to process the tmplt response
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+
+        assert_equal(len(provider.gettmplttxn_received), 0)
+        self.log.info("Stale tip template was rejected as expected")
+
+        provider.peer_disconnect()
+        provider.wait_for_disconnect()
+
+    def test_unknown_tip_rejection(self):
+        """Test that templates referencing an unknown tip are rejected."""
+        self.log.info("Test receive-side: unknown tip rejection")
+        node = self.nodes[0]
+
+        # Use a random hash as the tip (not in our block index)
+        unknown_tip = 0xdeadbeef << 200  # arbitrary non-zero hash
+
+        # Create a transaction and build a template with the unknown tip
+        tx_info = self.wallet.create_self_transfer()
+        txs = [tx_info["tx"]]
+        tmplt_msg = build_tmplt(txs, tip_hash=unknown_tip)
+
+        self.log.info("Connect provider peer with unknown tip template")
+        provider = node.add_p2p_connection(TemplateProviderP2P())
+        provider.set_template(txs, tmplt_msg)
+
+        self.log.info("Wait for gettmplt")
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        provider.wait_for_gettmplt()
+
+        self.log.info("Verify no gettmplttxn is sent (template should be ignored)")
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+        node.bumpmocktime(1)
+        provider.sync_with_ping()
+
+        assert_equal(len(provider.gettmplttxn_received), 0)
+        self.log.info("Unknown tip template was rejected as expected")
+
+        provider.peer_disconnect()
+        provider.wait_for_disconnect()
 
 
 if __name__ == '__main__':

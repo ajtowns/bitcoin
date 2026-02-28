@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+class CBlockIndex;
 class CTxMemPool;
 typedef int64_t NodeId;
 
@@ -90,10 +91,11 @@ using TemplateTxRef = TemplateTxSet::iterator;
 class Template {
 public:
     std::vector<TemplateTxRef> m_txs;    //!< ordered tx list
-    uint256 m_hash;                      //!< SHA256 of concatenated wtxids
+    const CBlockIndex* m_tip{nullptr};   //!< chain tip this template targets
+    uint256 m_hash;                      //!< SHA256(tip_hash || wtxid1 || wtxid2 || ...)
     int64_t m_weight{0};                 //!< total transaction weight
 
-    /** Compute template hash: SHA256 of concatenated wtxids. */
+    /** Compute template hash: SHA256 of tip hash (if set) then concatenated wtxids. */
     void ComputeHash();
 };
 
@@ -267,7 +269,8 @@ public:
      * Generate a new template from block transactions (sans coinbase).
      * Computes template hash and adds txs to pool.
      */
-    void GenerateTemplate(uint64_t network_key, NodeClock::time_point now, std::span<CTransactionRef> txs);
+    void GenerateTemplate(uint64_t network_key, NodeClock::time_point now,
+                          const CBlockIndex* tip, std::span<CTransactionRef> txs);
 
     /** Trim local templates older than cutoff. Removes empty key entries. */
     void TrimLocalTemplates(NodeClock::time_point cutoff);
@@ -326,6 +329,7 @@ public:
      *  For delta tmplt: fills positions from basis using decoded delta instructions.
      *  Returns false if delta offsets are out of range. */
     [[nodiscard]] bool PartialInitFromBasis(NodeId nodeid, const uint256& hash,
+                                             const CBlockIndex* tip,
                                              const Template* basis, const std::vector<int32_t>& delta_ints);
 
     /** Fill unfilled positions by matching short IDs against mempool, template pool,
@@ -362,6 +366,8 @@ public:
      *  If non-null, sets pos_out and total_out for progress reporting. */
     CTransactionRef GetNextTemplateTx(NodeId nodeid, NodeClock::time_point now,
                                       const CTxMemPool& mempool,
+                                      const uint256& active_tip_hash,
+                                      const std::map<GenTxid, CTransactionRef>* recent_block_txs,
                                       size_t& pos_out, size_t& total_out);
 
     /** Update next_mempool_check for a tx in the shared pool.

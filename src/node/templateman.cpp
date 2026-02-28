@@ -4,6 +4,7 @@
 
 #include <node/templateman.h>
 
+#include <chain.h>
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
 #include <crypto/siphash.h>
@@ -17,6 +18,10 @@ namespace node {
 void Template::ComputeHash()
 {
     CSHA256 hasher;
+    if (m_tip) {
+        const auto& tip_hash = m_tip->GetBlockHash();
+        hasher.Write(UCharCast(tip_hash.data()), 32);
+    }
     for (const auto& it : m_txs) {
         const auto& wtxid = it->tx->GetWitnessHash();
         hasher.Write(UCharCast(wtxid.data()), 32);
@@ -86,6 +91,7 @@ DataStream LocalTemplate::MakeTmpltMsg(uint64_t nonce, const LocalTemplate* basi
 {
     DataStream stream{};
     stream << m_hash;
+    stream << (m_tip ? m_tip->GetBlockHash() : uint256::ZERO);
     stream << nonce;
 
     ShortIDHasher hasher(m_hash, nonce);
@@ -182,10 +188,12 @@ void TemplateManager::TrimLocalTemplates(NodeClock::time_point cutoff)
     }
 }
 
-void TemplateManager::GenerateTemplate(uint64_t network_key, NodeClock::time_point now, std::span<CTransactionRef> txs)
+void TemplateManager::GenerateTemplate(uint64_t network_key, NodeClock::time_point now,
+                                        const CBlockIndex* tip, std::span<CTransactionRef> txs)
 {
     LocalTemplate tmpl;
     tmpl.m_time = now;
+    tmpl.m_tip = tip;
     tmpl.m_txs = AddTxs(std::move(txs));
     for (const auto& ref : tmpl.m_txs) {
         tmpl.m_weight += ref->weight;
@@ -320,6 +328,7 @@ PeerTemplate::PeerTemplate(NodeId nodeid, NodeClock::time_point now, PartialPeer
     : m_nodeid{nodeid}, m_time{now}
 {
     m_txs = std::move(partial.m_txs);
+    m_tip = partial.m_tip;
     m_hash = partial.m_hash;
 }
 
@@ -367,6 +376,7 @@ void TemplateManager::AddPeerTemplate(PeerTemplate&& pt)
 }
 
 bool TemplateManager::PartialInitFromBasis(NodeId nodeid, const uint256& hash,
+                                            const CBlockIndex* tip,
                                             const Template* basis, const std::vector<int32_t>& delta_ints)
 {
     // Create (or reset) the partial for this peer
@@ -374,6 +384,7 @@ bool TemplateManager::PartialInitFromBasis(NodeId nodeid, const uint256& hash,
 
     PartialPeerTemplate partial;
     partial.m_hash = hash;
+    partial.m_tip = tip;
     partial.m_tx_count = 0;
     partial.m_filled = 0;
 
@@ -649,10 +660,17 @@ void TemplateManager::TrimPeerTemplates(NodeClock::time_point cutoff)
 
 CTransactionRef TemplateManager::GetNextTemplateTx(NodeId nodeid, NodeClock::time_point now,
                                                     const CTxMemPool& mempool,
+                                                    const uint256& active_tip_hash,
+                                                    const std::map<GenTxid, CTransactionRef>* recent_block_txs,
                                                     size_t& pos_out, size_t& total_out)
 {
     const auto* pt = GetPeerTemplate(nodeid);
     if (!pt) return nullptr;
+
+    // Only check recent block txs when the template targets a different tip
+    // (if tips match, all template txs are unconfirmed by definition)
+    const bool check_recent_block = recent_block_txs && pt->m_tip
+        && pt->m_tip->GetBlockHash() != active_tip_hash;
 
     total_out = pt->m_txs.size();
 
@@ -672,6 +690,16 @@ CTransactionRef TemplateManager::GetNextTemplateTx(NodeId nodeid, NodeClock::tim
             ttx.next_mempool_check = now + 120s;
             ++pt->m_last_validated_idx;
             continue;
+        }
+
+        // Skip txs confirmed in a recent block (stale template only)
+        if (check_recent_block) {
+            auto wit = recent_block_txs->find(GenTxid{wtxid});
+            if (wit != recent_block_txs->end()) {
+                ttx.next_mempool_check = now + 120s;
+                ++pt->m_last_validated_idx;
+                continue;
+            }
         }
 
         pos_out = pt->m_last_validated_idx;
