@@ -426,9 +426,12 @@ struct Peer {
      *  Atomic because GetNodeStateStats reads it without g_msgproc_mutex. */
     std::atomic<NodeClock::time_point> m_next_gettmplt{NodeClock::time_point::max()};
 
-    /** Whether this inbound peer is currently in the active template-requesting set.
+    /** Whether this peer is in the active template-requesting set.
+     *  For outbound full-relay: always true after feature negotiation.
+     *  For inbound: managed by MAX_INBOUND_TEMPLATE_PEERS rotation.
+     *  For block-relay-only: true briefly for one-shot request, then false.
      *  Atomic because FinalizeNode reads it without g_msgproc_mutex. */
-    std::atomic<bool> m_gettmplt_active_inbound{false};
+    std::atomic<bool> m_gettmplt_active{false};
 
     /** Time offset computed during the version handshake based on the
      * timestamp the peer sent in the version message. */
@@ -1777,7 +1780,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(peer != nullptr);
         m_wtxid_relay_peers -= peer->m_wtxid_relay;
         assert(m_wtxid_relay_peers >= 0);
-        if (peer->m_gettmplt_active_inbound) {
+        if (peer->m_gettmplt_active && peer->m_is_inbound) {
             --m_active_inbound_template_peers;
         }
     }
@@ -1936,7 +1939,7 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
 
     if (peer->m_next_gettmplt.load() == NodeClock::time_point::max()) {
         stats.m_template_status = "unsupported";
-    } else if (!peer->m_is_inbound || peer->m_gettmplt_active_inbound) {
+    } else if (peer->m_gettmplt_active) {
         stats.m_template_status = "active";
     } else {
         stats.m_template_status = "inactive";
@@ -3849,7 +3852,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             }
         }
 
-        if (greatest_common_version >= FEATURE_VERSION && m_opts.enable_templates) {
+        if (greatest_common_version >= FEATURE_VERSION && m_opts.enable_templates && !pfrom.IsBlockOnlyConn()) {
             // announce supported features
             MakeAndPushFeature(pfrom, NetMsgFeature::BIN25_2_1);
         }
@@ -4098,6 +4101,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             if (!m_opts.enable_templates) return;
             LogDebug(BCLog::SHARETMPL, "peer %d supports BIN25-2.1 templates", pfrom.GetId());
             peer.m_next_gettmplt = NodeClock::now();
+            if (!peer.m_is_inbound) peer.m_gettmplt_active = true;
             return;
         }
 
@@ -6155,11 +6159,19 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     auto now = NodeClock::now();
     if (now <= peer.m_next_gettmplt.load()) return;
 
+    // Block-relay-only cleanup pass: exchange is done, disable permanently
+    if (node.IsBlockOnlyConn() && !peer.m_gettmplt_active) {
+        peer.m_next_gettmplt = NodeClock::time_point::max();
+        WITH_LOCK(m_template_mutex, m_templateman.ForgetPeer(node.GetId()));
+        LogDebug(BCLog::SHARETMPL, "block-relay-only peer=%d template cleanup done", peer.m_id);
+        return;
+    }
+
     // Inbound activation: eligible but inactive → try to fill a slot
-    if (peer.m_is_inbound && !peer.m_gettmplt_active_inbound) {
+    if (peer.m_is_inbound && !peer.m_gettmplt_active) {
         if (m_active_inbound_template_peers >= node::MAX_INBOUND_TEMPLATE_PEERS) return;
 
-        peer.m_gettmplt_active_inbound = true;
+        peer.m_gettmplt_active = true;
         ++m_active_inbound_template_peers;
         LogDebug(BCLog::SHARETMPL, "activated inbound peer=%d for templates (%d/%d)",
                  peer.m_id, m_active_inbound_template_peers.load(),
@@ -6184,12 +6196,20 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     LogDebug(BCLog::SHARETMPL, "Sent gettmplt to peer=%d (basis=%s)",
              node.GetId(), basis_hash.IsNull() ? "none" : basis_hash.ToString());
 
+    // Block-relay-only: one-shot request, schedule cleanup
+    if (node.IsBlockOnlyConn()) {
+        peer.m_gettmplt_active = false;
+        peer.m_next_gettmplt = now + node::TEMPLATE_REQUEST_INTERVAL;
+        LogDebug(BCLog::SHARETMPL, "one-shot template request to block-relay-only peer=%d", peer.m_id);
+        return;
+    }
+
     // Inbound deactivation: randomly rotate out
     if (peer.m_is_inbound) {
         if (m_active_inbound_template_peers < node::MAX_INBOUND_TEMPLATE_PEERS) return;
         if (m_rng.randrange(node::INBOUND_TEMPLATE_ROTATION_FREQ) != 0) return;
 
-        peer.m_gettmplt_active_inbound = false;
+        peer.m_gettmplt_active = false;
         --m_active_inbound_template_peers;
         LogDebug(BCLog::SHARETMPL, "rotated out inbound peer=%d (%d/%d)",
                  peer.m_id, m_active_inbound_template_peers.load(),
