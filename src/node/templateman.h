@@ -210,7 +210,9 @@ struct TemplateInfo {
     size_t num_templates{0};
     size_t max_templates{0};
     size_t pool_size{0};
+    int64_t pool_weight{0};
     size_t latest_tx_count{0};
+    int64_t latest_weight{0};
     std::chrono::seconds update_interval{};
     NodeClock::time_point next_update{};
     size_t num_peer_templates{0};
@@ -371,8 +373,10 @@ public:
         stats.num_templates = m_templates.size();
         stats.max_templates = MAX_TEMPLATES;
         stats.pool_size = m_pool.size();
+        stats.pool_weight = m_pool_weight;
         if (!m_templates.empty()) {
             stats.latest_tx_count = m_templates.back().m_txs.size();
+            stats.latest_weight = m_templates.back().m_weight;
         }
         stats.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
         stats.next_update = m_next_update;

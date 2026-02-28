@@ -1214,7 +1214,9 @@ static RPCHelpMan gettemplateinfo()
                 {RPCResult::Type::NUM, "templates", "Number of templates in memory"},
                 {RPCResult::Type::NUM, "max_templates", "Maximum templates kept"},
                 {RPCResult::Type::NUM, "transactions", "Number of transactions in shared pool"},
+                {RPCResult::Type::NUM, "pool_weight", "Total weight of transactions in shared pool"},
                 {RPCResult::Type::NUM, "latest_template_tx", "Transaction count in most recent template"},
+                {RPCResult::Type::NUM, "latest_template_weight", "Weight of most recent template"},
                 {RPCResult::Type::NUM, "update_interval", "Seconds between template updates"},
                 {RPCResult::Type::NUM_TIME, "next_update", "UNIX epoch time of next scheduled update"},
                 {RPCResult::Type::NUM, "peer_templates", "Completed peer templates in memory"},
@@ -1236,7 +1238,9 @@ static RPCHelpMan gettemplateinfo()
             ret.pushKV("templates", info.num_templates);
             ret.pushKV("max_templates", info.max_templates);
             ret.pushKV("transactions", info.pool_size);
+            ret.pushKV("pool_weight", info.pool_weight);
             ret.pushKV("latest_template_tx", info.latest_tx_count);
+            ret.pushKV("latest_template_weight", info.latest_weight);
             ret.pushKV("update_interval", info.update_interval.count());
             ret.pushKV("next_update", TicksSinceEpoch<std::chrono::seconds>(info.next_update));
             ret.pushKV("peer_templates", info.num_peer_templates);
