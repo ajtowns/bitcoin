@@ -803,7 +803,7 @@ private:
     void MaybeSendFeefilter(CNode& node, Peer& peer, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     /** Generate a template for a network key if timing conditions are met. */
-    void MaybeGenerateTemplateForKey(uint64_t key, std::chrono::microseconds now_us) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+    void MaybeGenerateTemplate(CNode& node, std::chrono::microseconds now_us) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
     /** Send deferred tmplt response and/or drain queued tmplttxn chunks. */
     void MaybeSendTemplateMessages(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
@@ -5559,7 +5559,7 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
-void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::microseconds now_us)
+void PeerManagerImpl::MaybeGenerateTemplate(CNode& node, std::chrono::microseconds now_us)
 {
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
@@ -5567,22 +5567,14 @@ void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::mic
     if (!m_opts.enable_templates) return;
     if (m_opts.ignore_incoming_txs) return; // generating templates would leak own txs
 
+    uint64_t key = node.IsInboundConn() ? node.m_network_key : 0;
     auto& ks = m_template_key_state[key];
 
-    // Only generate if someone wants a template for this key
-    if (!ks.m_wanted) return;
-
-    // Check if we should look at template generation for this key (aligned with INV timing)
+    // Only do anything if it's an appropriate time
     if (now_us < ks.m_next_check) return;
     ks.m_next_check = NextInvToInbounds(now_us, INBOUND_INVENTORY_BROADCAST_INTERVAL, key);
 
-    // Check the per-key generation timer
-    auto now = NodeClock::now();
-    if (now < ks.m_next_gen) return;
-
-    bool have_templates = WITH_LOCK(m_template_mutex, return m_templateman.NumTemplates() > 0);
-
-    if (!have_templates) {
+    if (ks.m_next_gen == NodeClock::time_point::min()) {
         if (m_chainman.IsInitialBlockDownload()) {
             LogDebug(BCLog::SHARETMPL, "Skipping template generation (initial block download)");
             return;
@@ -5595,8 +5587,13 @@ void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::mic
         }
     }
 
-    // Schedule next generation
+    // Check (and update) the per-key generation timer
+    auto now = NodeClock::now();
+    if (now < ks.m_next_gen) return;
     ks.m_next_gen = now + node::TEMPLATE_UPDATE_INTERVAL / 2 + m_rng.randrange<std::chrono::milliseconds>(node::TEMPLATE_UPDATE_INTERVAL);
+
+    // Don't bother generating for inbounds if nobody wants a template
+    if (key != 0 && !ks.m_wanted) return;
 
     const auto assemble_options = []() {
         node::BlockAssembler::Options opt;
@@ -6867,11 +6864,8 @@ bool PeerManagerImpl::SendMessages(CNode& node)
             MakeAndPushMessage(node, NetMsgType::GETDATA, vGetData);
     } // release cs_main
     MaybeSendFeefilter(node, peer, current_time);
-    {
-        uint64_t key = node.IsInboundConn() ? node.m_network_key : 0;
-        MaybeGenerateTemplateForKey(key, current_time);
-        MaybeSendTemplateMessages(node, peer);
-    }
+    MaybeGenerateTemplate(node, current_time);
+    MaybeSendTemplateMessages(node, peer);
     MaybeRequestTemplate(node, peer);
     return true;
 }
