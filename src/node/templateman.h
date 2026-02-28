@@ -51,8 +51,10 @@ static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
 /** Average number of request cycles before rotating out an active inbound. */
 static constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
 
-/** How long to keep completed peer templates (as delta bases). */
-static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{150}};
+/** How long to keep completed peer templates (as delta bases).
+ *  Must exceed TEMPLATE_REQUEST_INTERVAL + generation delay (~45s)
+ *  so the basis is still available when the deferred response arrives. */
+static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
