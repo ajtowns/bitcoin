@@ -166,24 +166,32 @@ void TemplateManager::RemoveTxs(std::vector<TemplateTxRef>&& vec)
     }
 }
 
-void TemplateManager::TrimLocalTemplates()
+void TemplateManager::TrimLocalTemplates(NodeClock::time_point cutoff)
 {
-    while (m_templates.size() > MAX_TEMPLATES) {
-        RemoveTxs(std::move(m_templates.front().m_txs));
-        m_templates.pop_front();
+    for (auto it = m_templates.begin(); it != m_templates.end(); ) {
+        auto& deq = it->second;
+        while (!deq.empty() && deq.front().m_time < cutoff) {
+            RemoveTxs(std::move(deq.front().m_txs));
+            deq.pop_front();
+        }
+        if (deq.empty()) {
+            it = m_templates.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
-void TemplateManager::GenerateTemplate(std::span<CTransactionRef> txs)
+void TemplateManager::GenerateTemplate(uint64_t network_key, NodeClock::time_point now, std::span<CTransactionRef> txs)
 {
     LocalTemplate tmpl;
+    tmpl.m_time = now;
     tmpl.m_txs = AddTxs(std::move(txs));
     for (const auto& ref : tmpl.m_txs) {
         tmpl.m_weight += ref->weight;
     }
     tmpl.ComputeHash();
-    m_templates.push_back(std::move(tmpl));
-    TrimLocalTemplates();
+    m_templates[network_key].push_back(std::move(tmpl));
 }
 
 std::vector<CTransactionRef> TemplateManager::GetTxsByPosition(const LocalTemplate& tmpl, const std::vector<uint16_t>& positions)

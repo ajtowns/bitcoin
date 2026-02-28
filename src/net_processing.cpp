@@ -85,6 +85,7 @@
 #include <ranges>
 #include <ratio>
 #include <set>
+#include <unordered_map>
 #include <span>
 #include <typeinfo>
 #include <utility>
@@ -419,8 +420,13 @@ struct Peer {
     bool m_prefers_headers GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
 
     /** Queued template txns for chunked tmplttxn sending.
-     *  ProcessMessage populates via Queue(); MaybeSendTemplateTxns drains via GetNextChunk(). */
+     *  ProcessMessage populates via Queue(); MaybeSendTemplateMessages drains via GetNextChunk(). */
     node::RequestedTemplateTxns m_tmplttxn GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+
+    /** Pending template request time. max() = no pending request. */
+    NodeClock::time_point m_want_tmplt GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
+    /** Basis hash for pending request (null = no basis). */
+    uint256 m_want_tmplt_basis GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
     /** When to send next gettmplt. max() = peer doesn't support templates.
      *  Atomic because GetNodeStateStats reads it without g_msgproc_mutex. */
@@ -795,11 +801,17 @@ private:
     /** Send `feefilter` message. */
     void MaybeSendFeefilter(CNode& node, Peer& peer, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
-    /** Drain queued tmplttxn positions in byte-limited chunks. */
-    void MaybeSendTemplateTxns(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+    /** Generate a template for a network key if timing conditions are met. */
+    void MaybeGenerateTemplateForKey(uint64_t key, std::chrono::microseconds now_us) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+
+    /** Send deferred tmplt response and/or drain queued tmplttxn chunks. */
+    void MaybeSendTemplateMessages(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
     /** Periodically send gettmplt to peers that support templates. */
     void MaybeRequestTemplate(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+
+    /** Periodic cleanup: trim expired peer and local templates. */
+    void MaybeCleanupTemplates() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
     FastRandomContext m_rng GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
 
@@ -867,6 +879,16 @@ private:
     uint32_t GetFetchFlags(const Peer& peer) const;
 
     std::map<uint64_t, std::chrono::microseconds> m_next_inv_to_inbounds_per_network_key GUARDED_BY(g_msgproc_mutex);
+
+    /** Per-network-key template generation state. */
+    struct TemplateKeyState {
+        std::chrono::microseconds m_next_check{0}; //!< next time to check (aligned with INV timing)
+        NodeClock::time_point m_next_gen{NodeClock::time_point::min()}; //!< next generation time
+        bool m_wanted{false}; //!< pending demand (set on GETTMPLT, cleared on generation)
+    };
+    std::unordered_map<uint64_t, TemplateKeyState> m_template_key_state GUARDED_BY(g_msgproc_mutex);
+    /** Next time to run the periodic template cleanup sweep. */
+    NodeClock::time_point m_next_template_sweep GUARDED_BY(g_msgproc_mutex){NodeClock::time_point::min()};
 
     /** Number of nodes with fSyncStarted. */
     int nSyncStarted GUARDED_BY(cs_main) = 0;
@@ -1179,8 +1201,6 @@ private:
     std::map<std::pair<uint64_t, uint256>, std::pair<uint256, CSerializedNetMsg>>
         m_tmplt_cache GUARDED_BY(m_template_mutex);
 
-    /** Generate a new template if enough time has passed. */
-    void MaybeGenerateNewTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
     ReadStatus InitCompactBlockData(PartiallyDownloadedBlock& partial_block, const CBlockHeaderAndShortTxIDs& cmpctblock)
         EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
@@ -5317,44 +5337,25 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::GETTMPLT) {
-        // Parse optional basis hash
+        // Disconnect block-relay-only outbound — we didn't advertise templates
+        if (pfrom.IsBlockOnlyConn()) {
+            LogDebug(BCLog::SHARETMPL, "Disconnecting block-relay-only peer %d for sending gettmplt", pfrom.GetId());
+            pfrom.fDisconnect = true;
+            return;
+        }
+
+        // Defer response until a fresh template is generated
         uint256 basis_hash;
         if (!vRecv.empty()) {
             vRecv >> basis_hash;
         }
-
-        LOCK(m_template_mutex);
-        const auto* best = m_templateman.GetBestTemplate();
-        if (!best) return; // no templates yet
-
-        // Look up basis
-        const node::LocalTemplate* basis = nullptr;
-        if (!basis_hash.IsNull()) {
-            basis = m_templateman.GetTemplate(basis_hash);
-            if (!basis) {
-                // Basis not found, fall back to no-basis
-                basis_hash.SetNull();
-            }
-        }
-
-        // Check cache
-        auto cache_key = std::make_pair(pfrom.m_network_key, basis_hash);
-        auto it = m_tmplt_cache.find(cache_key);
-        if (it == m_tmplt_cache.end() || it->second.first != best->m_hash) {
-            // Generate tmplt message with random nonce
-            uint64_t nonce = m_rng.rand64();
-            DataStream payload = best->MakeTmpltMsg(nonce, basis);
-            CSerializedNetMsg msg = NetMsg::Make(NetMsgType::TMPLT, MakeByteSpan(payload));
-            it = m_tmplt_cache.insert_or_assign(cache_key, std::pair{best->m_hash, std::move(msg)}).first;
-        }
-
-        // Cancel any in-flight tmplttxn queue — the peer is moving on to a new template
-        peer.m_tmplttxn.Reset();
-
-        PushMessage(pfrom, it->second.second.Copy());
-        LogDebug(BCLog::SHARETMPL, "Sent tmplt to peer %d (%d txs, basis=%s)",
-                 pfrom.GetId(), best->m_txs.size(),
-                 basis_hash.IsNull() ? "none" : basis_hash.ToString());
+        uint64_t key = pfrom.IsInboundConn() ? pfrom.m_network_key : 0;
+        peer.m_want_tmplt = NodeClock::now();
+        peer.m_want_tmplt_basis = basis_hash;
+        peer.m_tmplttxn.Reset(); // cancel any in-flight tmplttxn
+        m_template_key_state[key].m_wanted = true;
+        LogDebug(BCLog::SHARETMPL, "Deferred gettmplt from peer %d (key=%d, basis=%s)",
+                 pfrom.GetId(), key, basis_hash.IsNull() ? "none" : basis_hash.ToString());
         return;
     }
 
@@ -5533,7 +5534,7 @@ bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
     return true;
 }
 
-void PeerManagerImpl::MaybeGenerateNewTemplate()
+void PeerManagerImpl::MaybeGenerateTemplateForKey(uint64_t key, std::chrono::microseconds now_us)
 {
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
@@ -5541,16 +5542,22 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     if (!m_opts.enable_templates) return;
     if (m_opts.ignore_incoming_txs) return; // generating templates would leak own txs
 
+    auto& ks = m_template_key_state[key];
+
+    // Only generate if someone wants a template for this key
+    if (!ks.m_wanted) return;
+
+    // Check if we should look at template generation for this key (aligned with INV timing)
+    if (now_us < ks.m_next_check) return;
+    ks.m_next_check = NextInvToInbounds(now_us, INBOUND_INVENTORY_BROADCAST_INTERVAL, key);
+
+    // Check the per-key generation timer
     auto now = NodeClock::now();
-    bool have_templates;
-    {
-        LOCK(m_template_mutex);
-        if (!m_templateman.CheckTimer(now, m_rng)) return;
-        have_templates = m_templateman.NumTemplates() > 0;
-    }
+    if (now < ks.m_next_gen) return;
+
+    bool have_templates = WITH_LOCK(m_template_mutex, return m_templateman.NumTemplates() > 0);
 
     if (!have_templates) {
-        // Note: if any of these checks hit, we'll only recheck again in 30s intervals
         if (m_chainman.IsInitialBlockDownload()) {
             LogDebug(BCLog::SHARETMPL, "Skipping template generation (initial block download)");
             return;
@@ -5562,6 +5569,9 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
             return;
         }
     }
+
+    // Schedule next generation
+    ks.m_next_gen = now + node::TEMPLATE_UPDATE_INTERVAL / 2 + m_rng.randrange<std::chrono::milliseconds>(node::TEMPLATE_UPDATE_INTERVAL);
 
     const auto assemble_options = []() {
         node::BlockAssembler::Options opt;
@@ -5579,12 +5589,31 @@ void PeerManagerImpl::MaybeGenerateNewTemplate()
     assert(!vtx.empty() && vtx[0]->IsCoinBase());
     auto txs = std::span{vtx}.subspan(1); // skip coinbase
 
-    LogDebug(BCLog::SHARETMPL, "Generated template for compact block reconstruction (%d txs)", txs.size());
+    LogDebug(BCLog::SHARETMPL, "Generated template for key %d (%d txs)", key, txs.size());
 
     LOCK(m_template_mutex);
-    m_templateman.GenerateTemplate(txs);
+    m_templateman.GenerateTemplate(key, now, txs);
+    // Invalidate cache entries for this key
+    std::erase_if(m_tmplt_cache, [key](const auto& p) {
+        return p.first.first == key;
+    });
+
+    // Demand satisfied
+    ks.m_wanted = false;
+}
+
+void PeerManagerImpl::MaybeCleanupTemplates()
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockNotHeld(m_template_mutex);
+
+    auto now = NodeClock::now();
+    if (now < m_next_template_sweep) return;
+    m_next_template_sweep = now + node::TEMPLATE_UPDATE_INTERVAL;
+
+    LOCK(m_template_mutex);
     m_templateman.TrimPeerTemplates(now - node::PEER_TEMPLATE_EXPIRY);
-    m_tmplt_cache.clear();
+    m_templateman.TrimLocalTemplates(now - node::LOCAL_TEMPLATE_EXPIRY);
 }
 
 ReadStatus PeerManagerImpl::InitCompactBlockData(PartiallyDownloadedBlock& partial_block, const CBlockHeaderAndShortTxIDs& cmpctblock)
@@ -5659,7 +5688,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     AssertLockNotHeld(m_tx_download_mutex);
     AssertLockHeld(g_msgproc_mutex);
 
-    MaybeGenerateNewTemplate();
+    MaybeCleanupTemplates();
 
     PeerRef maybe_peer{GetPeerRef(node.GetId())};
     if (maybe_peer == nullptr) return false;
@@ -6122,32 +6151,66 @@ void PeerManagerImpl::MaybeSendFeefilter(CNode& pto, Peer& peer, std::chrono::mi
 /** Maximum serialized size of transactions per tmplttxn chunk. */
 static constexpr size_t MAX_TMPLTTXN_MSG_SIZE{100000};
 
-void PeerManagerImpl::MaybeSendTemplateTxns(CNode& node, Peer& peer)
+void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
 {
     AssertLockHeld(g_msgproc_mutex);
 
-    if (peer.m_tmplttxn.empty()) return;
+    // (a) Deferred GETTMPLT response
+    if (peer.m_want_tmplt != NodeClock::time_point::max()) {
+        uint64_t key = node.IsInboundConn() ? node.m_network_key : 0;
 
-    const uint256 template_hash = peer.m_tmplttxn.template_hash();
-    std::vector<CTransactionRef> txs;
-
-    {
         LOCK(m_template_mutex);
-        const auto* tmpl = m_templateman.GetTemplate(template_hash);
-        if (!tmpl) {
-            LogDebug(BCLog::SHARETMPL, "Dropping tmplttxn queue for peer %d (template %s evicted)",
-                     node.GetId(), template_hash.ToString());
-            peer.m_tmplttxn.Reset();
-            return;
-        }
+        const auto* best = m_templateman.GetBestTemplate(key);
+        if (best && best->m_time >= peer.m_want_tmplt) {
+            // Look up basis
+            const node::LocalTemplate* basis = nullptr;
+            uint256 basis_hash = peer.m_want_tmplt_basis;
+            if (!basis_hash.IsNull()) {
+                basis = m_templateman.GetTemplate(basis_hash);
+                if (!basis) basis_hash.SetNull();
+            }
 
-        txs = peer.m_tmplttxn.GetNextChunk(*tmpl, MAX_TMPLTTXN_MSG_SIZE);
+            // Check cache
+            auto cache_key = std::make_pair(key, basis_hash);
+            auto it = m_tmplt_cache.find(cache_key);
+            if (it == m_tmplt_cache.end() || it->second.first != best->m_hash) {
+                uint64_t nonce = m_rng.rand64();
+                DataStream payload = best->MakeTmpltMsg(nonce, basis);
+                CSerializedNetMsg msg = NetMsg::Make(NetMsgType::TMPLT, MakeByteSpan(payload));
+                it = m_tmplt_cache.insert_or_assign(cache_key, std::pair{best->m_hash, std::move(msg)}).first;
+            }
+
+            PushMessage(node, it->second.second.Copy());
+            LogDebug(BCLog::SHARETMPL, "Sent deferred tmplt to peer %d (%d txs, basis=%s)",
+                     node.GetId(), best->m_txs.size(),
+                     basis_hash.IsNull() ? "none" : basis_hash.ToString());
+            peer.m_want_tmplt = NodeClock::time_point::max();
+        }
     }
 
-    if (!txs.empty()) {
-        MakeAndPushMessage(node, NetMsgType::TMPLTTXN, template_hash, TX_WITH_WITNESS(txs));
-        LogDebug(BCLog::SHARETMPL, "Sent tmplttxn chunk to peer %d (%d txs)",
-                 node.GetId(), txs.size());
+    // (b) Send queued tmplttxn chunks
+    if (!peer.m_tmplttxn.empty()) {
+        const uint256 template_hash = peer.m_tmplttxn.template_hash();
+        std::vector<CTransactionRef> txs;
+
+        {
+            LOCK(m_template_mutex);
+            const auto* tmpl = m_templateman.GetTemplate(template_hash);
+            if (!tmpl) {
+                LogDebug(BCLog::SHARETMPL, "Dropping tmplttxn queue for peer %d (template %s evicted)",
+                         node.GetId(), template_hash.ToString());
+                peer.m_tmplttxn.Reset();
+                return;
+            }
+
+            txs = peer.m_tmplttxn.GetNextChunk(*tmpl, MAX_TMPLTTXN_MSG_SIZE);
+        }
+
+        if (!txs.empty()) {
+            MakeAndPushMessage(node, NetMsgType::TMPLTTXN, template_hash, TX_WITH_WITNESS(txs));
+            LogDebug(BCLog::SHARETMPL, "Sent tmplttxn chunk to peer %d (%d txs)",
+                     node.GetId(), txs.size());
+        }
     }
 }
 
@@ -6766,7 +6829,11 @@ bool PeerManagerImpl::SendMessages(CNode& node)
             MakeAndPushMessage(node, NetMsgType::GETDATA, vGetData);
     } // release cs_main
     MaybeSendFeefilter(node, peer, current_time);
-    MaybeSendTemplateTxns(node, peer);
+    {
+        uint64_t key = node.IsInboundConn() ? node.m_network_key : 0;
+        MaybeGenerateTemplateForKey(key, current_time);
+        MaybeSendTemplateMessages(node, peer);
+    }
     MaybeRequestTemplate(node, peer);
     return true;
 }

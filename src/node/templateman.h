@@ -35,8 +35,8 @@ namespace node {
 
 static constexpr int SHORTTXIDS_LENGTH = 6;
 
-/** Maximum number of templates to keep. */
-static constexpr size_t MAX_TEMPLATES{10};
+/** How long to keep local templates before expiry. */
+static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
 /** How frequently to update templates for compact block reconstruction. */
 static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
@@ -103,6 +103,8 @@ using TemplateDelta = std::vector<std::byte>;
 /** A locally-generated block template for the sendtemplate protocol. */
 class LocalTemplate : public Template {
 public:
+    NodeClock::time_point m_time; //!< generation time
+
     /** Lazily-computed deltas from basis templates, keyed by basis hash. */
     mutable std::unordered_map<uint256, TemplateDelta, SaltedUint256Hasher> m_deltas;
 
@@ -208,13 +210,12 @@ public:
 
 struct TemplateInfo {
     size_t num_templates{0};
-    size_t max_templates{0};
+    size_t num_networks{0};
     size_t pool_size{0};
     int64_t pool_weight{0};
     size_t latest_tx_count{0};
     int64_t latest_weight{0};
     std::chrono::seconds update_interval{};
-    NodeClock::time_point next_update{};
     size_t num_peer_templates{0};
     size_t num_partial_peer_templates{0};
 };
@@ -229,8 +230,7 @@ class TemplateManager
 {
     TemplateTxSet m_pool;
     int64_t m_pool_weight{0};            //!< total weight of all txs in m_pool
-    std::deque<LocalTemplate> m_templates;
-    NodeClock::time_point m_next_update{NodeClock::time_point::min()};
+    std::map<uint64_t, std::deque<LocalTemplate>> m_templates;
 
     /**
      * Vector of (wtxid, iterator) pairs for cache-local linear scans
@@ -256,9 +256,6 @@ class TemplateManager
     /** Decrement refcounts and erase txs with zero refs. */
     void RemoveTxs(std::vector<TemplateTxRef>&& vec);
 
-    /** Trim old templates beyond MAX_TEMPLATES. */
-    void TrimLocalTemplates();
-
     /** Add a completed peer template. Handles cache invalidation on reallocation. */
     void AddPeerTemplate(PeerTemplate&& pt);
 
@@ -268,24 +265,30 @@ class TemplateManager
 public:
     /**
      * Generate a new template from block transactions (sans coinbase).
-     * Computes template hash, adds txs to pool, and trims old templates.
+     * Computes template hash and adds txs to pool.
      */
-    void GenerateTemplate(std::span<CTransactionRef> txs);
+    void GenerateTemplate(uint64_t network_key, NodeClock::time_point now, std::span<CTransactionRef> txs);
 
-    /** Look up a template by its hash. */
+    /** Trim local templates older than cutoff. Removes empty key entries. */
+    void TrimLocalTemplates(NodeClock::time_point cutoff);
+
+    /** Look up a template by its hash (searches all network keys). */
     const LocalTemplate* GetTemplate(const uint256& hash) const
     {
-        for (const auto& tmpl : m_templates) {
-            if (tmpl.m_hash == hash) return &tmpl;
+        for (const auto& [key, deq] : m_templates) {
+            for (const auto& tmpl : deq) {
+                if (tmpl.m_hash == hash) return &tmpl;
+            }
         }
         return nullptr;
     }
 
-    /** Get the most recent template (or nullptr if none). */
-    const LocalTemplate* GetBestTemplate() const
+    /** Get the most recent template for a network key (or nullptr if none). */
+    const LocalTemplate* GetBestTemplate(uint64_t network_key) const
     {
-        if (m_templates.empty()) return nullptr;
-        return &m_templates.back();
+        auto it = m_templates.find(network_key);
+        if (it == m_templates.end() || it->second.empty()) return nullptr;
+        return &it->second.back();
     }
 
     /**
@@ -300,15 +303,14 @@ public:
     /** Number of transactions in the shared pool. */
     size_t PoolSize() const { return m_pool.size(); }
 
-    /** Number of stored templates. */
-    size_t NumTemplates() const { return m_templates.size(); }
-
-    /** Check if it's time to generate a new template, and if so, advance the timer. */
-    bool CheckTimer(NodeClock::time_point now, FastRandomContext& rng)
+    /** Number of stored templates (across all network keys). */
+    size_t NumTemplates() const
     {
-        if (now < m_next_update) return false;
-        m_next_update = now + TEMPLATE_UPDATE_INTERVAL / 2 + rng.randrange<std::chrono::milliseconds>(TEMPLATE_UPDATE_INTERVAL);
-        return true;
+        size_t total = 0;
+        for (const auto& [key, deq] : m_templates) {
+            total += deq.size();
+        }
+        return total;
     }
 
     /** Find the most recent completed template from a peer, or nullptr.
@@ -370,16 +372,20 @@ public:
     TemplateInfo GetInfo() const
     {
         TemplateInfo stats;
-        stats.num_templates = m_templates.size();
-        stats.max_templates = MAX_TEMPLATES;
+        stats.num_templates = NumTemplates();
+        stats.num_networks = m_templates.size();
         stats.pool_size = m_pool.size();
         stats.pool_weight = m_pool_weight;
-        if (!m_templates.empty()) {
-            stats.latest_tx_count = m_templates.back().m_txs.size();
-            stats.latest_weight = m_templates.back().m_weight;
+        // Find newest template across all keys
+        NodeClock::time_point newest{NodeClock::time_point::min()};
+        for (const auto& [key, deq] : m_templates) {
+            if (!deq.empty() && deq.back().m_time > newest) {
+                stats.latest_tx_count = deq.back().m_txs.size();
+                stats.latest_weight = deq.back().m_weight;
+                newest = deq.back().m_time;
+            }
         }
         stats.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
-        stats.next_update = m_next_update;
         stats.num_peer_templates = m_peer_templates.size();
         stats.num_partial_peer_templates = m_partial_peer_templates.size();
         return stats;

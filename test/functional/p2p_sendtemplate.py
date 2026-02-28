@@ -45,6 +45,9 @@ BIN25_2_1_FEATURE = "BIN25-2.1"
 # Template update interval in seconds (from templateman.h)
 TEMPLATE_UPDATE_INTERVAL = 30
 
+# Local template expiry in seconds (from templateman.h)
+LOCAL_TEMPLATE_EXPIRY = 300
+
 # Template request interval in seconds (from templateman.h)
 TEMPLATE_REQUEST_INTERVAL = 120
 
@@ -248,7 +251,10 @@ class SendTemplateTest(BitcoinTestFramework):
         self.log.info("Connect template-supporting peer")
         peer = node.add_p2p_connection(TemplateP2P())
 
-        self.log.info("Trigger template generation")
+        self.log.info("Request template via gettmplt (deferred)")
+        peer.send_without_ping(msg_gettmplt())
+
+        self.log.info("Trigger template generation (sends deferred response)")
         self.trigger_template_generation(peer)
 
         tmpl_info = node.gettemplateinfo()
@@ -257,8 +263,6 @@ class SendTemplateTest(BitcoinTestFramework):
         tx_count = tmpl_info["latest_template_tx"]
         assert_greater_than(tx_count, 50)
 
-        self.log.info("Request template via gettmplt")
-        peer.send_and_ping(msg_gettmplt())
         peer.wait_for_tmplt()
         assert_equal(len(peer.tmplt_received), 1)
         tmplt = peer.tmplt_received[0]
@@ -310,8 +314,9 @@ class SendTemplateTest(BitcoinTestFramework):
 
         peer = node.add_p2p_connection(TemplateP2P())
 
-        # Get the template
-        peer.send_and_ping(msg_gettmplt())
+        # Get the template (deferred: request, then trigger generation)
+        peer.send_without_ping(msg_gettmplt())
+        self.trigger_template_generation(peer)
         peer.wait_for_tmplt()
         tmplt = peer.tmplt_received[0]
         tx_count = tmplt.tx_count
@@ -322,13 +327,14 @@ class SendTemplateTest(BitcoinTestFramework):
         self.log.info("Peer disconnected as expected")
 
     def test_template_eviction(self):
-        self.log.info("Test template eviction with pending queue")
+        self.log.info("Test template eviction with pending queue (time-based)")
         node = self.nodes[0]
 
         peer = node.add_p2p_connection(TemplateP2P())
 
-        # Get a template and its hash
-        peer.send_and_ping(msg_gettmplt())
+        # Get a template and its hash (deferred)
+        peer.send_without_ping(msg_gettmplt())
+        self.trigger_template_generation(peer)
         peer.wait_for_tmplt()
         tmplt = peer.tmplt_received[0]
         original_hash = tmplt.template_hash
@@ -337,26 +343,18 @@ class SendTemplateTest(BitcoinTestFramework):
         positions = list(range(tmplt.tx_count))
         peer.send_and_ping(msg_gettmplttxn(original_hash, positions))
 
-        self.log.info("Generate enough new templates to evict the original")
-        info_before = node.gettemplateinfo()
-        max_templates = info_before["max_templates"]
-        templates_before = info_before["templates"]
-        for i in range(max_templates):
-            # Add a new tx each time to ensure the template changes
-            self.wallet.send_self_transfer(from_node=node)
-            self.trigger_template_generation(peer)
-
-        # Verify eviction actually happened: at max capacity and some were dropped
-        new_info = node.gettemplateinfo()
-        self.log.info(f"After eviction: {new_info}")
-        assert_equal(new_info["templates"], max_templates)
-        assert_greater_than(templates_before + max_templates, max_templates)
-
-        # Snapshot: chunks sent so far (during eviction loop's sync_with_ping calls)
+        # Snapshot: chunks sent so far (send_and_ping may have drained some)
         pre_eviction_count = len(peer.tmplttxn_received)
 
-        self.log.info("Trigger SendMessages to drain the queue (should drop it)")
+        self.log.info("Advance time past LOCAL_TEMPLATE_EXPIRY to expire the template")
+        # Bump past 300s expiry. The cleanup sweep runs every ~30s in
+        # ProcessMessages and trims templates older than LOCAL_TEMPLATE_EXPIRY.
+        node.bumpmocktime(LOCAL_TEMPLATE_EXPIRY + TEMPLATE_UPDATE_INTERVAL + 1)
         peer.sync_with_ping()
+
+        new_info = node.gettemplateinfo()
+        self.log.info(f"After expiry: {new_info}")
+        assert_equal(new_info["templates"], 0)
 
         # After eviction, no NEW tmplttxn for the original hash should arrive.
         for msg in peer.tmplttxn_received[pre_eviction_count:]:
