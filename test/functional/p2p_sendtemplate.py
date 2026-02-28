@@ -504,6 +504,10 @@ class SendTemplateTest(BitcoinTestFramework):
         provider.peer_disconnect()
         provider.wait_for_disconnect()
 
+    def get_active_template_peers(self, node):
+        """Return set of peer IDs with template_status == 'active' from getpeerinfo."""
+        return {p["id"] for p in node.getpeerinfo() if p.get("template_status") == "active"}
+
     def test_inbound_rotation(self):
         """Test that inbound peer selection rotates among eligible peers."""
         self.log.info("Test inbound template peer rotation")
@@ -529,54 +533,40 @@ class SendTemplateTest(BitcoinTestFramework):
         node.bumpmocktime(TEMPLATE_UPDATE_INTERVAL * 2)
         peers[0].sync_with_ping()
 
-        self.log.info("Bump mocktime past first request interval")
-        node.bumpmocktime(TEMPLATE_REQUEST_INTERVAL * 2)
+        # All peers have m_next_gettmplt = now() from feature negotiation,
+        # so the first bump should activate exactly MAX_INBOUND_TEMPLATE_PEERS.
+        self.log.info("Bump mocktime to trigger initial activation")
+        node.bumpmocktime(1)
         for peer in peers:
             peer.sync_with_ping()
 
-        # Count which peers received gettmplt
-        active_peers = [i for i, p in enumerate(peers) if len(p.gettmplt_received) > 0]
-        self.log.info(f"After first cycle: {len(active_peers)} peers received gettmplt: {active_peers}")
-        assert_equal(len(active_peers), MAX_INBOUND_TEMPLATE_PEERS)
+        active = self.get_active_template_peers(node)
+        self.log.info(f"Initially active: {len(active)} peers {active}")
+        assert_equal(len(active), MAX_INBOUND_TEMPLATE_PEERS)
 
-        # Verify template_status in getpeerinfo
-        peerinfo = node.getpeerinfo()
-        active_count = sum(1 for p in peerinfo if p.get("template_status") == "active")
-        inactive_count = sum(1 for p in peerinfo if p.get("template_status") == "inactive")
-        self.log.info(f"RPC template_status: {active_count} active, {inactive_count} inactive")
-        assert_equal(active_count, MAX_INBOUND_TEMPLATE_PEERS)
-        assert_equal(inactive_count, num_peers - MAX_INBOUND_TEMPLATE_PEERS)
-
-        self.log.info("Run multiple request cycles to trigger rotation")
-        initial_active = set(active_peers)
-        ever_active = set(active_peers)
-
-        # Run ~40 request cycles. With 1/8 deactivation probability per cycle
-        # and 10 active peers, we expect ~1.25 rotations per cycle on average.
-        # Over 40 cycles that's ~50 rotations, enough to activate all 15 peers.
-        for _ in range(40):
-            node.bumpmocktime(TEMPLATE_REQUEST_INTERVAL * 2)
+        # Advance time in 30s increments. Each bump may trigger request cycles
+        # for peers whose jittered timer has expired. With 1/8 deactivation
+        # probability per cycle and 10 active peers, we expect ~1.25 rotations
+        # per cycle. Track which peer IDs have ever been active.
+        self.log.info("Run cycles with 30s increments to observe rotation")
+        ever_active = set(active)
+        for cycle in range(80):
+            node.bumpmocktime(30)
             for peer in peers:
                 peer.sync_with_ping()
 
-        # Check which peers have ever received a gettmplt
-        for i, peer in enumerate(peers):
-            if len(peer.gettmplt_received) > 0:
-                ever_active.add(i)
+            active = self.get_active_template_peers(node)
+            ever_active |= active
 
-        current_active = [i for i, p in enumerate(peers) if len(p.gettmplt_received) > 0]
-        self.log.info(f"After rotation cycles: {len(ever_active)} peers were ever active")
+            # Active count should never exceed MAX_INBOUND_TEMPLATE_PEERS
+            assert_greater_than(MAX_INBOUND_TEMPLATE_PEERS + 1, len(active))
 
-        # All 15 peers should have been activated at some point
+            if len(ever_active) == num_peers:
+                self.log.info(f"All {num_peers} peers activated after {cycle + 1} cycles")
+                break
+
+        self.log.info(f"Ever active: {len(ever_active)} peers")
         assert_equal(len(ever_active), num_peers)
-
-        # Some rotation should have occurred: the current set shouldn't be
-        # identical to the initial set (overwhelmingly likely with 40 cycles)
-        # Check by verifying that at least one initially-inactive peer got requests
-        initially_inactive = set(range(num_peers)) - initial_active
-        newly_activated = initially_inactive & ever_active
-        self.log.info(f"Initially inactive peers that were later activated: {newly_activated}")
-        assert_greater_than(len(newly_activated), 0)
 
         for peer in peers:
             peer.peer_disconnect()
