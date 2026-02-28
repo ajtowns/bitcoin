@@ -59,6 +59,7 @@ static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 /** Entry in the shared template tx pool. Ordered by wtxid. */
 struct TemplateTx {
     CTransactionRef tx;
+    mutable int32_t weight{0};         //!< cached GetTransactionWeight result
     mutable uint32_t num_templates{0}; //!< refcount: number of templates referencing this tx
     mutable size_t scannable_idx{0};   //!< index into m_scannable_txns
     mutable NodeClock::time_point next_mempool_check{NodeClock::time_point::min()}; //!< earliest time to retry ATMP
@@ -90,6 +91,7 @@ class Template {
 public:
     std::vector<TemplateTxRef> m_txs;    //!< ordered tx list
     uint256 m_hash;                      //!< SHA256 of concatenated wtxids
+    int64_t m_weight{0};                 //!< total transaction weight
 
     /** Compute template hash: SHA256 of concatenated wtxids. */
     void ComputeHash();
@@ -224,6 +226,7 @@ struct TemplateInfo {
 class TemplateManager
 {
     TemplateTxSet m_pool;
+    int64_t m_pool_weight{0};            //!< total weight of all txs in m_pool
     std::deque<LocalTemplate> m_templates;
     NodeClock::time_point m_next_update{NodeClock::time_point::min()};
 

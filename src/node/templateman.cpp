@@ -4,6 +4,7 @@
 
 #include <node/templateman.h>
 
+#include <consensus/validation.h>
 #include <crypto/sha256.h>
 #include <crypto/siphash.h>
 #include <primitives/transaction.h>
@@ -125,12 +126,14 @@ DataStream LocalTemplate::MakeTmpltMsg(uint64_t nonce, const LocalTemplate* basi
 
 TemplateTxRef TemplateManager::AddTx(CTransactionRef tx)
 {
-    auto [it, inserted] = m_pool.insert(TemplateTx{std::move(tx)});
-    ++it->num_templates;
+    auto [it, inserted] = m_pool.insert(TemplateTx{.tx = std::move(tx)});
     if (inserted) {
+        it->weight = GetTransactionWeight(*it->tx);
+        m_pool_weight += it->weight;
         it->scannable_idx = m_scannable_txns.size();
         m_scannable_txns.emplace_back(it->tx->GetWitnessHash(), it);
     }
+    ++it->num_templates;
     return it;
 }
 
@@ -150,6 +153,7 @@ void TemplateManager::RemoveTxs(std::vector<TemplateTxRef>&& vec)
     for (auto& it : vec) {
         if (it == pool_end) continue;
         if (--it->num_templates == 0) {
+            m_pool_weight -= it->weight;
             // Swap-to-back removal from m_scannable_txns
             size_t idx = it->scannable_idx;
             if (idx != m_scannable_txns.size() - 1) {
@@ -174,6 +178,9 @@ void TemplateManager::GenerateTemplate(std::span<CTransactionRef> txs)
 {
     LocalTemplate tmpl;
     tmpl.m_txs = AddTxs(std::move(txs));
+    for (const auto& ref : tmpl.m_txs) {
+        tmpl.m_weight += ref->weight;
+    }
     tmpl.ComputeHash();
     m_templates.push_back(std::move(tmpl));
     TrimLocalTemplates();
@@ -389,6 +396,7 @@ bool TemplateManager::PartialInitFromBasis(NodeId nodeid, const uint256& hash,
             ++partial.m_filled;
             partial.m_txs.push_back(basis->m_txs[basis_pos]);
             ++partial.m_txs.back()->num_templates;
+            partial.m_weight += partial.m_txs.back()->weight;
             ++basis_pos;
             last_missing = pos + 1;
         }
@@ -396,6 +404,11 @@ bool TemplateManager::PartialInitFromBasis(NodeId nodeid, const uint256& hash,
             partial.m_missing.ExtendMissing(last_missing, pos);
         }
         partial.m_tx_count = partial.m_txs.size();
+
+        if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial.m_txs));
+            return false; // definitely malicious (no short ID ambiguity yet)
+        }
     }
 
     m_partial_peer_templates[nodeid] = std::move(partial);
@@ -411,9 +424,9 @@ bool TemplateManager::PartialFillShortIDs(NodeId nodeid, const uint256& hash,
     AssertLockNotHeld(mempool.cs);
 
     auto it = m_partial_peer_templates.find(nodeid);
-    if (it == m_partial_peer_templates.end()) return false;
+    if (it == m_partial_peer_templates.end()) return true; // already dropped (e.g. overweight)
     auto& partial = it->second;
-    if (partial.m_hash != hash) return false;
+    if (partial.m_hash != hash) return true; // stale partial
 
     if (short_ids.empty()) {
         if (partial.m_tx_count == partial.m_filled) {
@@ -517,16 +530,23 @@ bool TemplateManager::PartialFillShortIDs(NodeId nodeid, const uint256& hash,
             [&](bool) { /* nothing to do */ },
             [&](CTransactionRef tx) {
                 partial.m_txs[pos] = AddTx(std::move(tx));
+                partial.m_weight += partial.m_txs[pos]->weight;
                 partial.m_missing.ReceivedTxn(pos);
                 ++partial.m_filled;
             },
             [&](TemplateTxRef ttx) {
                 partial.m_txs[pos] = ttx;
                 ++ttx->num_templates;
+                partial.m_weight += ttx->weight;
                 partial.m_missing.ReceivedTxn(pos);
                 ++partial.m_filled;
             }), std::move(have_txn[i])
         );
+    }
+
+    if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
+        ForgetPartialTemplate(nodeid);
+        return true; // overweight, likely wrong short ID match; don't disconnect
     }
 
     return true;
@@ -536,9 +556,9 @@ bool TemplateManager::PartialFillTxns(NodeId nodeid, const uint256& hash,
                                        std::span<CTransactionRef> txs)
 {
     auto it = m_partial_peer_templates.find(nodeid);
-    if (it == m_partial_peer_templates.end()) return false;
+    if (it == m_partial_peer_templates.end()) return true; // already dropped (e.g. overweight)
     auto& partial = it->second;
-    if (partial.m_hash != hash) return false;
+    if (partial.m_hash != hash) return true; // stale partial
 
     if (partial.m_filled + txs.size() > partial.m_txs.size()) return false;
 
@@ -547,6 +567,15 @@ bool TemplateManager::PartialFillTxns(NodeId nodeid, const uint256& hash,
     size_t filled = partial.m_missing.FillTxs(partial, refs);
     Assume(filled == refs.size());
     partial.m_filled += filled;
+
+    for (const auto& ref : refs) {
+        partial.m_weight += ref->weight;
+    }
+
+    if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
+        ForgetPartialTemplate(nodeid);
+        return true; // overweight, likely wrong short ID match; don't disconnect
+    }
 
     return true;
 }
