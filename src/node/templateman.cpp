@@ -18,10 +18,8 @@ namespace node {
 void Template::ComputeHash()
 {
     CSHA256 hasher;
-    if (m_tip) {
-        const auto& tip_hash = m_tip->GetBlockHash();
-        hasher.Write(UCharCast(tip_hash.data()), 32);
-    }
+    const uint256& tip_hash = (m_tip ? m_tip->GetBlockHash() : uint256::ZERO);
+    hasher.Write(UCharCast(tip_hash.data()), 32);
     for (const auto& it : m_txs) {
         const auto& wtxid = it->tx->GetWitnessHash();
         hasher.Write(UCharCast(wtxid.data()), 32);
