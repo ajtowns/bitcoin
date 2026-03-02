@@ -544,19 +544,19 @@ bool TemplateManager::PartialFillShortIDs(NodeId nodeid, const uint256& hash,
     for (size_t i = 0; i < missing.size(); ++i) {
         auto pos = missing[i];
         std::visit(util::Overloaded(
-            [&](bool) { /* nothing to do */ },
-            [&](CTransactionRef tx) {
+            [&](bool&&) { /* nothing to do */ },
+            [&](CTransactionRef&& tx) {
                 partial.m_txs[pos] = AddTx(std::move(tx));
                 partial.m_weight += partial.m_txs[pos]->weight;
                 partial.m_missing.ReceivedTxn(pos);
                 ++partial.m_filled;
             },
-            [&](TemplateTxRef ttx) {
-                partial.m_txs[pos] = ttx;
+            [&](TemplateTxRef&& ttx) {
                 ++ttx->num_templates;
                 partial.m_weight += ttx->weight;
                 partial.m_missing.ReceivedTxn(pos);
                 ++partial.m_filled;
+                partial.m_txs[pos] = std::move(ttx);
             }), std::move(have_txn[i])
         );
     }
