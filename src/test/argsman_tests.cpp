@@ -51,7 +51,6 @@ BOOST_AUTO_TEST_CASE(util_datadir)
 
 struct TestArgsManager : public ArgsManager
 {
-    TestArgsManager() { m_network_only_args.clear(); }
     void ReadConfigString(const std::string& str_config)
     {
         std::istringstream streamConfig(str_config);
