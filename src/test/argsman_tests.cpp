@@ -62,11 +62,6 @@ struct TestArgsManager : public ArgsManager
         std::string error;
         BOOST_REQUIRE(ReadConfigStream(streamConfig, "", error));
     }
-    void SetNetworkOnlyArg(const std::string& arg)
-    {
-        LOCK(cs_args);
-        m_network_only_args.insert(arg);
-    }
     void SetupArgs(const std::vector<std::pair<std::string, unsigned int>>& args)
     {
         for (const auto& arg : args) {
@@ -451,8 +446,8 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
     const auto i = std::make_pair("-i", ArgsManager::ALLOW_ANY);
     const auto iii = std::make_pair("-iii", ArgsManager::ALLOW_ANY);
     test_args.SetupArgs({a, b, ccc, d, e, fff, ggg, h, i, iii});
-
     test_args.ReadConfigString(str_config);
+
     // expectation: a, b, ccc, d, fff, ggg, h, i end up in map
     // so do sec1.ccc, sec1.d, sec1.h, sec2.ccc, sec2.iii
 
@@ -583,9 +578,12 @@ BOOST_AUTO_TEST_CASE(util_ReadConfigStream)
 
     // Test section only options
 
-    test_args.SetNetworkOnlyArg("-d");
-    test_args.SetNetworkOnlyArg("-ccc");
-    test_args.SetNetworkOnlyArg("-h");
+    const auto ccc2 = std::make_pair("-ccc", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY);
+    const auto d2 = std::make_pair("-d", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY);
+    const auto h2 = std::make_pair("-h", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY);
+    test_args.ClearArgs();
+    test_args.SetupArgs({a, b, ccc2, d2, e, fff, ggg, h2, i, iii});
+    test_args.ReadConfigString(str_config);
 
     test_args.SelectConfigNetwork(ChainTypeToString(ChainType::MAIN));
     BOOST_CHECK(test_args.GetArg("-d", "xxx") == "e");
@@ -827,8 +825,7 @@ BOOST_FIXTURE_TEST_CASE(util_ArgsMerge, ArgsMergeTestingSetup)
 
         const std::string& name = net_specific ? "wallet" : "server";
         const std::string key = "-" + name;
-        parser.AddArg(key, name, ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-        if (net_specific) parser.SetNetworkOnlyArg(key);
+        parser.AddArg(key, name, ArgsManager::ALLOW_ANY | (net_specific ? ArgsManager::NETWORK_ONLY : 0), OptionsCategory::OPTIONS);
 
         auto args = GetValues(arg_actions, section, name, "a");
         std::vector<const char*> argv = {"ignored"};
