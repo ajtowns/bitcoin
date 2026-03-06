@@ -53,14 +53,7 @@ struct TestArgsManager : public ArgsManager
 {
     void ReadConfigString(const std::string& str_config)
     {
-        std::istringstream streamConfig(str_config);
-        {
-            LOCK(cs_args);
-            m_settings.ro_config.clear();
-            m_config_sections.clear();
-        }
-        std::string error;
-        BOOST_REQUIRE(ReadConfigStream(streamConfig, "", error));
+        BOOST_REQUIRE(ArgsManager::ReadConfigString(str_config));
     }
     void SetupArgs(const std::vector<std::pair<std::string, unsigned int>>& args)
     {

@@ -119,6 +119,18 @@ bool ArgsManager::ReadConfigStream(std::istream& stream, const std::string& file
     return true;
 }
 
+bool ArgsManager::ReadConfigString(const std::string& str_config)
+{
+   std::istringstream streamConfig(str_config);
+   {
+       LOCK(cs_args);
+       m_settings.ro_config.clear();
+       m_config_sections.clear();
+   }
+   std::string error; // ignored
+   return ReadConfigStream(streamConfig, "", error);
+}
+
 bool ArgsManager::ReadConfigFiles(std::string& error, bool ignore_invalid_keys)
 {
     {
