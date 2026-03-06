@@ -127,7 +127,7 @@ public:
         COMMAND = 0x800,
     };
 
-protected:
+private:
     struct Arg
     {
         std::string m_help_param;

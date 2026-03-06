@@ -61,11 +61,10 @@ struct TestArgsManager : public ArgsManager
             AddArg(arg.first, "", arg.second, OptionsCategory::OPTIONS);
         }
     }
-    using ArgsManager::GetSetting;
-    using ArgsManager::GetSettingsList;
+
+    // make protected methods available for testing
+    using ArgsManager::ReadConfigString;
     using ArgsManager::ReadConfigStream;
-    using ArgsManager::cs_args;
-    using ArgsManager::m_settings;
 };
 
 //! Test GetSetting and GetArg type coercion, negation, and default value handling.
