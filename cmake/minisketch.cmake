@@ -54,6 +54,7 @@ target_compile_definitions(minisketch
   PRIVATE
     DISABLE_DEFAULT_FIELDS
     ENABLE_FIELD_32
+    ENABLE_FIELD_46
 )
 
 target_include_directories(minisketch

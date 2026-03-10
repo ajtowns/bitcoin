@@ -13,8 +13,12 @@
 namespace node {
 /** Wrapper around Minisketch::Minisketch(32, implementation, capacity). */
 Minisketch MakeMinisketch32(size_t capacity);
-/** Wrapper around Minisketch::CreateFP. */
+/** Wrapper around Minisketch::CreateFP for 32-bit elements. */
 Minisketch MakeMinisketch32FP(size_t max_elements, uint32_t fpbits);
+/** Wrapper around Minisketch::Minisketch(46, implementation, capacity). */
+Minisketch MakeMinisketch46(size_t capacity);
+/** Wrapper around Minisketch::CreateFP for 46-bit elements. */
+Minisketch MakeMinisketch46FP(size_t max_elements, uint32_t fpbits);
 } // namespace node
 
 #endif // BITCOIN_NODE_MINISKETCHWRAPPER_H
