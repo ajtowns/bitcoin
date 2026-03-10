@@ -19,9 +19,7 @@
 namespace node {
 namespace {
 
-static constexpr uint32_t BITS = 32;
-
-uint32_t FindBestImplementation()
+uint32_t FindBestImplementation(uint32_t bits)
 {
     std::optional<std::pair<SteadyClock::duration, uint32_t>> best;
 
@@ -31,8 +29,8 @@ uint32_t FindBestImplementation()
         uint64_t offset = 0;
         /* Run a little benchmark with capacity 32, adding 184 entries, and decoding 11 of them once. */
         for (int b = 0; b < 11; ++b) {
-            if (!Minisketch::ImplementationSupported(BITS, impl)) break;
-            Minisketch sketch(BITS, impl, 32);
+            if (!Minisketch::ImplementationSupported(bits, impl)) break;
+            Minisketch sketch(bits, impl, 32);
             auto start = SteadyClock::now();
             for (uint64_t e = 0; e < 100; ++e) {
                 sketch.Add(e*1337 + b*13337 + offset);
@@ -53,14 +51,15 @@ uint32_t FindBestImplementation()
         }
     }
     assert(best.has_value());
-    LogInfo("Using Minisketch implementation number %i", best->second);
+    LogInfo("Using Minisketch-%u implementation number %i", bits, best->second);
     return best->second;
 }
 
-uint32_t Minisketch32Implementation()
+template<uint32_t BITS>
+uint32_t MinisketchImplementation()
 {
     // Fast compute-once idiom.
-    static uint32_t best = FindBestImplementation();
+    static uint32_t best = FindBestImplementation(BITS);
     return best;
 }
 
@@ -69,11 +68,21 @@ uint32_t Minisketch32Implementation()
 
 Minisketch MakeMinisketch32(size_t capacity)
 {
-    return Minisketch(BITS, Minisketch32Implementation(), capacity);
+    return Minisketch(32, MinisketchImplementation<32>(), capacity);
 }
 
 Minisketch MakeMinisketch32FP(size_t max_elements, uint32_t fpbits)
 {
-    return Minisketch::CreateFP(BITS, Minisketch32Implementation(), max_elements, fpbits);
+    return Minisketch::CreateFP(32, MinisketchImplementation<32>(), max_elements, fpbits);
+}
+
+Minisketch MakeMinisketch46(size_t capacity)
+{
+    return Minisketch(46, MinisketchImplementation<46>(), capacity);
+}
+
+Minisketch MakeMinisketch46FP(size_t max_elements, uint32_t fpbits)
+{
+    return Minisketch::CreateFP(46, MinisketchImplementation<46>(), max_elements, fpbits);
 }
 } // namespace node
