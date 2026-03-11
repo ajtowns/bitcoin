@@ -47,8 +47,9 @@ class CCoinsViewTest : public CoinsViewEmpty
 public:
     explicit CCoinsViewTest(FastRandomContext& rng) : m_rng{rng} {}
 
-    std::optional<Coin> GetCoin(const COutPoint& outpoint) const override
+    std::optional<Coin> GetCoin(const COutPoint& outpoint, bool peek_only=false) const override
     {
+        (void)peek_only;
         if (auto it{map_.find(outpoint)}; it != map_.end() && !it->second.IsSpent()) return it->second;
         return std::nullopt;
     }
@@ -1182,9 +1183,9 @@ BOOST_AUTO_TEST_CASE(ccoins_peekcoin)
         cache.Flush();
     }
 
-    // Verify PeekCoin can read through the cache stack without mutating the intermediate cache.
+    // Verify GetCoin(*,true) can read through the cache stack without mutating the intermediate cache.
     CCoinsViewCacheTest main_cache{&base};
-    const auto fetched{main_cache.PeekCoin(outpoint)};
+    const auto fetched{main_cache.GetCoin(outpoint, /*peek_only=*/true)};
     BOOST_CHECK(fetched.has_value());
     BOOST_CHECK(*fetched == coin);
     BOOST_CHECK(!main_cache.HaveCoinInCache(outpoint));

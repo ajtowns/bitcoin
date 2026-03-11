@@ -69,18 +69,14 @@ void CCoinsViewDB::ResizeCache(size_t new_cache_size)
     }
 }
 
-std::optional<Coin> CCoinsViewDB::GetCoin(const COutPoint& outpoint) const
+std::optional<Coin> CCoinsViewDB::GetCoin(const COutPoint& outpoint, bool peek_only) const
 {
+    (void)peek_only; // no caching, so peeking is no different
     if (Coin coin; m_db->Read(CoinEntry(&outpoint), coin)) {
         Assert(!coin.IsSpent()); // The UTXO database should never contain spent coins
         return coin;
     }
     return std::nullopt;
-}
-
-std::optional<Coin> CCoinsViewDB::PeekCoin(const COutPoint& outpoint) const
-{
-    return GetCoin(outpoint);
 }
 
 bool CCoinsViewDB::HaveCoin(const COutPoint& outpoint) const

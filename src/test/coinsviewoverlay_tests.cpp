@@ -102,7 +102,7 @@ BOOST_AUTO_TEST_CASE(fetch_inputs_from_db)
     view.SetBestBlock(uint256::ONE);
     BOOST_CHECK(view.SpendCoin(outpoint));
     view.Flush();
-    BOOST_CHECK(!main_cache.PeekCoin(outpoint).has_value());
+    BOOST_CHECK(!main_cache.GetCoin(outpoint, /*peek_only=*/true).has_value());
 }
 
 BOOST_AUTO_TEST_CASE(fetch_inputs_from_cache)
@@ -118,7 +118,7 @@ BOOST_AUTO_TEST_CASE(fetch_inputs_from_cache)
     view.SetBestBlock(uint256::ONE);
     BOOST_CHECK(view.SpendCoin(outpoint));
     view.Flush();
-    BOOST_CHECK(!main_cache.PeekCoin(outpoint).has_value());
+    BOOST_CHECK(!main_cache.GetCoin(outpoint, /*peek_only=*/true).has_value());
 }
 
 // Test for the case where a block spends coins that are spent in the cache, but
