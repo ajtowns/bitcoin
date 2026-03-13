@@ -33,6 +33,7 @@
 #include <node/blockstorage.h>
 #include <node/connection_types.h>
 #include <node/protocol_version.h>
+#include <node/templateman.h>
 #include <node/timeoffsets.h>
 #include <node/txdownloadman.h>
 #include <node/txorphanage.h>
