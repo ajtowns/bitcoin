@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <node/templateman.h>
+#include <node/minisketchwrapper.h>
 
 #include <chain.h>
 #include <consensus/validation.h>
@@ -115,6 +116,46 @@ std::vector<uint8_t> LocalTemplate::GetShortIdBytes(int round, GroupMask mask) c
     return result;
 }
 
+void LocalTemplate::GenerateSketches()
+{
+    // Build 32 per-bucket sketches directly into slots 0..31.
+    class MS : public Minisketch
+    {
+    public:
+        // Minisketch, but with a default initializer
+        MS() : Minisketch{MakeMinisketch46(SKETCH_CAPACITY)} { }
+    };
+    std::array<MS, TOTAL_BUCKETS> ms;
+    std::array<uint32_t, TOTAL_BUCKETS> count{};
+    for (uint64_t sid : shortids) {
+        int b = sid & (TOTAL_BUCKETS - 1);
+        ms[b].Add(sid);
+        ++count[b];
+    }
+
+    // Merge the sketch tree bottom-up in-place.
+    // At each step, merge into the lower half, leaving the upper half unchanged.
+    auto merge_level = [&](int n) {
+        for (int i = 0; i < n; ++i) {
+            ms[i].Merge(ms[i+n]);
+            count[i] += count[i + n];
+        }
+    };
+
+    // slots 16..31 = individual buckets (round 3); merge into 0..15
+    merge_level(16);
+    // slots 8..15 = stride-16 groups (round 2); merge into 0..7
+    merge_level(8);
+    // slots 4..7 = stride-8 groups (round 1); merge into 0..3
+    merge_level(4);
+    // slots 0..3 = stride-4 groups (round 0)
+
+    for (int i = 0; i < TOTAL_BUCKETS; ++i) {
+        sketches[i].ser = ms[i].Serialize();
+        sketches[i].elements = count[i];
+    }
+}
+
 TemplateTxRef TemplateManager::AddTx(CTransactionRef tx)
 {
     const int32_t w = GetTransactionWeight(*tx);
@@ -216,7 +257,7 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now, FastRandomC
     // Hash over tip_hash then wtxids in shortid order; receiver can verify independently.
     tmpl.m_hash = tmpl.ComputeHash();
 
-    // TODO: populate sketches here
+    tmpl.GenerateSketches();
 
     uint256 template_hash = tmpl.m_hash;
 

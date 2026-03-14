@@ -144,6 +144,9 @@ public:
     /** All short IDs; in parallel order to m_txs (which should be sorted by shortid). */
     std::vector<uint64_t> shortids;
 
+    /** Compute and store all sketch levels from shortids. Call after shortids is populated. */
+    void GenerateSketches();
+
     /** Return the sketches for a wire round (0..3). Returns empty span for out-of-range round.
      *  Round 0 and 1 each have 4 sketches; rounds 2 and 3 have 8 and 16 respectively.
      *  Formula: count = 4<<(round?round-1:0), offset = round?count:0. */
