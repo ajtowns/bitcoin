@@ -397,4 +397,19 @@ std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemp
     return txs;
 }
 
+TemplateInfo TemplateManager::GetInfo() const
+{
+    TemplateInfo info;
+    info.num_templates = m_templates.size();
+    info.pool_size = m_pool.size();
+    info.pool_weight = m_pool_weight;
+    if (!m_templates.empty()) {
+        info.latest_tx_count = m_templates.back().m_txs.size();
+        info.latest_weight = m_templates.back().m_weight;
+    }
+    info.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
+    info.next_update = m_next_gen;
+    return info;
+}
+
 } // namespace node

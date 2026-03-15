@@ -242,6 +242,16 @@ public:
     std::vector<CTransactionRef> GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes);
 };
 
+struct TemplateInfo {
+    size_t num_templates{0};
+    size_t pool_size{0};
+    int64_t pool_weight{0};
+    size_t latest_tx_count{0};
+    int64_t latest_weight{0};
+    std::chrono::seconds update_interval{};
+    NodeClock::time_point next_update{};
+};
+
 /**
  * Manages block templates for the gettmplt protocol
  *
@@ -318,6 +328,8 @@ public:
 
     /** Number of transactions in the shared pool. */
     size_t PoolSize() const { return m_pool.size(); }
+
+    TemplateInfo GetInfo() const;
 };
 
 } // namespace node
