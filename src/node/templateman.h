@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <set>
 #include <span>
 #include <tuple>
@@ -240,6 +241,91 @@ public:
     /** Drain up to max_bytes of transactions, resolving positions via tmpl.
      *  Returns the collected transactions. Clears state when fully drained. */
     std::vector<CTransactionRef> GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes);
+};
+
+/** A completed, hash-verified template received from a peer. */
+class PeerTemplate : public Template {
+};
+
+/** Receiver-side sketch reconciliation state for a peer template request.
+ *
+ *  Maintains three parallel arrays of TOTAL_BUCKETS Minisketch objects at the current round
+ *  level (4 → 8 → 16 → 32 groups): basis, local, and provider.  At each round
+ *  the groups are split in parallel using the received provider odd-child sketches.
+ *  TryDecodeGroups() attempts ((basis+local)^provider) then (basis^provider) for
+ *  each unresolved group, early-exiting per group on first success.
+ */
+class PeerTemplateSketch : public Template {
+public:
+    uint256 m_tip_hash;   //!< peer's tip hash (for ShortIDHasher)
+    uint64_t m_nonce{0};  //!< peer's nonce
+    uint256 m_basis_hash; //!< basis hint for next gettmplt cycle
+
+    /** Shortids parallel to m_txs.
+     *  [0 .. m_basis_count-1]: from retained basis positions, sorted by shortid.
+     *  [m_basis_count .. end]:  from local pool scan (excl. basis), sorted by shortid. */
+    std::vector<uint64_t> shortids;
+    size_t m_basis_count{0};
+
+    /** Bitmask: bit b set once bucket b is reconciled. */
+    BucketMask m_bucket_resolved;
+
+    /** Bitmask tracking which buckets were decoded via basis^provider (rather than
+     *  (basis+local)^provider). In these buckets the diff shortids represent provider-only
+     *  elements (provider\basis); in other buckets the diff is the full symmetric difference.
+     *  Used by FinalizeShortids to correctly classify diff elements as kept-local vs
+     *  provider-only. */
+    BucketMask m_decoded_by_basis;
+
+    /** Decoded symmetric difference shortids accumulated across all rounds. */
+    std::vector<uint64_t> m_diff_shortids;
+
+    /** Provider shortids received via round-4 fallback. */
+    std::vector<uint64_t> m_extra_shortids;
+
+    /** Current sketch split level: sketches are partitioned into 2^m_sketch_level groups.
+     *  Set to 0 after Init, updated to `round` after PrepareRound(round). During
+     *  ProcessShortidFallback at the start of Process(round), equals round-1. */
+    int m_sketch_level{-1};
+
+    PeerTemplateSketch();
+    ~PeerTemplateSketch();
+
+    /** Initialise from separately-sorted basis and local (shortid, txref) pairs and the
+     *  provider's combined (round-0) sketches.  Returns true if all buckets resolved. */
+    bool Init(std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs,
+              std::vector<std::pair<uint64_t, TemplateTxRef>> local_pairs,
+              std::span<const LocalTemplate::Sketch> combined_sketches);
+
+    struct ProcessResult {
+        bool resolved;          //!< all TOTAL_BUCKETS buckets reconciled
+        BucketMask shortidmask; //!< unresolved buckets (for round-4 shortid fallback)
+        GroupMask sketchmask;   //!< groups still needing sketches at the next round
+    };
+
+    /** Process incoming data for rounds 1-4.
+     *  shortidmask_sent: the shortidmask field from the gettmplt we sent (groups we requested shortids for).
+     *  sketchmask_sent: the sketchmask field from the gettmplt we sent (groups we requested sketches for). */
+    ProcessResult Process(int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
+                          std::span<const uint8_t> shortid_bytes,
+                          std::span<const LocalTemplate::Sketch> sketches);
+
+private:
+    struct Sketches;
+    std::unique_ptr<Sketches> m_sketches;
+
+    /** For each unresolved group at the current level, try (basis^provider)
+     *  then ((basis+local)^provider), early-exiting per group on first success.
+     *  Returns true when all buckets are resolved. */
+    bool TryDecodeGroups();
+
+    /** Round-4 shortid fallback: parse shortid_bytes, diff against our shortids. */
+    void ProcessShortidFallback(std::span<const uint8_t> shortid_bytes, GroupMask shortidmask);
+
+    /** Once all buckets are resolved, update shortids to reflect the provider's set.
+     *  Local shortids absent from the provider are zeroed; provider-only shortids are appended.
+     *  After this call, the non-zero entries of shortids equal the provider's shortid set. */
+    void FinalizeShortids();
 };
 
 struct TemplateInfo {

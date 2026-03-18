@@ -397,6 +397,318 @@ std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemp
     return txs;
 }
 
+struct PeerTemplateSketch::Sketches {
+    struct MSC {
+        int count{0};
+        Minisketch sketch{MakeMinisketch46(SKETCH_CAPACITY)};
+        void Add(uint64_t shortid) { sketch.Add(shortid); ++count; }
+    };
+    using MSCArr = std::array<MSC, TOTAL_BUCKETS>;
+
+    // Slot invariant for all three MSCArr arrays:
+    // - After InitialMerge (level=0): slots 0..3 hold the 4 stride-4 combined groups;
+    //   slots 4..31 hold stale intermediate merged values used by PrepareRound.
+    // - After PrepareRound(r): there are 4<<r active groups in slots 0..(4<<r)-1.
+    //   Slot gi = group gi. Slots >= 4<<r hold stale data and must not be read.
+    // - All three arrays follow the same slot structure at all times.
+    MSCArr m_basis_sketches;   //!< basis shortids only
+    MSCArr m_local_sketches;   //!< basis+local shortids (pre-merged so TryDecodeGroups needs one fewer Merge())
+    MSCArr m_provider_sketches;
+
+    void InitialMerge()
+    {
+        auto merge = [&](int i, int j) {
+            m_basis_sketches[i].sketch.Merge(m_basis_sketches[j].sketch);
+            m_basis_sketches[i].count += m_basis_sketches[j].count;
+            m_local_sketches[i].sketch.Merge(m_local_sketches[j].sketch);
+            m_local_sketches[i].count += m_local_sketches[j].count;
+        };
+
+        // 32 → 16: merge x += x+16 for x in 0..15
+        for (int x = 0; x < 16; ++x) merge(x, x + 16);
+        // 16 → 8: merge x += x+8 for x in 0..7
+        for (int x = 0; x < 8; ++x) merge(x, x + 8);
+        // 8 → 4: merge x += x+4 for x in 0..3
+        for (int x = 0; x < 4; ++x) merge(x, x + 4);
+        // slots 0..3 now hold the 4 stride-4 combined groups
+    }
+
+    void ProviderDeser(int round, GroupMask mask, std::span<const LocalTemplate::Sketch> sketches)
+    {
+        size_t sketch_idx = 0;
+        if (round == 0) {
+            // Round 0: store 4 sketches into slots 0..3 (mask unused)
+            for (int gi = 0; gi < TOTAL_BUCKETS / 8 && sketch_idx < sketches.size(); ++gi) {
+                const auto& s = sketches[sketch_idx++];
+                m_provider_sketches[gi].sketch.Deserialize(s.ser);
+                m_provider_sketches[gi].count = s.elements;
+            }
+        } else {
+            // Round 1..3: for each set bit gi in mask, store into slot n+gi
+            // where n = 4 << (round-1) (the new "odd child" slots for this round)
+            int n = 4 << (round - 1);
+            for (int gi = 0; gi < n && sketch_idx < sketches.size(); ++gi) {
+                if (!mask[gi]) continue;
+                const auto& s = sketches[sketch_idx++];
+                m_provider_sketches[n + gi].sketch.Deserialize(s.ser);
+                m_provider_sketches[n + gi].count = s.elements;
+            }
+        }
+    }
+
+    void PrepareRound(int round)
+    {
+        // n = current number of groups (before splitting)
+        // For each x in 0..n-1: XOR parent[x] with odd-child[x+n] to get even-child[x]
+        int n = 4 << (round - 1);
+        for (int x = 0; x < n; ++x) {
+            m_basis_sketches[x].sketch.Merge(m_basis_sketches[x + n].sketch);
+            m_basis_sketches[x].count -= m_basis_sketches[x + n].count;
+            m_local_sketches[x].sketch.Merge(m_local_sketches[x + n].sketch);
+            m_local_sketches[x].count -= m_local_sketches[x + n].count;
+            m_provider_sketches[x].sketch.Merge(m_provider_sketches[x + n].sketch);
+            m_provider_sketches[x].count -= m_provider_sketches[x + n].count;
+        }
+    }
+};
+
+PeerTemplateSketch::PeerTemplateSketch() = default;
+PeerTemplateSketch::~PeerTemplateSketch() = default;
+
+bool PeerTemplateSketch::TryDecodeGroups()
+{
+    auto& sk = *m_sketches;
+    // n = number of active groups at current sketch level
+    const int n = 4 << m_sketch_level;
+    // stride = n (buckets in group gi are: gi, gi+n, gi+2n, ...)
+    for (int gi = 0; gi < n; ++gi) {
+        // Check if all buckets in group gi are already resolved
+        bool all_resolved = true;
+        for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+            if (!m_bucket_resolved[b]) { all_resolved = false; break; }
+        }
+        if (all_resolved) continue;
+
+        int basis_count    = sk.m_basis_sketches[gi].count;
+        int local_count    = sk.m_local_sketches[gi].count; // basis+local
+        int provider_count = sk.m_provider_sketches[gi].count;
+
+        // Try basis XOR provider (only when diff is small enough to decode).
+        // Assumes basis is a subset of provider (guaranteed by the protocol: basis is
+        // a previously-sent template that the provider retains). Under this assumption,
+        // basis^provider == provider\basis and the feasibility check
+        // provider_count - basis_count <= SKETCH_CAPACITY is tight. If the assumption is
+        // violated by a misbehaving peer, the sketch may fail to decode or produce wrong
+        // diff elements; correctness is recovered by template-hash verification at the
+        // PeerTemplatePartial stage.
+        if (basis_count + SKETCH_CAPACITY >= provider_count) {
+            Minisketch diff = sk.m_basis_sketches[gi].sketch;
+            diff.Merge(sk.m_provider_sketches[gi].sketch);
+            if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
+                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                    m_bucket_resolved.Set(b);
+                    m_decoded_by_basis.Set(b);
+                }
+                continue;
+            }
+        }
+
+        // Try (basis + local) XOR provider (only when diff is small enough to decode).
+        // m_local_sketches holds basis+local pre-merged, so only one Merge() needed here.
+        if (std::abs(provider_count - local_count) <= SKETCH_CAPACITY) {
+            Minisketch diff = sk.m_local_sketches[gi].sketch;
+            diff.Merge(sk.m_provider_sketches[gi].sketch);
+            if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
+                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                    m_bucket_resolved.Set(b);
+                }
+                continue;
+            }
+        }
+    }
+    return m_bucket_resolved.Count() == TOTAL_BUCKETS;
+}
+
+bool PeerTemplateSketch::Init(std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs,
+                               std::vector<std::pair<uint64_t, TemplateTxRef>> local_pairs,
+                               std::span<const LocalTemplate::Sketch> combined_sketches)
+{
+    // Populate shortids and m_txs: basis segment [0..m_basis_count), then local
+    shortids.reserve(basis_pairs.size() + local_pairs.size());
+    m_txs.reserve(basis_pairs.size() + local_pairs.size());
+    for (auto& [sid, ref] : basis_pairs) {
+        shortids.push_back(sid);
+        m_txs.push_back(ref);
+    }
+    m_basis_count = basis_pairs.size();
+    for (auto& [sid, ref] : local_pairs) {
+        shortids.push_back(sid);
+        m_txs.push_back(ref);
+    }
+
+    // Build per-bucket sketches from the two sorted segments
+    m_sketches = std::make_unique<Sketches>();
+    auto& sk = *m_sketches;
+    for (size_t i = 0; i < m_basis_count; ++i) {
+        sk.m_basis_sketches[shortids[i] & (TOTAL_BUCKETS - 1)].Add(shortids[i]);
+    }
+    for (size_t i = m_basis_count; i < shortids.size(); ++i) {
+        sk.m_local_sketches[shortids[i] & (TOTAL_BUCKETS - 1)].Add(shortids[i]);
+    }
+    // Pre-merge basis into local so m_local_sketches holds basis+local;
+    // TryDecodeGroups can then use it directly without an extra Merge().
+    for (int b = 0; b < TOTAL_BUCKETS; ++b) {
+        sk.m_local_sketches[b].sketch.Merge(sk.m_basis_sketches[b].sketch);
+        sk.m_local_sketches[b].count += sk.m_basis_sketches[b].count;
+    }
+    sk.InitialMerge();
+
+    // Store provider's 4 combined sketches (round 0) into slots 0..3
+    sk.ProviderDeser(0, GroupMask{}, combined_sketches);
+    m_sketch_level = 0;
+
+    bool resolved = TryDecodeGroups();
+    if (resolved) FinalizeShortids();
+    return resolved;
+}
+
+void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid_bytes,
+                                                 GroupMask shortidmask)
+{
+    // At the start of round r, m_sketch_level = r-1 and sketches are at that granularity.
+    // num_groups = 4 << m_sketch_level; group index = low bits of bucket index.
+    const int num_groups = 4 << m_sketch_level;
+
+    // Parse the provider's outer shortids (positions SKETCH_CAPACITY+1 per sketch group) into per-group lists.
+    std::vector<std::vector<uint64_t>> received(num_groups);
+    {
+        SpanReader stream{shortid_bytes};
+        uint32_t n;
+        stream >> n;
+        uint8_t P;
+        stream >> P;
+        BitStreamReader<SpanReader> bitreader{stream};
+        uint64_t last = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            uint64_t delta = GolombRiceDecode(bitreader, P);
+            if (delta >= (1ULL << 46)) return;
+            last += delta + 1;
+            if (last >= (1ULL << 46)) return;
+            int gi = static_cast<int>(last & (num_groups - 1));
+            // Include if the group is requested and not fully resolved
+            if (!shortidmask[gi]) continue;
+            bool group_resolved = true;
+            for (int bx = gi; bx < TOTAL_BUCKETS; bx += num_groups) {
+                if (!m_bucket_resolved[bx]) { group_resolved = false; break; }
+            }
+            if (!group_resolved) received[gi].push_back(last);
+        }
+    }
+
+    // For each unresolved group, try (basis + received_outer) XOR provider.
+    // Since received_outer ⊆ provider, diff = provider_inner \ basis (≤SKETCH_CAPACITY elements).
+    auto& sk = *m_sketches;
+    for (int gi = 0; gi < num_groups; ++gi) {
+        // Check if group is already fully resolved
+        bool group_resolved = true;
+        for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+            if (!m_bucket_resolved[b]) { group_resolved = false; break; }
+        }
+        if (group_resolved) continue;
+
+        auto& recv = received[gi];
+        int basis_count    = sk.m_basis_sketches[gi].count;
+        int received_count = static_cast<int>(recv.size());
+        int provider_count = sk.m_provider_sketches[gi].count;
+
+        if (basis_count + received_count + SKETCH_CAPACITY >= provider_count) {
+            Minisketch recv_sketch = MakeMinisketch46(SKETCH_CAPACITY);
+            for (uint64_t sid : recv) recv_sketch.Add(sid);
+
+            Minisketch diff = sk.m_basis_sketches[gi].sketch;
+            diff.Merge(recv_sketch);
+            diff.Merge(sk.m_provider_sketches[gi].sketch);
+            if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
+                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+                    m_bucket_resolved.Set(b);
+                    m_decoded_by_basis.Set(b);
+                }
+                for (uint64_t sid : recv) m_extra_shortids.push_back(sid);
+            }
+        }
+    }
+}
+
+void PeerTemplateSketch::FinalizeShortids()
+{
+    // diff semantics differ by decode type:
+    //  - basis-only (m_decoded_by_basis bit set): diff = provider \ basis
+    //      (assumes basis ⊆ provider; see TryDecodeGroups comment)
+    //      → local in diff means local IS in provider (keep); local not in diff → zero
+    //  - basis+local: diff = (basis+local) Δ provider
+    //      → local in diff means local NOT in provider (zero); local not in diff → keep
+    std::unordered_set<uint64_t> diff_set(m_diff_shortids.begin(), m_diff_shortids.end());
+    std::unordered_set<uint64_t> our_set(shortids.begin(), shortids.end());
+
+    for (size_t i = m_basis_count; i < shortids.size(); ++i) {
+        uint64_t sid = shortids[i];
+        bool in_diff = diff_set.count(sid);
+        bool in_provider = m_decoded_by_basis[sid & (TOTAL_BUCKETS - 1)] ? in_diff : !in_diff;
+        if (!in_provider) shortids[i] = 0;
+    }
+
+    // Append provider shortids we don't have in our local/basis set
+    for (uint64_t sid : m_diff_shortids) {
+        if (our_set.insert(sid).second) shortids.push_back(sid);
+    }
+    for (uint64_t sid : m_extra_shortids) {
+        if (our_set.insert(sid).second) shortids.push_back(sid);
+    }
+}
+
+PeerTemplateSketch::ProcessResult PeerTemplateSketch::Process(
+    int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
+    std::span<const uint8_t> shortid_bytes,
+    std::span<const LocalTemplate::Sketch> sketches)
+{
+    // Try shortid fallback first using sketches already prepared at round m_sketch_level = (round-1).
+    // GetShortIdBytes(round, mask) groups shortids at that same granularity.
+    if (!shortid_bytes.empty()) {
+        ProcessShortidFallback(shortid_bytes, shortidmask_sent);
+    }
+
+    if (m_bucket_resolved.Count() != TOTAL_BUCKETS && round >= 1 && round <= 3) {
+        // Write provider sketches into their slots, then split all three arrays.
+        m_sketches->ProviderDeser(round, sketchmask_sent, sketches);
+        m_sketches->PrepareRound(round);
+        m_sketch_level = round;
+        TryDecodeGroups();
+    }
+
+    bool all_resolved = (m_bucket_resolved.Count() == TOTAL_BUCKETS);
+    if (all_resolved) FinalizeShortids();
+    BucketMask shortidmask = BucketMask::Fill(TOTAL_BUCKETS) - m_bucket_resolved; // unresolved buckets → request shortids
+
+    // Compute sketchmask for next round: groups at current level with unresolved buckets
+    GroupMask sketchmask;
+    if (!all_resolved && round < 3) {
+        const int n = 4 << m_sketch_level;
+        for (int gi = 0; gi < n; ++gi) {
+            for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                if (!m_bucket_resolved[b]) {
+                    sketchmask.Set(gi);
+                    break;
+                }
+            }
+        }
+    }
+
+    return {all_resolved, shortidmask, sketchmask};
+}
+
 TemplateInfo TemplateManager::GetInfo() const
 {
     TemplateInfo info;
