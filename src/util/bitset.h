@@ -8,6 +8,7 @@
 #include <util/check.h>
 #include <util/overflow.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -66,6 +67,8 @@ class IntBitSet
     static_assert(std::is_integral_v<I> && std::is_unsigned_v<I> && std::numeric_limits<I>::radix == 2);
     /** The maximum number of bits this bitset supports. */
     static constexpr unsigned MAX_SIZE = std::numeric_limits<I>::digits;
+    /** Number of uint32_t's needed to represent an I */
+    static constexpr size_t NUM_U32S{(MAX_SIZE + 31) / 32};
     /** Integer whose bits represent this bitset. */
     I m_val;
     /** Internal constructor with a given integer as contents. */
@@ -222,6 +225,18 @@ public:
     constexpr bool IsSubsetOf(const IntBitSet& a) const noexcept { return (m_val & ~a.m_val) == 0; }
     /** Swap two bitsets. */
     friend constexpr void swap(IntBitSet& a, IntBitSet& b) noexcept { std::swap(a.m_val, b.m_val); }
+    /** Serialize to uint32_t words (little-endian), filling as many as fit in u32s. */
+
+    void ToUint32(std::span<uint32_t> u32s) const noexcept {
+        for (std::size_t i = 0; i < std::min(u32s.size(), NUM_U32S); ++i)
+            u32s[i] = static_cast<uint32_t>(m_val >> (32 * i));
+    }
+    /** Deserialize from uint32_t words (little-endian), reading as many as are in u32s. */
+    void FromUint32(std::span<const uint32_t> u32s) noexcept {
+        m_val = 0;
+        for (std::size_t i = 0; i < std::min(u32s.size(), NUM_U32S); ++i)
+            m_val |= I(u32s[i]) << (32 * i);
+    }
 };
 
 /** A bitset implementation backed by N integers of type I. */
@@ -513,6 +528,26 @@ public:
     friend constexpr bool operator==(const MultiIntBitSet& a, const MultiIntBitSet& b) noexcept = default;
     /** Swap two bitsets. */
     friend constexpr void swap(MultiIntBitSet& a, MultiIntBitSet& b) noexcept { std::swap(a.m_val, b.m_val); }
+    /** Serialize to uint32_t words (little-endian), filling as many as fit in u32s. */
+    void ToUint32(std::span<uint32_t> u32s) const noexcept {
+        constexpr std::size_t WPL = (LIMB_BITS + 31) / 32;
+        for (unsigned i = 0; i < N; ++i)
+            for (std::size_t j = 0; j < WPL; ++j) {
+                if (i * WPL + j >= u32s.size()) return;
+                u32s[i * WPL + j] = static_cast<uint32_t>(m_val[i] >> (32 * j));
+            }
+    }
+    /** Deserialize from uint32_t words (little-endian), reading as many as are in u32s. */
+    void FromUint32(std::span<const uint32_t> u32s) noexcept {
+        constexpr std::size_t WPL = (LIMB_BITS + 31) / 32;
+        for (unsigned i = 0; i < N; ++i) {
+            m_val[i] = 0;
+            for (std::size_t j = 0; j < WPL; ++j) {
+                if (i * WPL + j >= u32s.size()) return;
+                m_val[i] |= I(u32s[i * WPL + j]) << (32 * j);
+            }
+        }
+    }
 };
 
 } // namespace bitset_detail
