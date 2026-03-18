@@ -125,6 +125,7 @@ add_executable(fuzz
   string.cpp
   strprintf.cpp
   system.cpp
+  templateman.cpp
   threadpool.cpp
   timeoffsets.cpp
   torcontrol.cpp
