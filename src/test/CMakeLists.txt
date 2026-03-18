@@ -111,6 +111,7 @@ add_executable(test_bitcoin
   sync_tests.cpp
   system_ram_tests.cpp
   system_tests.cpp
+  templateman_tests.cpp
   testnet4_miner_tests.cpp
   threadpool_tests.cpp
   timeoffsets_tests.cpp
