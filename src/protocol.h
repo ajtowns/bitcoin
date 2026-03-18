@@ -268,6 +268,22 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  * BIP 434 Peer feature negotiation
  */
 inline constexpr const char* FEATURE{"feature"};
+/**
+ * BIN-2025-0002 template request
+ */
+inline constexpr const char* GETTMPLT{"gettmplt"};
+/**
+ * BIN-2025-0002 template response
+ */
+inline constexpr const char* TMPLT{"tmplt"};
+/**
+ * BIN-2025-0002 request template transactions by position
+ */
+inline constexpr const char* GETTMPLTTXN{"gettmplttxn"};
+/**
+ * BIN-2025-0002 template transaction response (chunked)
+ */
+inline constexpr const char* TMPLTTXN{"tmplttxn"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -308,13 +324,18 @@ inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
+    NetMsgType::GETTMPLT,
+    NetMsgType::TMPLT,
+    NetMsgType::GETTMPLTTXN,
+    NetMsgType::TMPLTTXN,
 })};
 
 inline constexpr size_t MAX_FEATUREID_LENGTH{80};
 inline constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
-//inline constexpr std::string_view FOO{"BIP-FOO"};
+/** BIN-2025-0002 template sharing protocol (gettmplt) */
+inline constexpr std::string_view BIN25_2{"BIN25-2.2"};
 }
 
 /** nServices flags */
