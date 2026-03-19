@@ -182,11 +182,10 @@ public:
  */
 class TemplateTxnsSelection
 {
-protected:
+public:
     static constexpr unsigned CHUNK_SIZE{1024};
     std::vector<BitSet<CHUNK_SIZE>> m_positions;
 
-public:
     virtual ~TemplateTxnsSelection() = default;
 
     size_t Count() const;
@@ -328,6 +327,26 @@ private:
     void FinalizeShortids();
 };
 
+/** Receiver-side reconstruction state after sketch reconciliation completes.
+ *
+ *  m_txs holds the full peer template in position (shortid-sorted) order.
+ *  Positions that couldn't be matched locally are pool.end() until filled
+ *  by incoming tmplttxn data.
+ */
+class PeerTemplatePartial : public Template {
+public:
+    TemplateTxnsSelection m_missing; //!< bitset of unfilled positions
+    size_t m_filled{0};              //!< number of positions filled so far
+
+    /** Fill the next missing positions using the provided txrefs (in position order).
+     *  Returns true if all positions are now filled. */
+    bool Fill(std::vector<TemplateTxRef>&& refs);
+
+    /** Check whether all positions are filled and the hash matches.
+     *  Returns true on hash match (ready to promote to PeerTemplate). */
+    bool CompletedSuccessfully() const;
+};
+
 struct TemplateInfo {
     size_t num_templates{0};
     size_t pool_size{0};
@@ -416,6 +435,11 @@ public:
     size_t PoolSize() const { return m_pool.size(); }
 
     TemplateInfo GetInfo() const;
+
+    /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
+     *  Releases pool refs for local txs absent from the peer's template.
+     *  Returns nullopt on shortid collision. */
+    std::optional<PeerTemplatePartial> MakePeerTemplatePartial(PeerTemplateSketch&& sketch);
 };
 
 } // namespace node
