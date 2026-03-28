@@ -22,10 +22,12 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 class CBlockIndex;
 class FastRandomContext;
+typedef int64_t NodeId;
 
 namespace node {
 
@@ -122,6 +124,8 @@ public:
 /** A locally-generated block template for the sendtemplate protocol. */
 class LocalTemplate : public Template {
 public:
+    /* m_txs is ordered by shortid, based on m_nonce and m_tip */
+
     NodeClock::time_point m_time; //!< generation time
     uint64_t m_nonce;             //!< template-level nonce
 
@@ -142,7 +146,7 @@ public:
      *  Caller filters by mask before sending if not all sketches in a round are needed. */
     std::array<Sketch, TOTAL_BUCKETS> sketches;
 
-    /** All short IDs; in parallel order to m_txs (which should be sorted by shortid). */
+    /** All short IDs; in parallel order to m_txs */
     std::vector<uint64_t> shortids;
 
     /** Compute and store all sketch levels from shortids. Call after shortids is populated. */
@@ -244,6 +248,11 @@ public:
 
 /** A completed, hash-verified template received from a peer. */
 class PeerTemplate : public Template {
+public:
+    /* m_txs is ordered by shortid, calculated at construction time */
+
+    NodeId m_nodeid; //!< peer that sent us this template
+    NodeClock::time_point m_time; //!< received time
 };
 
 /** Receiver-side sketch reconciliation state for a peer template request.
@@ -256,15 +265,17 @@ class PeerTemplate : public Template {
  */
 class PeerTemplateSketch : public Template {
 public:
-    uint256 m_tip_hash;   //!< peer's tip hash (for ShortIDHasher)
-    uint64_t m_nonce{0};  //!< peer's nonce
-    uint256 m_basis_hash; //!< basis hint for next gettmplt cycle
-
-    /** Shortids parallel to m_txs.
-     *  [0 .. m_basis_count-1]: from retained basis positions, sorted by shortid.
-     *  [m_basis_count .. end]:  from local pool scan (excl. basis), sorted by shortid. */
-    std::vector<uint64_t> shortids;
+    /* m_txs is constructed from the basis txs followed by local txs
+     *  [0 .. m_basis_count-1]: from retained basis positions
+     *  [m_basis_count .. end]:  from local pool scan (excl. basis)
+     * ordering of txs is otherwise arbitrary
+     */
     size_t m_basis_count{0};
+
+    uint64_t m_nonce{0};  //!< peer's nonce
+
+    /** Shortids parallel to m_txs. */
+    std::vector<uint64_t> m_shortids;
 
     /** Bitmask: bit b set once bucket b is reconciled. */
     BucketMask m_bucket_resolved;
@@ -289,22 +300,28 @@ public:
 
     PeerTemplateSketch();
     ~PeerTemplateSketch();
-
-    /** Initialise from separately-sorted basis and local (shortid, txref) pairs and the
-     *  provider's combined (round-0) sketches.  Returns true if all buckets resolved. */
-    bool Init(std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs,
-              std::vector<std::pair<uint64_t, TemplateTxRef>> local_pairs,
-              std::span<const LocalTemplate::Sketch> combined_sketches);
+    PeerTemplateSketch(PeerTemplateSketch&&) = default;
+    PeerTemplateSketch& operator=(PeerTemplateSketch&&) = default;
 
     struct ProcessResult {
         bool resolved;          //!< all TOTAL_BUCKETS buckets reconciled
-        BucketMask shortidmask; //!< unresolved buckets (for round-4 shortid fallback)
-        GroupMask sketchmask;   //!< groups still needing sketches at the next round
+        GroupMask shortidmask;  //!< resolved groups to request shortids for
+        GroupMask sketchmask;   //!< unresolved groups to request sketches for
     };
+
+    /** Initialise sketch reconciliation.
+     *  txs[0..basis_count) are basis txs, txs[basis_count..] are local txs.
+     *  shortids is parallel to txs.
+     *  May throw on malformed sketch data. */
+    ProcessResult Init(std::vector<TemplateTxRef>&& txs,
+                       std::vector<uint64_t>&& shortids,
+                       size_t basis_count,
+                       std::span<const LocalTemplate::Sketch> combined_sketches);
 
     /** Process incoming data for rounds 1-4.
      *  shortidmask_sent: the shortidmask field from the gettmplt we sent (groups we requested shortids for).
-     *  sketchmask_sent: the sketchmask field from the gettmplt we sent (groups we requested sketches for). */
+     *  sketchmask_sent: the sketchmask field from the gettmplt we sent (groups we requested sketches for).
+     *  May throw on malformed shortid/sketch data. */
     ProcessResult Process(int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
                           std::span<const uint8_t> shortid_bytes,
                           std::span<const LocalTemplate::Sketch> sketches);
@@ -318,12 +335,12 @@ private:
      *  Returns true when all buckets are resolved. */
     bool TryDecodeGroups();
 
-    /** Round-4 shortid fallback: parse shortid_bytes, diff against our shortids. */
+    /** Round-4 shortid fallback: parse shortid_bytes, diff against our m_shortids. */
     void ProcessShortidFallback(std::span<const uint8_t> shortid_bytes, GroupMask shortidmask);
 
-    /** Once all buckets are resolved, update shortids to reflect the provider's set.
+    /** Once all buckets are resolved, update m_shortids to reflect the provider's set.
      *  Local shortids absent from the provider are zeroed; provider-only shortids are appended.
-     *  After this call, the non-zero entries of shortids equal the provider's shortid set. */
+     *  After this call, the non-zero entries of m_shortids equal the provider's shortid set. */
     void FinalizeShortids();
 };
 
@@ -335,6 +352,8 @@ private:
  */
 class PeerTemplatePartial : public Template {
 public:
+    /* m_txs ordered by shortid, with holes (nullptr) for missing txs */
+
     TemplateTxnsSelection m_missing; //!< bitset of unfilled positions
     size_t m_filled{0};              //!< number of positions filled so far
 
@@ -365,6 +384,17 @@ struct TemplateInfo {
  */
 class TemplateManager
 {
+public:
+    enum class TmpltState { ERROR, UNRESOLVED, NEEDS_TXS, DONE };
+
+    struct TmpltResult {
+        TmpltState state;
+        uint256 hash;                    //!< template hash
+        GroupMask shortidmask, sketchmask; //!< only meaningful when state == UNRESOLVED
+        std::vector<uint8_t> missing_gr; //!< GR-encoded missing positions; only when state == NEEDS_TXS
+    };
+
+private:
     TemplateTxSet m_pool;
 
     /**
@@ -382,6 +412,29 @@ class TemplateManager
 
     /** Next time to attempt template generation; min() triggers immediately. */
     NodeClock::time_point m_next_gen{NodeClock::time_point::min()};
+
+    /** Per-peer reconciliation state.
+     *  monostate = gettmplt n=0 sent, awaiting tmplt n=0.
+     *  PeerTemplateSketch = reconciling (rounds 1-4).
+     *  PeerTemplatePartial = filling missing txs via tmplttxn. */
+    using PeerReconcileMap = std::unordered_map<NodeId, std::variant<std::monostate, PeerTemplateSketch, PeerTemplatePartial>>;
+    PeerReconcileMap m_peer_reconcile;
+
+    /** Completed peer templates (FIFO). */
+    std::deque<PeerTemplate> m_peer_templates;
+
+    /** Most recent completed template per peer (pointer into m_peer_templates). */
+    std::unordered_map<NodeId, const PeerTemplate*> m_peer_template_cache;
+
+    /** Replace a peer's reconciliation state, releasing pool refs from the old value. */
+    template <typename T>
+    PeerReconcileMap::iterator SetPeerReconcile(NodeId nodeid, T&& new_value);
+
+    /** Handle a sketch round result: if resolved, transition to partial/complete;
+     *  if not, store masks and return UNRESOLVED.
+     *  Iterator must point to a PeerTemplateSketch entry. May erase it. */
+    TmpltResult CompleteSketchRound(PeerReconcileMap::iterator it,
+                                    const PeerTemplateSketch::ProcessResult& pr);
 
     /** Find transaction in the pool, adding if necessary. Bumps refcount. */
     TemplateTxRef AddTx(CTransactionRef tx);
@@ -435,6 +488,41 @@ public:
     size_t PoolSize() const { return m_pool.size(); }
 
     TemplateInfo GetInfo() const;
+
+    // -- Receiver-side methods (called from net_processing) --
+
+    /** Mark that we've sent gettmplt n=0 and are awaiting the response.
+     *  Releases any in-progress reconciliation state for this peer. */
+    void WaitingForPeerSketch(NodeId nodeid);
+
+    /** Start a new peer sketch from a round-0 tmplt message.
+     *  Scans mempool+pool for matching txs, initialises PeerTemplateSketch.
+     *  Returns UNRESOLVED (with masks for gettmplt n=1), NEEDS_TXS, or DONE. */
+    TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
+                               uint64_t nonce, uint256 basis_hash,
+                               std::span<const uint8_t> basis_delta,
+                               std::span<const LocalTemplate::Sketch> sketches);
+
+    /** Feed round 1-4 data into an existing peer sketch.
+     *  shortidmask/sketchmask are parsed from the peer's tmplt message; must partition
+     *  unresolved groups at the current level (no overlap, full coverage).
+     *  Returns UNRESOLVED (with masks for the next round), NEEDS_TXS, DONE, or ERROR. */
+    TmpltResult UpdatePeerSketch(NodeId nodeid, uint256 templatehash, int round,
+                                 GroupMask shortidmask, GroupMask sketchmask,
+                                 std::span<const uint8_t> shortid_bytes,
+                                 std::span<const LocalTemplate::Sketch> sketches);
+
+    /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
+     *  On completion, verifies hash and promotes to PeerTemplate.
+     *  Returns false on error (bad data or unexpected state). */
+    bool FillPeerPartial(NodeId nodeid, std::vector<CTransactionRef> txs);
+
+    /** Return the hash of the most recent completed template from this peer,
+     *  for use as a basis hint in the next gettmplt n=0. */
+    uint256 GetLastPeerTemplateHash(NodeId nodeid);
+
+    /** Clean up all state for a disconnected peer. */
+    void ForgetPeer(NodeId nodeid);
 
     /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
      *  Releases pool refs for local txs absent from the peer's template.

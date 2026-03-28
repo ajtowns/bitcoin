@@ -8,19 +8,21 @@ void MaybeRequestTemplate(CNode& node, Peer& peer)
     MakeAndPushMessage(node, NetMsgType::GETTMPLT, 0, basis_hash);
     peer.m_next_gettmplt = NodeClock::now() + 2min;
 
-    // clear previous incomplete request; set new request as monostate?
+    // clear previous incomplete request; set new request as monostate
+    WITH_LOCK(templateman.ResetReconciliation());
 }
 
 // TMPLT handler
 void ProcessTmpltRound0(node, peer, hash, tip_hash, basis_hash, nonce, basis_delta, sketches)
 {
-    // if previous request is not monostate, throw
 
     const CBlockIndex* tip = WITH_LOCK(cs_main, return LookupBlockIndex(tip_hash));
 
     LOCK(m_template_mutex);
-    auto result = templateman.InitPeerSketch(node.GetId(), hash, tip, nonce,
-                                                basis_hash, basis_delta, sketches);
+    auto req = templateman.GetReconciliation<std::monostate>(nodeid);
+    if (!req) throw; // if previous request is not monostate, throw
+    auto result = templateman.InitPeerSketch(req, hash, tip, nonce,
+                                             basis_hash, basis_delta, sketches);
     HandleTmpltResult(node, peer, round, result);
 }
 
@@ -77,8 +79,8 @@ public:
     struct TmpltResult {
         TmpltState state;
         uint256 hash; // template hash
-        GroupMask shortidmask, sketchmask; // only if state == UNRESOLVED
-        vector<uint8_t> missing_gr; // only if state == NEEDS_TXS
+        GroupMask shortidmask{}, sketchmask{}; // only if state == UNRESOLVED
+        vector<uint8_t> missing_gr{}; // only if state == NEEDS_TXS
     };
 
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 tiphash, uint64_t nonce, uint256 basis_hash, vector<uint8_t> basis_delta, vector<uint8_t> sketches);

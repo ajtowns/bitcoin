@@ -47,15 +47,17 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
     std::sort(basis_sids.begin(), basis_sids.end());
     std::sort(local_sids.begin(), local_sids.end());
 
-    std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs, local_pairs;
-    for (auto s : basis_sids) basis_pairs.push_back({s, pool.end()});
-    for (auto s : local_sids) local_pairs.push_back({s, pool.end()});
+    std::vector<TemplateTxRef> txs;
+    std::vector<uint64_t> sids;
+    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    size_t basis_count = txs.size();
+    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
 
     PeerTemplateSketch sketch;
 
     auto reconstruct = [&](int round) {
         std::vector<uint64_t> result;
-        for (uint64_t sid : sketch.shortids) {
+        for (uint64_t sid : sketch.m_shortids) {
             if (sid != 0) result.push_back(sid);
         }
         std::sort(result.begin(), result.end());
@@ -63,8 +65,8 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
         BOOST_CHECK(result == provider.shortids);
     };
 
-    if (sketch.Init(std::move(basis_pairs), std::move(local_pairs),
-                    provider.GetSketches(0))) { reconstruct(0); return; }
+    if (sketch.Init(std::move(txs), std::move(sids), basis_count,
+                    provider.GetSketches(0)).resolved) { reconstruct(0); return; }
 
     for (int round = 1; round <= 4; ++round) {
         std::vector<uint8_t> shortid_bytes;
@@ -107,7 +109,7 @@ BOOST_AUTO_TEST_CASE(sketch_shortid_early_round1)
     TemplateTxSet pool;
     PeerTemplateSketch sketch;
 
-    BOOST_REQUIRE(!sketch.Init({}, {}, provider.GetSketches(0)));
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Send shortid bytes at round 1 (combined-level outer shortids) before any PrepareRound.
     auto shortid_bytes = provider.GetShortIdBytes(1, GroupMask::Fill(TOTAL_BUCKETS));
@@ -115,7 +117,7 @@ BOOST_AUTO_TEST_CASE(sketch_shortid_early_round1)
     BOOST_REQUIRE(res);
 
     std::vector<uint64_t> result;
-    for (uint64_t sid : sketch.shortids) {
+    for (uint64_t sid : sketch.m_shortids) {
         if (sid != 0) result.push_back(sid);
     }
     std::sort(result.begin(), result.end());
@@ -179,16 +181,18 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_decode_mask)
     std::sort(basis_sids.begin(), basis_sids.end());
     std::sort(local_sids.begin(), local_sids.end());
 
-    std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs, local_pairs;
-    for (auto s : basis_sids) basis_pairs.push_back({s, pool.end()});
-    for (auto s : local_sids) local_pairs.push_back({s, pool.end()});
+    std::vector<TemplateTxRef> txs;
+    std::vector<uint64_t> sids;
+    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    size_t basis_count = txs.size();
+    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
 
     PeerTemplateSketch sketch;
 
     // Round 0 should fail: per stride-4 group diff = 72 > 64 (SKETCH_CAPACITY).
     // Each stride-4 group has 4 even buckets (diff 9 each = 36) + 4 odd buckets (diff 9 each = 36) = 72.
-    BOOST_REQUIRE(!sketch.Init(std::move(basis_pairs), std::move(local_pairs),
-                               provider.GetSketches(0)));
+    BOOST_REQUIRE(!sketch.Init(std::move(txs), std::move(sids), basis_count,
+                               provider.GetSketches(0)).resolved);
 
     // Round 1 should resolve: each stride-8 group has diff 36 ≤ 64.
     // Even stride-8 groups resolve via basis-only; odd stride-8 groups via basis+local.
@@ -209,7 +213,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_decode_mask)
 
     // Verify final shortids match provider.
     std::vector<uint64_t> result;
-    for (uint64_t sid : sketch.shortids) {
+    for (uint64_t sid : sketch.m_shortids) {
         if (sid != 0) result.push_back(sid);
     }
     std::sort(result.begin(), result.end());
@@ -243,7 +247,7 @@ BOOST_AUTO_TEST_CASE(sketch_selective_masks)
 
     TemplateTxSet pool;
     PeerTemplateSketch sketch;
-    BOOST_REQUIRE(!sketch.Init({}, {}, provider.GetSketches(0)));
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Round 1: stride-8 even groups resolve, odd don't.
     auto [res1, shortidmask1, sketchmask1] = sketch.Process(
@@ -269,7 +273,7 @@ BOOST_AUTO_TEST_CASE(sketch_selective_masks)
     BOOST_CHECK(sketchmask2.None());
 
     std::vector<uint64_t> result;
-    for (uint64_t sid : sketch.shortids) {
+    for (uint64_t sid : sketch.m_shortids) {
         if (sid != 0) result.push_back(sid);
     }
     std::sort(result.begin(), result.end());
@@ -299,7 +303,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_shortid_and_sketch)
 
     TemplateTxSet pool;
     PeerTemplateSketch sketch;
-    BOOST_REQUIRE(!sketch.Init({}, {}, provider.GetSketches(0)));
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Request outer shortids only for the large groups (0,1); sketches for all.
     GroupMask shortidmask;
@@ -314,7 +318,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_shortid_and_sketch)
     BOOST_REQUIRE(res);
 
     std::vector<uint64_t> result;
-    for (uint64_t sid : sketch.shortids) {
+    for (uint64_t sid : sketch.m_shortids) {
         if (sid != 0) result.push_back(sid);
     }
     std::sort(result.begin(), result.end());

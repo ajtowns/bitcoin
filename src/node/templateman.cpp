@@ -17,7 +17,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <type_traits>
 #include <unordered_set>
+#include <variant>
 
 namespace node {
 
@@ -531,37 +533,32 @@ bool PeerTemplateSketch::TryDecodeGroups()
     return m_bucket_resolved.Count() == TOTAL_BUCKETS;
 }
 
-bool PeerTemplateSketch::Init(std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs,
-                               std::vector<std::pair<uint64_t, TemplateTxRef>> local_pairs,
-                               std::span<const LocalTemplate::Sketch> combined_sketches)
+PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
+    std::vector<TemplateTxRef>&& txs,
+    std::vector<uint64_t>&& shortids,
+    size_t basis_count,
+    std::span<const LocalTemplate::Sketch> combined_sketches)
 {
-    // Populate shortids and m_txs: basis segment [0..m_basis_count), then local
-    shortids.reserve(basis_pairs.size() + local_pairs.size());
-    m_txs.reserve(basis_pairs.size() + local_pairs.size());
-    for (auto& [sid, ref] : basis_pairs) {
-        shortids.push_back(sid);
-        m_txs.push_back(ref);
-    }
-    m_basis_count = basis_pairs.size();
-    for (auto& [sid, ref] : local_pairs) {
-        shortids.push_back(sid);
-        m_txs.push_back(ref);
-    }
+    m_txs = std::move(txs);
+    m_shortids = std::move(shortids);
+    m_basis_count = basis_count;
 
-    // Build per-bucket sketches from the two sorted segments
+    // Build per-bucket sketches
     m_sketches = std::make_unique<Sketches>();
     auto& sk = *m_sketches;
     for (size_t i = 0; i < m_basis_count; ++i) {
-        sk.m_basis_sketches[shortids[i] & (TOTAL_BUCKETS - 1)].Add(shortids[i]);
+        sk.m_basis_sketches[m_shortids[i] & (TOTAL_BUCKETS - 1)].Add(m_shortids[i]);
     }
-    for (size_t i = m_basis_count; i < shortids.size(); ++i) {
-        sk.m_local_sketches[shortids[i] & (TOTAL_BUCKETS - 1)].Add(shortids[i]);
+    for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
+        sk.m_local_sketches[m_shortids[i] & (TOTAL_BUCKETS - 1)].Add(m_shortids[i]);
     }
-    // Pre-merge basis into local so m_local_sketches holds basis+local;
-    // TryDecodeGroups can then use it directly without an extra Merge().
-    for (int b = 0; b < TOTAL_BUCKETS; ++b) {
-        sk.m_local_sketches[b].sketch.Merge(sk.m_basis_sketches[b].sketch);
-        sk.m_local_sketches[b].count += sk.m_basis_sketches[b].count;
+    if (m_basis_count > 0) {
+        // Pre-merge basis into local so m_local_sketches holds basis+local;
+        // TryDecodeGroups can then use it directly without an extra Merge().
+        for (int b = 0; b < TOTAL_BUCKETS; ++b) {
+            sk.m_local_sketches[b].sketch.Merge(sk.m_basis_sketches[b].sketch);
+            sk.m_local_sketches[b].count += sk.m_basis_sketches[b].count;
+        }
     }
     sk.InitialMerge();
 
@@ -570,8 +567,12 @@ bool PeerTemplateSketch::Init(std::vector<std::pair<uint64_t, TemplateTxRef>> ba
     m_sketch_level = 0;
 
     bool resolved = TryDecodeGroups();
-    if (resolved) FinalizeShortids();
-    return resolved;
+    if (resolved) {
+        FinalizeShortids();
+        return {true, {}, {}};
+    }
+    // After round 0, request sketches for all 4 groups.
+    return {false, {}, GroupMask::Fill(4)};
 }
 
 void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid_bytes,
@@ -651,21 +652,21 @@ void PeerTemplateSketch::FinalizeShortids()
     //  - basis+local: diff = (basis+local) Δ provider
     //      → local in diff means local NOT in provider (zero); local not in diff → keep
     std::unordered_set<uint64_t> diff_set(m_diff_shortids.begin(), m_diff_shortids.end());
-    std::unordered_set<uint64_t> our_set(shortids.begin(), shortids.end());
+    std::unordered_set<uint64_t> our_set(m_shortids.begin(), m_shortids.end());
 
-    for (size_t i = m_basis_count; i < shortids.size(); ++i) {
-        uint64_t sid = shortids[i];
+    for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
+        uint64_t sid = m_shortids[i];
         bool in_diff = diff_set.count(sid);
         bool in_provider = m_decoded_by_basis[sid & (TOTAL_BUCKETS - 1)] ? in_diff : !in_diff;
-        if (!in_provider) shortids[i] = 0;
+        if (!in_provider) m_shortids[i] = 0;
     }
 
     // Append provider shortids we don't have in our local/basis set
     for (uint64_t sid : m_diff_shortids) {
-        if (our_set.insert(sid).second) shortids.push_back(sid);
+        if (our_set.insert(sid).second) m_shortids.push_back(sid);
     }
     for (uint64_t sid : m_extra_shortids) {
-        if (our_set.insert(sid).second) shortids.push_back(sid);
+        if (our_set.insert(sid).second) m_shortids.push_back(sid);
     }
 }
 
@@ -722,6 +723,10 @@ bool PeerTemplatePartial::Fill(std::vector<TemplateTxRef>&& refs)
             ++m_filled;
         }
     }
+    // Append any excess refs so they're tracked (hash check will catch mismatches).
+    while (ref_it != refs.end()) {
+        m_txs.push_back(*ref_it++);
+    }
     return m_missing.empty();
 }
 
@@ -739,15 +744,15 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
     std::vector<std::pair<uint64_t, TemplateTxRef>> pairs;
     std::vector<TemplateTxRef> to_release;
     for (size_t i = 0; i < orig_size; ++i) {
-        if (sketch.shortids[i] != 0) {
-            pairs.emplace_back(sketch.shortids[i], sketch.m_txs[i]);
+        if (sketch.m_shortids[i] != 0) {
+            pairs.emplace_back(sketch.m_shortids[i], sketch.m_txs[i]);
         } else {
             to_release.push_back(sketch.m_txs[i]);
         }
     }
     // Provider-only shortids (appended beyond m_txs, no local ref).
-    for (size_t i = orig_size; i < sketch.shortids.size(); ++i) {
-        pairs.emplace_back(sketch.shortids[i], pool_end);
+    for (size_t i = orig_size; i < sketch.m_shortids.size(); ++i) {
+        pairs.emplace_back(sketch.m_shortids[i], pool_end);
     }
     RemoveTxs(std::move(to_release));
 
@@ -789,6 +794,229 @@ TemplateInfo TemplateManager::GetInfo() const
     info.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
     info.next_update = m_next_gen;
     return info;
+}
+
+/** Look up a peer's reconciliation state.
+ *  Returns {true, it} if the entry exists and holds type T;
+ *  {false, it} if it exists but holds a different type;
+ *  {false, end} if no entry. */
+template <typename T, typename Map>
+static std::pair<bool, typename Map::iterator> GetPeerRecState(Map& map, NodeId nodeid)
+{
+    auto it = map.find(nodeid);
+    if (it == map.end()) return {false, it};
+    return {std::holds_alternative<T>(it->second), it};
+}
+
+template <typename T>
+TemplateManager::PeerReconcileMap::iterator TemplateManager::SetPeerReconcile(NodeId nodeid, T&& new_value)
+{
+    auto [it, _] = m_peer_reconcile.try_emplace(nodeid);
+    std::visit([this](auto& old) {
+        if constexpr (!std::is_same_v<std::decay_t<decltype(old)>, std::monostate>) {
+            RemoveTxs(std::move(old.m_txs));
+        }
+    }, it->second);
+    it->second = std::forward<T>(new_value);
+    return it;
+}
+
+TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
+    PeerReconcileMap::iterator it,
+    const PeerTemplateSketch::ProcessResult& pr)
+{
+    NodeId nodeid = it->first;
+    auto& sketch = std::get<PeerTemplateSketch>(it->second);
+    const uint256 templatehash = sketch.m_hash;
+
+    if (!pr.resolved) {
+        // XXX store pr.shortidmask/pr.sketchmask on sketch for next round
+        return {TmpltState::UNRESOLVED, templatehash, pr.shortidmask, pr.sketchmask, {}};
+    }
+
+    auto partial = MakePeerTemplatePartial(std::move(sketch));
+    if (!partial) {
+        m_peer_reconcile.erase(it);
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+    if (partial->CompletedSuccessfully()) {
+        // All txs matched locally; promote directly.
+        PeerTemplate pt;
+        pt.m_txs = std::move(partial->m_txs);
+        pt.m_tip = partial->m_tip;
+        pt.m_hash = partial->m_hash;
+        pt.m_nodeid = nodeid;
+        pt.m_time = NodeClock::now();
+        m_peer_reconcile.erase(it);
+        m_peer_templates.push_back(std::move(pt));
+        m_peer_template_cache[nodeid] = &m_peer_templates.back();
+        return {TmpltState::DONE, templatehash, {}, {}, {}};
+    }
+    auto missing_gr = partial->m_missing.GREncode();
+    SetPeerReconcile(nodeid, std::move(*partial));
+    return {TmpltState::NEEDS_TXS, templatehash, {}, {}, std::move(missing_gr)};
+}
+
+void TemplateManager::WaitingForPeerSketch(NodeId nodeid)
+{
+    SetPeerReconcile(nodeid, std::monostate{});
+}
+
+TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
+    NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
+    uint64_t nonce, uint256 basis_hash,
+    std::span<const uint8_t> basis_delta,
+    std::span<const LocalTemplate::Sketch> sketches)
+{
+    // Must be in monostate (awaiting round-0 response).
+    auto [is_mono, it] = GetPeerRecState<std::monostate>(m_peer_reconcile, nodeid);
+    if (!is_mono) {
+        if (it != m_peer_reconcile.end()) m_peer_reconcile.erase(it);
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+
+    const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
+    ShortIDHasher hasher(tip_hash, nonce);
+
+    // Build txs and shortids arrays: basis segment then local.
+    std::unordered_set<const CTransaction*> basis_tx_set;
+    std::vector<TemplateTxRef> txs;
+    std::vector<uint64_t> shortids;
+    size_t basis_count = 0;
+
+    if (!basis_hash.IsNull()) {
+        auto cache_it = m_peer_template_cache.find(nodeid);
+        if (cache_it != m_peer_template_cache.end() && cache_it->second->m_hash == basis_hash) {
+            // null basis_hash, missing basis hash and incorrect basis hash are all treated the same
+            const PeerTemplate& basis = *cache_it->second;
+            TemplateTxnsSelection sel;
+            try {
+                sel.GRDecode(basis_delta);
+            } catch (...) {
+                // sending corrupt shortid data suggests sketches might be corrupt too,
+                // so don't try to recover automatically
+                return {TmpltState::ERROR, templatehash, {}, {}, {}};
+            }
+            txs.reserve(sel.Count());
+            shortids.reserve(sel.Count());
+            for (size_t chunk_idx = 0; chunk_idx < sel.m_positions.size(); ++chunk_idx) {
+                for (unsigned bit : sel.m_positions[chunk_idx]) {
+                    uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
+                    if (pos >= basis.m_txs.size()) {
+                        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+                    }
+                    const auto& ref = basis.m_txs[pos];
+                    ++ref->num_templates;
+                    shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
+                    txs.push_back(ref);
+                    basis_tx_set.insert(ref->tx.get());
+                }
+            }
+        }
+    }
+    basis_count = txs.size();
+
+    // Append local txs from our most recent local template, excluding basis txs.
+    if (!m_templates.empty()) {
+        const auto& local_tmpl = m_templates.back();
+        txs.reserve(basis_count + local_tmpl.m_txs.size());
+        shortids.reserve(basis_count + local_tmpl.m_txs.size());
+        for (const auto& ref : local_tmpl.m_txs) {
+            if (basis_tx_set.count(ref->tx.get())) continue;
+            ++ref->num_templates;
+            shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
+            txs.push_back(ref);
+        }
+    }
+
+    // Initialise the sketch and store it in m_peer_reconcile.
+    PeerTemplateSketch sketch;
+    sketch.m_hash = templatehash;
+    sketch.m_tip = tip;
+    sketch.m_nonce = nonce;
+
+    PeerTemplateSketch::ProcessResult pr;
+    try {
+        pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches);
+    } catch (...) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+    auto rec_it = SetPeerReconcile(nodeid, std::move(sketch));
+    return CompleteSketchRound(rec_it, pr);
+}
+
+TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
+    NodeId nodeid, uint256 templatehash, int round,
+    GroupMask shortidmask, GroupMask sketchmask,
+    std::span<const uint8_t> shortid_bytes,
+    std::span<const LocalTemplate::Sketch> sketches)
+{
+    // Must be a PeerTemplateSketch with matching hash.
+    auto [is_sketch, it] = GetPeerRecState<PeerTemplateSketch>(m_peer_reconcile, nodeid);
+    if (!is_sketch) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+    auto& sketch = std::get<PeerTemplateSketch>(it->second);
+    if (sketch.m_hash != templatehash) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+
+    // Validate masks: must not overlap, and must cover exactly the unresolved groups.
+    if ((shortidmask & sketchmask).Any()) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+    // Compute resolved groups at current level: a group is resolved if all its buckets are.
+    const int num_groups = 4 << sketch.m_sketch_level;
+    GroupMask resolved_groups = GroupMask::Fill(num_groups) & sketch.m_bucket_resolved;
+    if (((shortidmask | sketchmask) ^ resolved_groups) != GroupMask::Fill(num_groups)) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+
+    PeerTemplateSketch::ProcessResult pr;
+    try {
+        pr = sketch.Process(round, shortidmask, sketchmask, shortid_bytes, sketches);
+    } catch (...) {
+        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+    }
+
+    return CompleteSketchRound(it, pr);
+}
+
+bool TemplateManager::FillPeerPartial(NodeId nodeid, std::vector<CTransactionRef> txs)
+{
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+    if (!is_partial) return false;
+    auto& partial = std::get<PeerTemplatePartial>(it->second);
+
+    auto refs = AddTxs(txs);
+    if (!partial.Fill(std::move(refs))) return true; // more data to come
+    if (!partial.CompletedSuccessfully()) return false; // hash mismatch
+
+    // Promote to completed PeerTemplate.
+    PeerTemplate pt;
+    pt.m_txs = std::move(partial.m_txs);
+    pt.m_tip = partial.m_tip;
+    pt.m_hash = partial.m_hash;
+    pt.m_nodeid = nodeid;
+    pt.m_time = NodeClock::now();
+    m_peer_reconcile.erase(it);
+    m_peer_templates.push_back(std::move(pt));
+    m_peer_template_cache[nodeid] = &m_peer_templates.back();
+    return true;
+}
+
+uint256 TemplateManager::GetLastPeerTemplateHash(NodeId nodeid)
+{
+    auto it = m_peer_template_cache.find(nodeid);
+    if (it == m_peer_template_cache.end()) return uint256::ZERO;
+    return it->second->m_hash;
+}
+
+void TemplateManager::ForgetPeer(NodeId nodeid)
+{
+    auto it = SetPeerReconcile(nodeid, std::monostate{});
+    m_peer_reconcile.erase(it);
+    m_peer_template_cache.erase(nodeid);
 }
 
 } // namespace node

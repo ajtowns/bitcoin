@@ -122,13 +122,15 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     provider.shortids = send_sids; // replace for GetShortIdBytes
 
     TemplateTxSet pool;
-    std::vector<std::pair<uint64_t, TemplateTxRef>> basis_pairs, local_pairs;
-    for (auto s : basis_sids) basis_pairs.push_back({s, pool.end()});
-    for (auto s : local_sids) local_pairs.push_back({s, pool.end()});
+    std::vector<TemplateTxRef> txs;
+    std::vector<uint64_t> sids;
+    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    size_t basis_count = txs.size();
+    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
 
     PeerTemplateSketch sketch;
-    bool resolved = sketch.Init(std::move(basis_pairs), std::move(local_pairs),
-                                provider.GetSketches(0));
+    auto [resolved, _sid, _sk] = sketch.Init(std::move(txs), std::move(sids), basis_count,
+                                             provider.GetSketches(0));
 
     // Use the masks returned by each Process() call for the next round's requests,
     // matching the real protocol flow and exercising the mask-filtering code paths.
@@ -147,7 +149,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     if (!resolved) return;
 
     std::vector<uint64_t> result;
-    for (uint64_t sid : sketch.shortids) {
+    for (uint64_t sid : sketch.m_shortids) {
         if (sid != 0) result.push_back(sid);
     }
     std::sort(result.begin(), result.end());
@@ -157,8 +159,8 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     if (result != prov_sids) {
         fprintf(stderr, "MISMATCH result.size=%zu prov_sids.size=%zu\n", result.size(), prov_sids.size());
         fprintf(stderr, "decoded_by_basis.Count()=%u basis_count=%zu\n", sketch.m_decoded_by_basis.Count(), sketch.m_basis_count);
-        fprintf(stderr, "shortids(%zu):", sketch.shortids.size());
-        for (uint64_t sid : sketch.shortids) fprintf(stderr, " %llu", (unsigned long long)sid);
+        fprintf(stderr, "shortids(%zu):", sketch.m_shortids.size());
+        for (uint64_t sid : sketch.m_shortids) fprintf(stderr, " %llu", (unsigned long long)sid);
         fprintf(stderr, "\nprov_sids(%zu):", prov_sids.size());
         for (uint64_t sid : prov_sids) fprintf(stderr, " %llu", (unsigned long long)sid);
         fprintf(stderr, "\nresult(%zu):", result.size());
