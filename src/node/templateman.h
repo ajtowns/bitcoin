@@ -514,8 +514,8 @@ public:
 
     /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
      *  On completion, verifies hash and promotes to PeerTemplate.
-     *  Returns false on error (bad data or unexpected state). */
-    bool FillPeerPartial(NodeId nodeid, std::vector<CTransactionRef> txs);
+     *  Returns false on error (hash mismatch, bad data, or unexpected state). */
+    bool FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs);
 
     /** Return the hash of the most recent completed template from this peer,
      *  for use as a basis hint in the next gettmplt n=0. */

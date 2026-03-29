@@ -420,12 +420,17 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
-    /** Pending template request state:
+    /** Pending template request state (provider side):
      *  - monostate: idle
      *  - Req: gettmplt round=0 received, waiting to send tmplt round=0 response
      *  - RequestedTemplateTxns: gettmplttxn received, draining tmplttxn chunks */
     std::variant<std::monostate, node::TemplateManager::Req, node::RequestedTemplateTxns> m_tmplt_request
         GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+
+    /** Next time to send gettmplt n=0 to this peer.
+     *  max() = never request (peer doesn't support BIN25-2 or is block-relay-only).
+     *  min() = request immediately. */
+    NodeClock::time_point m_next_gettmplt GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
 
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
@@ -597,7 +602,7 @@ public:
 
     /** Implement NetEventsInterface */
     void InitializeNode(const CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
-    void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
+    void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex, !m_template_mutex);
     bool HasAllDesirableServiceFlags(ServiceFlags services) const override;
     bool ProcessMessages(CNode& node, std::atomic<bool>& interrupt) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex, !m_template_mutex);
@@ -1201,6 +1206,14 @@ private:
 
     /** Generate a new template if the timer has fired; cleanup old ones. */
     void MaybeGenerateTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+
+    /** Send gettmplt n=0 to this peer if the timer has fired. */
+    void MaybeRequestTemplate(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+
+    /** Act on the result of InitPeerSketch/UpdatePeerSketch: send the next
+     *  gettmplt round, gettmplttxn, or disconnect on error. */
+    void ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, const node::TemplateManager::TmpltResult& result)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     /** Send pending tmplt round=0 response and drain any queued tmplttxn chunks. */
     void MaybeSendTemplateMessages(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
@@ -1838,6 +1851,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         m_txdownloadman.DisconnectedPeer(nodeid);
     }
     if (m_txreconciliation) m_txreconciliation->ForgetPeer(nodeid);
+    WITH_LOCK(m_template_mutex, m_templateman.ForgetPeer(nodeid));
     m_num_preferred_download_peers -= state->fPreferredDownload;
     m_peers_downloading_from -= (!state->vBlocksInFlight.empty());
     assert(m_peers_downloading_from >= 0);
@@ -4282,7 +4296,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
 
         if (feature_id == NetMsgFeature::BIN25_2) {
-            LogDebug(BCLog::GETTMPLT, "peer=%d advertised BIN25-2 (gettmplt) support", pfrom.GetId());
+            LogDebug(BCLog::GETTMPLT, "peer=%d (%s) advertised BIN25-2 (gettmplt) support", pfrom.GetId(), pfrom.ConnectionTypeAsString());
+            if (!pfrom.IsBlockOnlyConn()) {
+                peer.m_next_gettmplt = NodeClock::time_point::min();
+            }
             return;
         }
 
@@ -4384,10 +4401,8 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             uint32_t raw{0};
             vRecv >> hash >> raw;
             shortidmask.FromUint32(std::span{&raw, 1});
-            if (round >= 1 && round <= 3) {
-                vRecv >> raw;
-                sketchmask.FromUint32(std::span{&raw, 1});
-            }
+            vRecv >> raw;
+            sketchmask.FromUint32(std::span{&raw, 1});
 
             LOCK(m_template_mutex);
             const node::LocalTemplate* tmpl = m_templateman.GetLocalTemplate(hash);
@@ -4414,7 +4429,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             sketchmask.ToUint32(std::span{&sketchmask_raw, 1});
             LogDebug(BCLog::GETTMPLT, "Sending tmplt round=%d template=%s shortidmask=0x%08x sketchmask=0x%08x peer=%d",
                      round, hash.ToString(), shortidmask_raw, sketchmask_raw, pfrom.GetId());
-            MakeAndPushMessage(pfrom, NetMsgType::TMPLT, hash, round, shortid_bytes, sketches_to_send);
+            MakeAndPushMessage(pfrom, NetMsgType::TMPLT, hash, round, shortidmask_raw, sketchmask_raw, shortid_bytes, sketches_to_send);
         } else {
             LogDebug(BCLog::GETTMPLT, "Got gettmplt invalid round=%d, disconnecting %s",
                      round, pfrom.LogPeer());
@@ -4452,6 +4467,62 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         LogDebug(BCLog::GETTMPLT, "Queued %d tmplttxn positions for template %s peer=%d",
                  queued.Count(), hash.ToString(), pfrom.GetId());
         peer.m_tmplt_request = std::move(queued);
+        return;
+    }
+
+    if (msg_type == NetMsgType::TMPLT) {
+        uint256 hash;
+        uint8_t round;
+        vRecv >> hash >> round;
+
+        if (round == 0) {
+            uint256 tip_hash;
+            uint64_t nonce;
+            uint256 basis_hash;
+            std::vector<uint8_t> basis_delta;
+            std::vector<node::LocalTemplate::Sketch> sketches;
+            vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> sketches;
+
+            const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.m_blockman.LookupBlockIndex(tip_hash));
+            if (!tip) {
+                LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 with unknown tip %s peer=%d, ignoring",
+                         tip_hash.ToString(), pfrom.GetId());
+                return;
+            }
+
+            LOCK(m_template_mutex);
+            auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
+                                                       basis_hash, basis_delta, sketches);
+            ProcessTemplateSketchUpdate(pfrom, peer, 0, result);
+        } else if (round <= 4) {
+            uint32_t shortidmask_raw{0}, sketchmask_raw{0};
+            node::GroupMask shortidmask, sketchmask;
+            std::vector<uint8_t> shortid_bytes;
+            std::vector<node::LocalTemplate::Sketch> sketches;
+            vRecv >> shortidmask_raw >> sketchmask_raw >> shortid_bytes >> sketches;
+            shortidmask.FromUint32(std::span{&shortidmask_raw, 1});
+            sketchmask.FromUint32(std::span{&sketchmask_raw, 1});
+
+            LOCK(m_template_mutex);
+            auto result = m_templateman.UpdatePeerSketch(pfrom.GetId(), hash, round,
+                                                         shortidmask, sketchmask,
+                                                         shortid_bytes, sketches);
+            ProcessTemplateSketchUpdate(pfrom, peer, round, result);
+        } else {
+            LogDebug(BCLog::GETTMPLT, "Got tmplt invalid round=%d peer=%d, ignoring", round, pfrom.GetId());
+        }
+        return;
+    }
+
+    if (msg_type == NetMsgType::TMPLTTXN) {
+        uint256 hash;
+        std::vector<CTransactionRef> txs;
+        vRecv >> hash >> TX_WITH_WITNESS(txs);
+
+        LOCK(m_template_mutex);
+        if (!m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs))) {
+            LogDebug(BCLog::GETTMPLT, "Got tmplttxn for unexpected state peer=%d, ignoring", pfrom.GetId());
+        }
         return;
     }
 
@@ -5538,6 +5609,59 @@ void PeerManagerImpl::MaybeGenerateTemplate()
     m_templateman.TrimLocalTemplates(now - node::LOCAL_TEMPLATE_EXPIRY);
 
     LogDebug(BCLog::GETTMPLT, "Generated template %s (tip=%s, %d txs)", template_hash.ToString(), tip->GetBlockHash().ToString(), txs.size());
+}
+
+void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, const node::TemplateManager::TmpltResult& result)
+{
+    AssertLockHeld(g_msgproc_mutex);
+
+    using enum node::TemplateManager::TmpltState;
+    switch (result.state) {
+    case ERROR:
+        LogDebug(BCLog::GETTMPLT, "Template reconciliation error at round %d peer=%d, disabling requests", round, node.GetId());
+        peer.m_next_gettmplt = NodeClock::time_point::max();
+        return;
+    case UNRESOLVED:
+    {
+        assert(round < 4);
+        uint32_t shortidmask_raw{0}, sketchmask_raw{0};
+        result.shortidmask.ToUint32(std::span{&shortidmask_raw, 1});
+        result.sketchmask.ToUint32(std::span{&sketchmask_raw, 1});
+        LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=%d template=%s shortidmask=0x%08x sketchmask=0x%08x peer=%d",
+                 round + 1, result.hash.ToString(), shortidmask_raw, sketchmask_raw, node.GetId());
+        MakeAndPushMessage(node, NetMsgType::GETTMPLT, static_cast<uint8_t>(round + 1),
+                           result.hash, shortidmask_raw, sketchmask_raw);
+        return;
+    }
+    case NEEDS_TXS:
+        assert(!result.missing_gr.empty());
+        LogDebug(BCLog::GETTMPLT, "Sending gettmplttxn template=%s peer=%d", result.hash.ToString(), node.GetId());
+        MakeAndPushMessage(node, NetMsgType::GETTMPLTTXN, result.hash, result.missing_gr);
+        return;
+    case DONE:
+        LogDebug(BCLog::GETTMPLT, "Template %s reconciled with no missing txs, peer=%d", result.hash.ToString(), node.GetId());
+        return;
+    }
+}
+
+void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockNotHeld(m_template_mutex);
+
+    if (NodeClock::now() < peer.m_next_gettmplt) return;
+
+    peer.m_next_gettmplt = NodeClock::now() + 2min;
+
+    uint256 basis_hash;
+    {
+        LOCK(m_template_mutex);
+        m_templateman.WaitingForPeerSketch(node.GetId());
+        basis_hash = m_templateman.GetLastPeerTemplateHash(node.GetId());
+    }
+
+    MakeAndPushMessage(node, NetMsgType::GETTMPLT, uint8_t{0}, basis_hash);
+    LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=0 basis=%s peer=%d", basis_hash.ToString(), node.GetId());
 }
 
 void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
@@ -6820,6 +6944,7 @@ bool PeerManagerImpl::SendMessages(CNode& node)
             MakeAndPushMessage(node, NetMsgType::GETDATA, vGetData);
     } // release cs_main
     MaybeSendFeefilter(node, peer, current_time);
+    MaybeRequestTemplate(node, peer);
     MaybeSendTemplateMessages(node, peer);
     return true;
 }
