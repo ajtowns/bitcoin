@@ -982,11 +982,12 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     return CompleteSketchRound(it, pr);
 }
 
-bool TemplateManager::FillPeerPartial(NodeId nodeid, std::vector<CTransactionRef> txs)
+bool TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)
 {
     auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
     if (!is_partial) return false;
     auto& partial = std::get<PeerTemplatePartial>(it->second);
+    if (partial.m_hash != hash) return false;
 
     auto refs = AddTxs(txs);
     if (!partial.Fill(std::move(refs))) return true; // more data to come
