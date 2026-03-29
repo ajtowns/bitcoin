@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -374,6 +375,8 @@ struct TemplateInfo {
     int64_t latest_weight{0};
     std::chrono::seconds update_interval{};
     NodeClock::time_point next_update{};
+    size_t peer_templates{0};
+    std::map<int, std::vector<NodeId>> pending_peer_templates; //!< round (0=waiting, 1-4=sketch, 5=partial) -> nodeids
 };
 
 /**

@@ -793,6 +793,18 @@ TemplateInfo TemplateManager::GetInfo() const
     }
     info.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
     info.next_update = m_next_gen;
+    info.peer_templates = m_peer_templates.size();
+    for (const auto& [nodeid, state] : m_peer_reconcile) {
+        int round;
+        if (std::holds_alternative<std::monostate>(state)) {
+            round = 0;
+        } else if (auto* sketch = std::get_if<PeerTemplateSketch>(&state)) {
+            round = std::max(1, sketch->m_sketch_level + 1);
+        } else {
+            round = 5;
+        }
+        info.pending_peer_templates[round].push_back(nodeid);
+    }
     return info;
 }
 
