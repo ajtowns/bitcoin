@@ -56,6 +56,9 @@ public:
 /** How long to keep local templates before expiry. */
 static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
+/** How long to keep completed peer templates before expiry. */
+static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{180}};
+
 /** How frequently to update templates for compact block reconstruction. */
 static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
 
@@ -461,8 +464,8 @@ public:
     uint256 GenerateTemplate(NodeClock::time_point now, FastRandomContext& rng,
                           const CBlockIndex* tip, std::span<CTransactionRef> txs);
 
-    /** Trim local templates older than cutoff. */
-    void TrimLocalTemplates(NodeClock::time_point cutoff);
+    /** Trim expired local and peer templates. */
+    void TrimTemplates(NodeClock::time_point now);
 
     /** Look up a template by its hash. */
     const LocalTemplate* GetLocalTemplate(const uint256& hash) const;
@@ -492,6 +495,9 @@ public:
 
     TemplateInfo GetInfo() const;
 
+    /** Validate internal invariants. Asserts on failure. */
+    void Check() const;
+
     // -- Receiver-side methods (called from net_processing) --
 
     /** Mark that we've sent gettmplt n=0 and are awaiting the response.
@@ -517,8 +523,9 @@ public:
 
     /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
      *  On completion, verifies hash and promotes to PeerTemplate.
-     *  Returns false on error (hash mismatch, bad data, or unexpected state). */
-    bool FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs);
+     *  Returns {ERROR, 0} on unexpected state or hash mismatch,
+     *  {NEEDS_TXS, 0} if more data is needed, or {DONE, ntxs} on success. */
+    std::pair<TmpltState, uint32_t> FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs);
 
     /** Return the hash of the most recent completed template from this peer,
      *  for use as a basis hint in the next gettmplt n=0. */

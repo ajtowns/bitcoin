@@ -880,7 +880,7 @@ private:
      * - A txhash (txid or wtxid) in m_txrequest is not also in m_lazy_recent_confirmed_transactions.
      * - Each data structure's limits hold (m_orphanage max size, m_txrequest per-peer limits, etc).
      */
-    Mutex m_tx_download_mutex ACQUIRED_BEFORE(m_mempool.cs);
+    Mutex m_tx_download_mutex ACQUIRED_BEFORE(m_mempool.cs) ACQUIRED_BEFORE(cs_main);
     node::TxDownloadManager m_txdownloadman GUARDED_BY(m_tx_download_mutex);
 
     std::unique_ptr<TxReconciliationTracker> m_txreconciliation;
@@ -4520,8 +4520,20 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         vRecv >> hash >> TX_WITH_WITNESS(txs);
 
         LOCK(m_template_mutex);
-        if (!m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs))) {
+        auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs));
+        using enum node::TemplateManager::TmpltState;
+        switch (state) {
+        case ERROR:
             LogDebug(BCLog::GETTMPLT, "Got tmplttxn for unexpected state peer=%d, ignoring", pfrom.GetId());
+            break;
+        case NEEDS_TXS:
+            break;
+        case DONE:
+            LogDebug(BCLog::GETTMPLT, "Completed peer template %s (%d txs) peer=%d",
+                     hash.ToString(), ntxs, pfrom.GetId());
+            break;
+        default:
+            break;
         }
         return;
     }
@@ -5606,7 +5618,7 @@ void PeerManagerImpl::MaybeGenerateTemplate()
 
     LOCK(m_template_mutex);
     uint256 template_hash = m_templateman.GenerateTemplate(now, m_rng, tip, txs);
-    m_templateman.TrimLocalTemplates(now - node::LOCAL_TEMPLATE_EXPIRY);
+    m_templateman.TrimTemplates(now);
 
     LogDebug(BCLog::GETTMPLT, "Generated template %s (tip=%s, %d txs)", template_hash.ToString(), tip->GetBlockHash().ToString(), txs.size());
 }

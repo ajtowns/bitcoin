@@ -215,12 +215,25 @@ std::optional<bool> TemplateManager::ShouldGenerate(NodeClock::time_point now)
     return m_templates.empty();
 }
 
-void TemplateManager::TrimLocalTemplates(NodeClock::time_point cutoff)
+void TemplateManager::TrimTemplates(NodeClock::time_point now)
 {
+    auto cutoff = now - LOCAL_TEMPLATE_EXPIRY;
     while (!m_templates.empty() && m_templates.front().m_time < cutoff) {
         RemoveTxs(std::move(m_templates.front().m_txs));
         m_templates.pop_front();
     }
+    auto peer_cutoff = now - PEER_TEMPLATE_EXPIRY;
+    while (!m_peer_templates.empty() && m_peer_templates.front().m_time < peer_cutoff) {
+        auto& front = m_peer_templates.front();
+        // Only erase cache if it points to this entry (peer may have a newer one).
+        auto it = m_peer_template_cache.find(front.m_nodeid);
+        if (it != m_peer_template_cache.end() && it->second == &front) {
+            m_peer_template_cache.erase(it);
+        }
+        RemoveTxs(std::move(front.m_txs));
+        m_peer_templates.pop_front();
+    }
+    Check();
 }
 
 uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now, FastRandomContext& rng,
@@ -754,6 +767,8 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
     for (size_t i = orig_size; i < sketch.m_shortids.size(); ++i) {
         pairs.emplace_back(sketch.m_shortids[i], pool_end);
     }
+    // Clear sketch's refs — ownership is now split between pairs and to_release.
+    sketch.m_txs.clear();
     RemoveTxs(std::move(to_release));
 
     std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -806,6 +821,72 @@ TemplateInfo TemplateManager::GetInfo() const
         info.pending_peer_templates[round].push_back(nodeid);
     }
     return info;
+}
+
+void TemplateManager::Check() const
+{
+    const auto pool_end = m_pool.end();
+
+    // 1. m_scannable_txns <-> m_pool consistency
+    assert(m_scannable_txns.size() == m_pool.size());
+    for (auto ref = m_pool.begin(); ref != pool_end; ++ref) {
+        assert(ref->tx != nullptr);
+        assert(ref->scannable_idx < m_scannable_txns.size());
+        assert(m_scannable_txns[ref->scannable_idx].second == ref);
+    }
+    for (size_t i = 0; i < m_scannable_txns.size(); ++i) {
+        const auto& [wtxid, ref] = m_scannable_txns[i];
+        assert(ref != pool_end);
+        assert(ref->tx != nullptr);
+        assert(ref->tx->GetWitnessHash() == wtxid);
+        assert(ref->scannable_idx == i);
+    }
+
+    // 2. m_pool_weight consistency
+    int64_t total_weight = 0;
+    for (const auto& entry : m_pool) {
+        total_weight += entry.weight;
+        assert(entry.num_templates > 0);
+    }
+    assert(total_weight == m_pool_weight);
+
+    // 3. Count actual references to each pool entry
+    std::vector<uint32_t> refcounts;
+    refcounts.resize(m_pool.size());
+    auto count_refs = [&](const std::vector<TemplateTxRef>& txs) {
+        for (const auto& ref : txs) {
+            if (ref != pool_end) ++refcounts[ref->scannable_idx];
+        }
+    };
+
+    for (const auto& tmpl : m_templates) count_refs(tmpl.m_txs);
+    for (const auto& pt : m_peer_templates) count_refs(pt.m_txs);
+    for (const auto& [nodeid, state] : m_peer_reconcile) {
+        std::visit([&](const auto& s) {
+            if constexpr (!std::is_same_v<std::decay_t<decltype(s)>, std::monostate>) {
+                count_refs(s.m_txs);
+            }
+        }, state);
+    }
+
+    for (const auto& entry : m_pool) {
+        uint32_t expected = refcounts[entry.scannable_idx];
+        if (entry.num_templates != expected) {
+            fprintf(stderr, "CHECK FAILED: wtxid=%s num_templates=%u expected=%u\n",
+                    entry.tx->GetWitnessHash().ToString().c_str(), entry.num_templates, expected);
+            assert(false);
+        }
+    }
+
+    // 4. m_peer_template_cache validity
+    for (const auto& [nodeid, ptr] : m_peer_template_cache) {
+        bool found = false;
+        for (const auto& pt : m_peer_templates) {
+            if (&pt == ptr) { found = true; break; }
+        }
+        assert(found);
+        assert(ptr->m_nodeid == nodeid);
+    }
 }
 
 /** Look up a peer's reconciliation state.
@@ -883,7 +964,10 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     // Must be in monostate (awaiting round-0 response).
     auto [is_mono, it] = GetPeerRecState<std::monostate>(m_peer_reconcile, nodeid);
     if (!is_mono) {
-        if (it != m_peer_reconcile.end()) m_peer_reconcile.erase(it);
+        if (it != m_peer_reconcile.end()) {
+            SetPeerReconcile(nodeid, std::monostate{});
+            m_peer_reconcile.erase(nodeid);
+        }
         return {TmpltState::ERROR, templatehash, {}, {}, {}};
     }
 
@@ -915,6 +999,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
                 for (unsigned bit : sel.m_positions[chunk_idx]) {
                     uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
                     if (pos >= basis.m_txs.size()) {
+                        RemoveTxs(std::move(txs));
                         return {TmpltState::ERROR, templatehash, {}, {}, {}};
                     }
                     const auto& ref = basis.m_txs[pos];
@@ -951,6 +1036,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     try {
         pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches);
     } catch (...) {
+        RemoveTxs(std::move(sketch.m_txs));
         return {TmpltState::ERROR, templatehash, {}, {}, {}};
     }
     auto rec_it = SetPeerReconcile(nodeid, std::move(sketch));
@@ -994,18 +1080,19 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     return CompleteSketchRound(it, pr);
 }
 
-bool TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)
+std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)
 {
     auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
-    if (!is_partial) return false;
+    if (!is_partial) return {TmpltState::ERROR, 0};
     auto& partial = std::get<PeerTemplatePartial>(it->second);
-    if (partial.m_hash != hash) return false;
+    if (partial.m_hash != hash) return {TmpltState::ERROR, 0};
 
     auto refs = AddTxs(txs);
-    if (!partial.Fill(std::move(refs))) return true; // more data to come
-    if (!partial.CompletedSuccessfully()) return false; // hash mismatch
+    if (!partial.Fill(std::move(refs))) return {TmpltState::NEEDS_TXS, 0};
+    if (!partial.CompletedSuccessfully()) return {TmpltState::ERROR, 0};
 
     // Promote to completed PeerTemplate.
+    uint32_t ntxs = partial.m_txs.size();
     PeerTemplate pt;
     pt.m_txs = std::move(partial.m_txs);
     pt.m_tip = partial.m_tip;
@@ -1015,7 +1102,7 @@ bool TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::v
     m_peer_reconcile.erase(it);
     m_peer_templates.push_back(std::move(pt));
     m_peer_template_cache[nodeid] = &m_peer_templates.back();
-    return true;
+    return {TmpltState::DONE, ntxs};
 }
 
 uint256 TemplateManager::GetLastPeerTemplateHash(NodeId nodeid)
