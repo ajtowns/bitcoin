@@ -4496,15 +4496,29 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             std::vector<node::LocalTemplate::Sketch> sketches;
             vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> sketches;
 
+            const CBlockIndex* tip;
+            {
+                LOCK(cs_main);
+                UpdateBlockAvailability(pfrom.GetId(), tip_hash);
+                tip = m_chainman.m_blockman.LookupBlockIndex(tip_hash);
+                if (!tip) {
+                    LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 with unknown tip %s peer=%d, ignoring",
+                             tip_hash.ToString(), pfrom.GetId());
+                    return;
+                }
+                const CBlockIndex* our_tip = m_chainman.ActiveChain().Tip();
+                if (tip != our_tip
+                    && tip != our_tip->pprev
+                    && tip->pprev != our_tip
+                    && tip->pprev != our_tip->pprev) {
+                    LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 with stale tip %s (height %d, ours %d) peer=%d, ignoring",
+                             tip_hash.ToString(), tip->nHeight, our_tip->nHeight, pfrom.GetId());
+                    return;
+                }
+            }
+
             LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes sketches=%d peer=%d",
                      hash.ToString(), tip_hash.ToString(), basis_hash.ToString(), basis_delta.size(), sketches.size(), pfrom.GetId());
-
-            const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.m_blockman.LookupBlockIndex(tip_hash));
-            if (!tip) {
-                LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 with unknown tip %s peer=%d, ignoring",
-                         tip_hash.ToString(), pfrom.GetId());
-                return;
-            }
 
             LOCK(m_template_mutex);
             auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
