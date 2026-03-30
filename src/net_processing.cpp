@@ -2196,6 +2196,7 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_txdownloadman{node::TxDownloadOptions{pool, opts.deterministic_rng}},
       m_warnings{warnings},
       m_opts{opts},
+      m_templateman{opts.deterministic_rng},
       m_inbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/1.0),
       m_outbound_inv_bucket(/*rate=*/m_opts.tx_send_rate, /*mult=*/OUTBOUND_INVENTORY_BUCKET_MULTIPLIER)
 {
@@ -5644,7 +5645,7 @@ void PeerManagerImpl::MaybeGenerateTemplate()
     const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.ActiveChain().Tip());
 
     LOCK(m_template_mutex);
-    uint256 template_hash = m_templateman.GenerateTemplate(now, m_rng, tip, txs);
+    uint256 template_hash = m_templateman.GenerateTemplate(now, tip, txs);
     m_templateman.TrimTemplates(now);
 
     LogDebug(BCLog::GETTMPLT, "Generated template %s (tip=%s, %d txs)", template_hash.ToString(), tip->GetBlockHash().ToString(), txs.size());
@@ -5688,7 +5689,8 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
 
-    if (NodeClock::now() < peer.m_next_gettmplt) return;
+    const auto now = NodeClock::now();
+    if (now < peer.m_next_gettmplt) return;
 
     uint256 basis_hash;
     {
@@ -5696,14 +5698,13 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
         if (!m_templateman.HaveLocalTemplate()) {
             // Don't request until we've generated a local template — without one,
             // the sketch has no "local" side and reconciliation is all differences.
-            peer.m_next_gettmplt = NodeClock::now() + node::TEMPLATE_UPDATE_INTERVAL;
+            peer.m_next_gettmplt = m_templateman.Jitter(now, node::TEMPLATE_GENERATE_INTERVAL);
             return;
         }
         m_templateman.WaitingForPeerSketch(node.GetId());
         basis_hash = m_templateman.GetLastPeerTemplateHash(node.GetId());
+        peer.m_next_gettmplt = m_templateman.Jitter(now, node::TEMPLATE_REQUEST_INTERVAL);
     }
-
-    peer.m_next_gettmplt = NodeClock::now() + 2min;
 
     MakeAndPushMessage(node, NetMsgType::GETTMPLT, uint8_t{0}, basis_hash);
     LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=0 basis=%s peer=%d", basis_hash.ToString(), node.GetId());

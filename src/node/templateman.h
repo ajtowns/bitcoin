@@ -7,6 +7,7 @@
 
 #include <crypto/siphash.h>
 #include <primitives/transaction.h>
+#include <random.h>
 #include <serialize.h>
 #include <uint256.h>
 #include <util/bitset.h>
@@ -28,7 +29,6 @@
 
 class CBlockIndex;
 class CTxMemPool;
-class FastRandomContext;
 class GenTxid;
 typedef int64_t NodeId;
 
@@ -61,8 +61,11 @@ static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 /** How long to keep completed peer templates before expiry. */
 static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{180}};
 
-/** How frequently to update templates for compact block reconstruction. */
-static constexpr auto TEMPLATE_UPDATE_INTERVAL{std::chrono::seconds{30}};
+/** Average interval between local template generation cycles. */
+static constexpr auto TEMPLATE_GENERATE_INTERVAL{std::chrono::seconds{30}};
+
+/** Average interval between gettmplt requests to each peer. */
+static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::minutes{2}};
 
 /** Skip transactions that entered the mempool this recently (prefer relaying txs normally) */
 static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{10};
@@ -411,7 +414,7 @@ struct TemplateInfo {
     int64_t pool_weight{0};
     size_t latest_tx_count{0};
     int64_t latest_weight{0};
-    std::chrono::seconds update_interval{};
+    std::chrono::seconds generate_interval{};
     NodeClock::time_point next_update{};
     size_t peer_templates{0};
     std::map<int, std::vector<NodeId>> pending_peer_templates; //!< round (0=waiting, 1-4=sketch, 5=partial) -> nodeids
@@ -426,6 +429,8 @@ struct TemplateInfo {
 class TemplateManager
 {
 public:
+    explicit TemplateManager(bool deterministic = false) : m_rng{deterministic} {}
+
     enum class TmpltState { ERROR, UNRESOLVED, NEEDS_TXS, DONE };
 
     struct TmpltResult {
@@ -435,7 +440,15 @@ public:
         std::vector<uint8_t> missing_gr; //!< GR-encoded missing positions; only when state == NEEDS_TXS
     };
 
+    /** Return a jittered time point uniformly distributed in [now + avg/2, now + 3*avg/2). */
+    NodeClock::time_point Jitter(NodeClock::time_point now, std::chrono::seconds avg)
+    {
+        return m_rng.rand_uniform_delay(now + avg / 2, avg);
+    }
+
 private:
+    FastRandomContext m_rng;
+
     TemplateTxSet m_pool;
 
     /**
@@ -496,8 +509,8 @@ public:
      * Assigns a random nonce, computes template hash, sorts m_txs by shortid,
      * and adds txs to the shared pool. Returns template hash.
      */
-    uint256 GenerateTemplate(NodeClock::time_point now, FastRandomContext& rng,
-                          const CBlockIndex* tip, std::span<CTransactionRef> txs);
+    uint256 GenerateTemplate(NodeClock::time_point now,
+                             const CBlockIndex* tip, std::span<CTransactionRef> txs);
 
     /** Trim expired local and peer templates. */
     void TrimTemplates(NodeClock::time_point now);

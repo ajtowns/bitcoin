@@ -1303,7 +1303,7 @@ static RPCMethod gettemplateinfo()
                 {RPCResult::Type::NUM, "pool_weight", "Total weight of transactions in shared pool"},
                 {RPCResult::Type::NUM, "latest_template_tx", "Transaction count in most recent template"},
                 {RPCResult::Type::NUM, "latest_template_weight", "Weight of most recent template"},
-                {RPCResult::Type::NUM, "update_interval", "Seconds between template updates"},
+                {RPCResult::Type::NUM, "generate_interval", "Average seconds between template generation cycles"},
                 {RPCResult::Type::NUM_TIME, "next_update", "UNIX epoch time of next scheduled update"},
                 {RPCResult::Type::NUM, "peer_templates", "Number of completed peer templates"},
                 {RPCResult::Type::OBJ_DYN, "pending_peer_templates", "Peers with in-progress template requests, keyed by round (0=waiting, 1-4=sketch, 5=partial)",
@@ -1331,7 +1331,7 @@ static RPCMethod gettemplateinfo()
             ret.pushKV("pool_weight", info.pool_weight);
             ret.pushKV("latest_template_tx", info.latest_tx_count);
             ret.pushKV("latest_template_weight", info.latest_weight);
-            ret.pushKV("update_interval", info.update_interval.count());
+            ret.pushKV("generate_interval", info.generate_interval.count());
             ret.pushKV("next_update", TicksSinceEpoch<std::chrono::seconds>(info.next_update));
             ret.pushKV("peer_templates", info.peer_templates);
             UniValue pending(UniValue::VOBJ);
