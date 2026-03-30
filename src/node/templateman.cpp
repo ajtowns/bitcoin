@@ -213,7 +213,7 @@ const LocalTemplate* TemplateManager::GetLocalTemplate(const uint256& hash) cons
 std::optional<bool> TemplateManager::ShouldGenerate(NodeClock::time_point now)
 {
     if (now < m_next_gen) return std::nullopt;
-    m_next_gen = now + TEMPLATE_UPDATE_INTERVAL;
+    m_next_gen = Jitter(now, TEMPLATE_GENERATE_INTERVAL);
     return m_templates.empty();
 }
 
@@ -238,13 +238,13 @@ void TemplateManager::TrimTemplates(NodeClock::time_point now)
     Check();
 }
 
-uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now, FastRandomContext& rng,
+uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
                                         const CBlockIndex* tip, std::span<CTransactionRef> txs)
 {
     LocalTemplate tmpl;
     tmpl.m_time = now;
     tmpl.m_tip = tip;
-    tmpl.m_nonce = rng.rand64();
+    tmpl.m_nonce = m_rng.rand64();
 
     // Add txs in fee/priority order from BlockAssembler
     tmpl.m_txs = AddTxs(txs);
@@ -822,7 +822,7 @@ TemplateInfo TemplateManager::GetInfo() const
         info.latest_tx_count = m_templates.back().m_txs.size();
         info.latest_weight = m_templates.back().m_weight;
     }
-    info.update_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_UPDATE_INTERVAL);
+    info.generate_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_GENERATE_INTERVAL);
     info.next_update = m_next_gen;
     info.peer_templates = m_peer_templates.size();
     for (const auto& [nodeid, state] : m_peer_reconcile) {
