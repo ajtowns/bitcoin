@@ -267,6 +267,8 @@ enum class TemplateATMPResult {
     UNACCEPTABLE,         //!< consensus/policy failures -- permanent reject
 };
 
+const char* TemplateATMPResultString(TemplateATMPResult result);
+
 /** Entry in PeerTemplate::m_pending (reverse topo order; pop_back for topo order). */
 struct TxPendingATMP {
     uint32_t pos;
@@ -296,16 +298,14 @@ public:
     /** Build m_pending via reverse Kahn's algorithm. Called once on template completion. */
     void TopoSort();
 
-    /** Decrement remaining_children for this tx's parents; erase when zero. */
-    void DecrementParentCandidates(const CTransaction& tx) const;
+    /** Find a 1p1c package parent for this tx, then decrement remaining_children
+     *  for all parent candidates (erasing when zero).
+     *  Returns {true, parent} if usable (parent may be nullptr if no candidate),
+     *  or {false, nullptr} if multiple candidates found (1p1c doesn't apply). */
+    std::pair<bool, CTransactionRef> ConsumeParentCandidates(const CTransaction& tx) const;
 
     /** Stash a tx as a 1p1c package candidate for its children. */
     void StashPackageCandidate(CTransactionRef tx, uint32_t nchildren) const;
-
-    /** Look up a package parent for 1p1c.
-     *  Returns {true, parent} if usable (parent may be nullptr if no candidate),
-     *  or {false, nullptr} if multiple candidates found (1p1c doesn't apply). */
-    std::pair<bool, CTransactionRef> FindPackageParent(const CTransaction& tx) const;
 };
 
 /** Receiver-side sketch reconciliation state for a peer template request.

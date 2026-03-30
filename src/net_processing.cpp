@@ -5821,8 +5821,7 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
               m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, next.nchildren));
 
     LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d children=%d wtxid=%s peer=%d",
-             (result == node::TemplateATMPResult::ACCEPTED ? "Accepted" : "Rejected"),
-             next.pos, next.total, next.nchildren,
+             node::TemplateATMPResultString(result), next.pos, next.total, next.nchildren,
              next.tx->GetWitnessHash().ToString(), peer.m_id);
     return true;
 }

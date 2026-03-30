@@ -23,7 +23,33 @@
 #include <unordered_set>
 #include <variant>
 
+namespace {
+/** Average recheck interval for txs already accepted into the mempool or confirmed in a block. */
+static constexpr auto ATMP_RECHECK_INTERVAL{std::chrono::seconds{60}};
+
+/** Average retry interval for transient ATMP failures (missing inputs, conflict, reconsiderable). */
+static constexpr auto ATMP_RETRY_INTERVAL{std::chrono::seconds{120}};
+
+/** Average retry interval for premature-spend ATMP failures. */
+static constexpr auto ATMP_RETRY_SLOW_INTERVAL{std::chrono::seconds{1200}};
+} // namespace
+
 namespace node {
+
+const char* TemplateATMPResultString(TemplateATMPResult result)
+{
+    using enum TemplateATMPResult;
+    switch (result) {
+    case ACCEPTED:           return "Accepted";
+    case ALREADY_IN_MEMPOOL: return "Rejected[already-in-mempool]";
+    case CONFLICT:           return "Rejected[conflict]";
+    case MISSING_INPUTS:     return "Rejected[missing-inputs]";
+    case RECONSIDERABLE:     return "Rejected[reconsiderable]";
+    case PREMATURE_SPEND:    return "Rejected[premature-spend]";
+    case UNACCEPTABLE:       return "Rejected[unacceptable]";
+    } // no default, compiler warns on missing case
+    assert(false);
+}
 
 static PresaltedSipHasher MakeShortIDHasher(const uint256& template_hash, uint64_t nonce)
 {
@@ -1192,8 +1218,25 @@ void PeerTemplate::TopoSort()
     // m_pending is now in reverse topo order: pop_back() yields topo order
 }
 
-void PeerTemplate::DecrementParentCandidates(const CTransaction& tx) const
+std::pair<bool, CTransactionRef> PeerTemplate::ConsumeParentCandidates(const CTransaction& tx) const
 {
+    // First pass: find a single package parent for 1p1c.
+    // Dedupe to handle txs spending multiple outputs of the same parent.
+    CTransactionRef package_parent{nullptr};
+    bool usable{true};
+    for (const auto& txin : tx.vin) {
+        if (package_parent && txin.prevout.hash == package_parent->GetHash()) continue;
+        auto it = m_package_candidates.find(txin.prevout.hash);
+        if (it != m_package_candidates.end()) {
+            if (package_parent) {
+                usable = false;
+                break;
+            }
+            package_parent = it->second.tx;
+        }
+    }
+
+    // Second pass: decrement remaining_children for all parent candidates.
     // No dedupe: nchildren counted with duplicates, so decrement with duplicates.
     for (const auto& txin : tx.vin) {
         auto it = m_package_candidates.find(txin.prevout.hash);
@@ -1203,26 +1246,13 @@ void PeerTemplate::DecrementParentCandidates(const CTransaction& tx) const
             }
         }
     }
+
+    return {usable, std::move(package_parent)};
 }
 
 void PeerTemplate::StashPackageCandidate(CTransactionRef tx, uint32_t nchildren) const
 {
     m_package_candidates.emplace(tx->GetHash(), PackageCandidate{std::move(tx), nchildren});
-}
-
-std::pair<bool, CTransactionRef> PeerTemplate::FindPackageParent(const CTransaction& tx) const
-{
-    // Dedupe to handle txs spending multiple outputs of the same parent.
-    CTransactionRef package_parent{nullptr};
-    for (const auto& txin : tx.vin) {
-        if (package_parent && txin.prevout.hash == package_parent->GetHash()) continue;
-        auto it = m_package_candidates.find(txin.prevout.hash);
-        if (it != m_package_candidates.end()) {
-            if (package_parent) return {false, {}}; // multiple low-fee parents, 1p1c won't apply
-            package_parent = it->second.tx;
-        }
-    }
-    return {true, std::move(package_parent)};
 }
 
 TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
@@ -1245,42 +1275,52 @@ TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
 
     const size_t total = pt.m_txs.size();
 
+    auto in_mempool_or_block = [&](const auto& wtxid) -> bool {
+        if (mempool.exists(wtxid)) return true;
+        if (check_recent_block) {
+            auto wit = recent_block_txs->find(GenTxid{wtxid});
+            if (wit != recent_block_txs->end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     while (!pt.m_pending.empty()) {
         auto [pos, nchildren] = pt.m_pending.back();
         pt.m_pending.pop_back();
 
         auto& ttx = *pt.m_txs[pos];
 
-        // Always decrement package candidates for this tx's parents, even if skipping.
-        pt.DecrementParentCandidates(*ttx.tx);
+        auto [usable, package_parent] = pt.ConsumeParentCandidates(*ttx.tx);
 
-        // Skip if not yet ready for retry
-        if (now < ttx.next_mempool_check) continue;
+        // (1) Permanently rejected — skip entirely
+        if (ttx.next_mempool_check == NodeClock::time_point::max()) continue;
 
-        // Skip if already in mempool
-        const Wtxid& wtxid = ttx.tx->GetWitnessHash();
-        if (mempool.exists(wtxid)) {
-            ttx.next_mempool_check = now + 120s;
+        // (2) Already in mempool or confirmed in recent block — bump and skip
+        if (in_mempool_or_block(ttx.tx->GetWitnessHash())) {
+            // check this first to avoid stashing it as a package candidate,
+            // which would interfere with 1p1c acceptance if another parent
+            // isn't already accepted
+            ttx.next_mempool_check = Jitter(now, ATMP_RECHECK_INTERVAL);
             continue;
         }
 
-        // Skip if confirmed in recent block (stale template)
-        if (check_recent_block) {
-            auto wit = recent_block_txs->find(GenTxid{wtxid});
-            if (wit != recent_block_txs->end()) {
-                ttx.next_mempool_check = now + 120s;
-                continue;
+        // (3) Not ready for retry — stash for 1p1c and skip
+        if (now < ttx.next_mempool_check) {
+            if (nchildren > 0) {
+                pt.StashPackageCandidate(ttx.tx, nchildren);
             }
-        }
-
-        // Check package candidates for 1p1c opportunity.
-        auto [usable, package_parent] = pt.FindPackageParent(*ttx.tx);
-        if (!usable) {
-            // Multiple low-fee parents, 1p1c won't apply, skip
-            ttx.next_mempool_check = now + 120s;
             continue;
         }
 
+        // (4) Multiple low-fee parents, 1p1c won't apply — skip
+        if (!usable) {
+            ttx.next_mempool_check = Jitter(now, ATMP_RETRY_INTERVAL);
+            continue;
+        }
+
+        // (5) Return tx for ATMP
         return NextTemplateTx{ttx.tx, std::move(package_parent), total - pt.m_pending.size(), total, nchildren};
     }
 
@@ -1297,13 +1337,15 @@ void TemplateManager::ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
         switch (result) {
         case TemplateATMPResult::ACCEPTED:
         case TemplateATMPResult::ALREADY_IN_MEMPOOL:
+            it->next_mempool_check = Jitter(now, ATMP_RECHECK_INTERVAL);
+            break;
         case TemplateATMPResult::CONFLICT:
         case TemplateATMPResult::RECONSIDERABLE:
         case TemplateATMPResult::MISSING_INPUTS:
-            it->next_mempool_check = now + 120s;
+            it->next_mempool_check = Jitter(now, ATMP_RETRY_INTERVAL);
             break;
         case TemplateATMPResult::PREMATURE_SPEND:
-            it->next_mempool_check = now + 1200s;
+            it->next_mempool_check = Jitter(now, ATMP_RETRY_SLOW_INTERVAL);
             break;
         case TemplateATMPResult::UNACCEPTABLE:
             it->next_mempool_check = NodeClock::time_point::max();
