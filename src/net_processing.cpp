@@ -4309,9 +4309,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (feature_id == NetMsgFeature::BIN25_2) {
             LogDebug(BCLog::GETTMPLT, "peer=%d (%s) advertised BIN25-2 (gettmplt) support", pfrom.GetId(), pfrom.ConnectionTypeAsString());
-            if (!pfrom.IsBlockOnlyConn()) {
-                peer.m_next_gettmplt = NodeClock::time_point::min();
-            }
+            peer.m_next_gettmplt = NodeClock::time_point::min();
             return;
         }
 
@@ -5705,6 +5703,15 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
 
     const auto now = NodeClock::now();
     if (now < peer.m_next_gettmplt) return;
+
+    // Block-relay-only cleanup: the one-shot exchange window has expired.
+    if (node.IsBlockOnlyConn() && peer.m_next_gettmplt != NodeClock::time_point::min()) {
+        peer.m_next_gettmplt = NodeClock::time_point::max();
+        LOCK(m_template_mutex);
+        m_templateman.ForgetPeer(node.GetId());
+        LogDebug(BCLog::GETTMPLT, "block-relay-only peer=%d template cleanup done", peer.m_id);
+        return;
+    }
 
     uint256 basis_hash;
     {
