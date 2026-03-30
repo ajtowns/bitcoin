@@ -1192,6 +1192,39 @@ void PeerTemplate::TopoSort()
     // m_pending is now in reverse topo order: pop_back() yields topo order
 }
 
+void PeerTemplate::DecrementParentCandidates(const CTransaction& tx) const
+{
+    // No dedupe: nchildren counted with duplicates, so decrement with duplicates.
+    for (const auto& txin : tx.vin) {
+        auto it = m_package_candidates.find(txin.prevout.hash);
+        if (it != m_package_candidates.end()) {
+            if (--it->second.remaining_children == 0) {
+                m_package_candidates.erase(it);
+            }
+        }
+    }
+}
+
+void PeerTemplate::StashPackageCandidate(CTransactionRef tx, uint32_t nchildren) const
+{
+    m_package_candidates.emplace(tx->GetHash(), PackageCandidate{std::move(tx), nchildren});
+}
+
+std::pair<bool, CTransactionRef> PeerTemplate::FindPackageParent(const CTransaction& tx) const
+{
+    // Dedupe to handle txs spending multiple outputs of the same parent.
+    CTransactionRef package_parent{nullptr};
+    for (const auto& txin : tx.vin) {
+        if (package_parent && txin.prevout.hash == package_parent->GetHash()) continue;
+        auto it = m_package_candidates.find(txin.prevout.hash);
+        if (it != m_package_candidates.end()) {
+            if (package_parent) return {false, {}}; // multiple low-fee parents, 1p1c won't apply
+            package_parent = it->second.tx;
+        }
+    }
+    return {true, std::move(package_parent)};
+}
+
 TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
     NodeId nodeid, NodeClock::time_point now,
     const CTxMemPool& mempool,
@@ -1219,15 +1252,7 @@ TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
         auto& ttx = *pt.m_txs[pos];
 
         // Always decrement package candidates for this tx's parents, even if skipping.
-        // No dedupe: nchildren counted with duplicates, so decrement with duplicates.
-        for (const auto& txin : ttx.tx->vin) {
-            auto it = pt.m_package_candidates.find(txin.prevout.hash);
-            if (it != pt.m_package_candidates.end()) {
-                if (--it->second.remaining_children == 0) {
-                    pt.m_package_candidates.erase(it);
-                }
-            }
-        }
+        pt.DecrementParentCandidates(*ttx.tx);
 
         // Skip if not yet ready for retry
         if (now < ttx.next_mempool_check) continue;
@@ -1249,23 +1274,9 @@ TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
         }
 
         // Check package candidates for 1p1c opportunity.
-        // Dedupe to handle txs spending multiple outputs of the same parent.
-        CTransactionRef package_parent{nullptr};
-        bool found_multiple{false};
-        for (const auto& txin : ttx.tx->vin) {
-            if (package_parent && txin.prevout.hash == package_parent->GetHash()) continue;
-            auto it = pt.m_package_candidates.find(txin.prevout.hash);
-            if (it != pt.m_package_candidates.end()) {
-                if (package_parent) {
-                    found_multiple = true;
-                    break;
-                } else {
-                    package_parent = it->second.tx;
-                }
-            }
-        }
-        // If multiple low-fee parents, 1p1c won't apply, so skip
-        if (found_multiple) {
+        auto [usable, package_parent] = pt.FindPackageParent(*ttx.tx);
+        if (!usable) {
+            // Multiple low-fee parents, 1p1c won't apply, skip
             ttx.next_mempool_check = now + 120s;
             continue;
         }
@@ -1307,8 +1318,7 @@ void TemplateManager::ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
     if (result == TemplateATMPResult::RECONSIDERABLE && nchildren > 0) {
         auto cache_it = m_peer_template_cache.find(nodeid);
         if (cache_it != m_peer_template_cache.end()) {
-            cache_it->second->m_package_candidates.emplace(tx->GetHash(),
-                PackageCandidate{tx, nchildren});
+            cache_it->second->StashPackageCandidate(tx, nchildren);
         }
     }
 }
