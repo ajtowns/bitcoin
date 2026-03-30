@@ -432,6 +432,13 @@ struct Peer {
      *  min() = request immediately. */
     NodeClock::time_point m_next_gettmplt GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
 
+    /** Whether we are interested in accepting templates from this peer.
+     *  For outbound full-relay: always true after feature negotiation.
+     *  For inbound: managed by MAX_INBOUND_TEMPLATE_PEERS rotation.
+     *  For block-relay-only: true initially, false after one-shot cleanup.
+     *  Atomic because FinalizeNode reads it without g_msgproc_mutex. */
+    std::atomic<bool> m_gettmplt_active{false};
+
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
         , m_our_services{our_services}
@@ -954,6 +961,9 @@ private:
 
     /** Number of peers with wtxid relay. */
     std::atomic<int> m_wtxid_relay_peers{0};
+
+    /** Number of inbound peers actively being requested for templates. */
+    std::atomic<int> m_active_inbound_template_peers{0};
 
     /** Number of outbound peers with m_chain_sync.m_protect. */
     int m_outbound_peers_with_protect_from_disconnect GUARDED_BY(cs_main) = 0;
@@ -1839,6 +1849,9 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(peer != nullptr);
         m_wtxid_relay_peers -= peer->m_wtxid_relay;
         assert(m_wtxid_relay_peers >= 0);
+        if (peer->m_gettmplt_active && peer->m_is_inbound) {
+            --m_active_inbound_template_peers;
+        }
     }
     CNodeState *state = State(nodeid);
     assert(state != nullptr);
@@ -1878,6 +1891,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(m_peers_downloading_from == 0);
         assert(m_outbound_peers_with_protect_from_disconnect == 0);
         assert(m_wtxid_relay_peers == 0);
+        assert(m_active_inbound_template_peers == 0);
         WITH_LOCK(m_tx_download_mutex, m_txdownloadman.CheckIsEmpty());
     }
     } // cs_main
@@ -4310,6 +4324,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         if (feature_id == NetMsgFeature::BIN25_2) {
             LogDebug(BCLog::GETTMPLT, "peer=%d (%s) advertised BIN25-2 (gettmplt) support", pfrom.GetId(), pfrom.ConnectionTypeAsString());
             peer.m_next_gettmplt = NodeClock::time_point::min();
+            if (!peer.m_is_inbound) {
+                peer.m_gettmplt_active = true;
+            }
             return;
         }
 
@@ -5707,10 +5724,20 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     // Block-relay-only cleanup: the one-shot exchange window has expired.
     if (node.IsBlockOnlyConn() && peer.m_next_gettmplt != NodeClock::time_point::min()) {
         peer.m_next_gettmplt = NodeClock::time_point::max();
+        peer.m_gettmplt_active = false;
         LOCK(m_template_mutex);
         m_templateman.ForgetPeer(node.GetId());
         LogDebug(BCLog::GETTMPLT, "block-relay-only peer=%d template cleanup done", peer.m_id);
         return;
+    }
+
+    // Inbound activation: eligible but inactive → try to fill a slot.
+    if (peer.m_is_inbound && !peer.m_gettmplt_active) {
+        if (m_active_inbound_template_peers >= node::MAX_INBOUND_TEMPLATE_PEERS) return;
+        peer.m_gettmplt_active = true;
+        ++m_active_inbound_template_peers;
+        LogDebug(BCLog::GETTMPLT, "activated inbound peer=%d for templates (%d/%d)",
+                 peer.m_id, m_active_inbound_template_peers.load(), node::MAX_INBOUND_TEMPLATE_PEERS);
     }
 
     uint256 basis_hash;
@@ -5729,6 +5756,16 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
 
     MakeAndPushMessage(node, NetMsgType::GETTMPLT, uint8_t{0}, basis_hash);
     LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=0 basis=%s peer=%d", basis_hash.ToString(), node.GetId());
+
+    // Inbound deactivation: randomly rotate out.
+    if (peer.m_is_inbound) {
+        if (m_active_inbound_template_peers < node::MAX_INBOUND_TEMPLATE_PEERS) return;
+        if (m_rng.randrange(node::INBOUND_TEMPLATE_ROTATION_FREQ) != 0) return;
+        peer.m_gettmplt_active = false;
+        --m_active_inbound_template_peers;
+        LogDebug(BCLog::GETTMPLT, "rotated out inbound peer=%d (%d/%d)",
+                 peer.m_id, m_active_inbound_template_peers.load(), node::MAX_INBOUND_TEMPLATE_PEERS);
+    }
 }
 
 void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
