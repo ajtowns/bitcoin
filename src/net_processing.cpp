@@ -738,6 +738,17 @@ private:
     bool ProcessOrphanTx(Peer& peer)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
 
+    /** Try to submit one transaction from a peer's template to the mempool.
+     *  Returns true if a tx was considered (regardless of acceptance). */
+    bool ConsiderTemplateTransactions(Peer& peer)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex,
+                                 !m_most_recent_block_mutex,
+                                 !m_peer_mutex, !m_inv_to_send_mutex, !m_tx_download_mutex);
+
+    /** Submit a single peer-template tx (or 1p1c package) to ATMP and classify the result. */
+    node::TemplateATMPResult ConsiderTemplateTx(Peer& peer, const node::TemplateManager::NextTemplateTx& next)
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex, !m_inv_to_send_mutex, !m_tx_download_mutex);
+
     /** Process a single headers message from a peer.
      *
      * @param[in]   pfrom     CNode of the peer
@@ -880,7 +891,7 @@ private:
      * - A txhash (txid or wtxid) in m_txrequest is not also in m_lazy_recent_confirmed_transactions.
      * - Each data structure's limits hold (m_orphanage max size, m_txrequest per-peer limits, etc).
      */
-    Mutex m_tx_download_mutex ACQUIRED_BEFORE(m_mempool.cs) ACQUIRED_BEFORE(cs_main);
+    Mutex m_tx_download_mutex ACQUIRED_BEFORE(m_mempool.cs);
     node::TxDownloadManager m_txdownloadman GUARDED_BY(m_tx_download_mutex);
 
     std::unique_ptr<TxReconciliationTracker> m_txreconciliation;
@@ -965,7 +976,7 @@ private:
                                                 uint64_t network_key) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     /** Mutex protecting m_templateman. */
-    mutable Mutex m_template_mutex ACQUIRED_BEFORE(m_mempool.cs);
+    mutable Mutex m_template_mutex ACQUIRED_BEFORE(cs_main, m_mempool.cs, m_most_recent_block_mutex);
     node::TemplateManager m_templateman GUARDED_BY(m_template_mutex);
 
     // All of the following cache a recent block, and are protected by m_most_recent_block_mutex
@@ -4416,6 +4427,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             if (shortidmask.Any()) shortid_bytes = tmpl->GetShortIdBytes(round, shortidmask);
 
             sketchmask.LimitToRound(round);
+            sketchmask -= shortidmask; // shortids take priority over sketches
             std::vector<node::LocalTemplate::Sketch> sketches_to_send;
             if (sketchmask.Any()) {
                 auto all_sketches = tmpl->GetSketches(round);
@@ -4483,6 +4495,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             std::vector<node::LocalTemplate::Sketch> sketches;
             vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> sketches;
 
+            LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes sketches=%d peer=%d",
+                     hash.ToString(), tip_hash.ToString(), basis_hash.ToString(), basis_delta.size(), sketches.size(), pfrom.GetId());
+
             const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.m_blockman.LookupBlockIndex(tip_hash));
             if (!tip) {
                 LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 with unknown tip %s peer=%d, ignoring",
@@ -4503,6 +4518,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             shortidmask.FromUint32(std::span{&shortidmask_raw, 1});
             sketchmask.FromUint32(std::span{&sketchmask_raw, 1});
 
+            LogDebug(BCLog::GETTMPLT, "Got tmplt round=%d template=%s shortidmask=0x%08x sketchmask=0x%08x shortids=%d bytes sketches=%d peer=%d",
+                     round, hash.ToString(), shortidmask_raw, sketchmask_raw, shortid_bytes.size(), sketches.size(), pfrom.GetId());
+
             LOCK(m_template_mutex);
             auto result = m_templateman.UpdatePeerSketch(pfrom.GetId(), hash, round,
                                                          shortidmask, sketchmask,
@@ -4518,6 +4536,15 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         uint256 hash;
         std::vector<CTransactionRef> txs;
         vRecv >> hash >> TX_WITH_WITNESS(txs);
+
+        LogDebug(BCLog::GETTMPLT, "Got tmplttxn template=%s %d txs peer=%d",
+                 hash.ToString(), txs.size(), pfrom.GetId());
+        if (txs.size() <= 3) {
+            for (const auto& tx : txs) {
+                LogDebug(BCLog::GETTMPLT, "  tmplttxn wtxid=%s peer=%d",
+                         tx->GetWitnessHash().ToString(), pfrom.GetId());
+            }
+        }
 
         LOCK(m_template_mutex);
         auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs));
@@ -5663,14 +5690,20 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
 
     if (NodeClock::now() < peer.m_next_gettmplt) return;
 
-    peer.m_next_gettmplt = NodeClock::now() + 2min;
-
     uint256 basis_hash;
     {
         LOCK(m_template_mutex);
+        if (!m_templateman.HaveLocalTemplate()) {
+            // Don't request until we've generated a local template — without one,
+            // the sketch has no "local" side and reconciliation is all differences.
+            peer.m_next_gettmplt = NodeClock::now() + node::TEMPLATE_UPDATE_INTERVAL;
+            return;
+        }
         m_templateman.WaitingForPeerSketch(node.GetId());
         basis_hash = m_templateman.GetLastPeerTemplateHash(node.GetId());
     }
+
+    peer.m_next_gettmplt = NodeClock::now() + 2min;
 
     MakeAndPushMessage(node, NetMsgType::GETTMPLT, uint8_t{0}, basis_hash);
     LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=0 basis=%s peer=%d", basis_hash.ToString(), node.GetId());
@@ -5759,6 +5792,90 @@ ReadStatus PeerManagerImpl::InitCompactBlockData(PartiallyDownloadedBlock& parti
                                                             m_templateman.GetScannableTxns()));
 }
 
+bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
+{
+    AssertLockHeld(g_msgproc_mutex);
+    AssertLockNotHeld(m_template_mutex);
+
+    if (m_opts.ignore_incoming_txs) return false;
+
+    if (m_chainman.IsInitialBlockDownload() || !m_mempool.GetLoadTried()) {
+        return false;
+    }
+
+    auto now = NodeClock::now();
+    node::TemplateManager::NextTemplateTx next;
+    {
+        LOCK(m_template_mutex);
+        LOCK(m_most_recent_block_mutex);
+        next = m_templateman.GetNextTemplateTx(peer.m_id, now, m_mempool,
+                                               m_most_recent_block_hash,
+                                               m_most_recent_block_txs.get());
+    }
+    if (!next) return false;
+
+    auto result = ConsiderTemplateTx(peer, next);
+
+    WITH_LOCK(m_template_mutex,
+              m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, next.nchildren));
+
+    LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d children=%d wtxid=%s peer=%d",
+             (result == node::TemplateATMPResult::ACCEPTED ? "Accepted" : "Rejected"),
+             next.pos, next.total, next.nchildren,
+             next.tx->GetWitnessHash().ToString(), peer.m_id);
+    return true;
+}
+
+node::TemplateATMPResult PeerManagerImpl::ConsiderTemplateTx(
+    Peer& peer, const node::TemplateManager::NextTemplateTx& next)
+{
+    AssertLockHeld(g_msgproc_mutex);
+
+    auto process_next = [&]() -> MempoolAcceptResult {
+        LOCK(::cs_main);
+        if (next.package_parent) {
+            Package package{next.package_parent, next.tx};
+            auto result = ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool,
+                package, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt);
+            auto it = result.m_tx_results.find(next.tx->GetWitnessHash());
+            if (it == result.m_tx_results.end()) {
+                // Parent must have failed; no longer reconsiderable
+                TxValidationState state;
+                state.Invalid(TxValidationResult::TX_MISSING_INPUTS, "package-parent-failed");
+                return MempoolAcceptResult::Failure(std::move(state));
+            }
+            return std::move(it->second);
+        } else {
+            return m_chainman.ProcessTransaction(next.tx);
+        }
+    };
+    auto result = process_next();
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+        LOCK(m_tx_download_mutex);
+        ProcessValidTx(peer.m_id, next.tx, result.m_replaced_transactions);
+        return node::TemplateATMPResult::ACCEPTED;
+    }
+
+    if (result.m_result_type == MempoolAcceptResult::ResultType::MEMPOOL_ENTRY ||
+        result.m_result_type == MempoolAcceptResult::ResultType::DIFFERENT_WITNESS) {
+        return node::TemplateATMPResult::ALREADY_IN_MEMPOOL;
+    }
+
+    switch (result.m_state.GetResult()) {
+    case TxValidationResult::TX_RECONSIDERABLE:
+        return node::TemplateATMPResult::RECONSIDERABLE;
+    case TxValidationResult::TX_CONFLICT:
+        return node::TemplateATMPResult::CONFLICT;
+    case TxValidationResult::TX_MISSING_INPUTS:
+        return node::TemplateATMPResult::MISSING_INPUTS;
+    case TxValidationResult::TX_PREMATURE_SPEND:
+        return node::TemplateATMPResult::PREMATURE_SPEND;
+    default:
+        return node::TemplateATMPResult::UNACCEPTABLE;
+    }
+}
+
 bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
 {
     {
@@ -5843,6 +5960,9 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
         LOCK(peer.m_getdata_requests_mutex);
         if (!peer.m_getdata_requests.empty()) return true;
     }
+
+    // Attempt to add txs from peer's template to the mempool
+    if (ConsiderTemplateTransactions(peer)) return true;
 
     // Don't bother if send buffer is too full to respond anyway
     if (node.fPauseSend) return false;

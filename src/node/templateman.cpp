@@ -9,9 +9,11 @@
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
 #include <primitives/transaction.h>
+#include <primitives/transaction_identifier.h>
 #include <random.h>
 #include <serialize.h>
 #include <streams.h>
+#include <txmempool.h>
 
 #include <util/golombrice.h>
 
@@ -584,8 +586,18 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
         FinalizeShortids();
         return {true, {}, {}};
     }
-    // After round 0, request sketches for all 4 groups.
-    return {false, {}, GroupMask::Fill(4)};
+
+    // Request sketches for unresolved groups only
+    GroupMask unresolved_groups;
+    for (int gi = 0; gi < 4; ++gi) {
+        for (int b = gi; b < TOTAL_BUCKETS; b += 4) {
+            if (!m_bucket_resolved[b]) {
+                unresolved_groups.Set(gi);
+                break;
+            }
+        }
+    }
+    return {false, {}, unresolved_groups};
 }
 
 void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid_bytes,
@@ -704,21 +716,25 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Process(
 
     bool all_resolved = (m_bucket_resolved.Count() == TOTAL_BUCKETS);
     if (all_resolved) FinalizeShortids();
-    BucketMask shortidmask = BucketMask::Fill(TOTAL_BUCKETS) - m_bucket_resolved; // unresolved buckets → request shortids
 
-    // Compute sketchmask for next round: groups at current level with unresolved buckets
-    GroupMask sketchmask;
-    if (!all_resolved && round < 3) {
-        const int n = 4 << m_sketch_level;
+    // Compute unresolved groups at current sketch level
+    const int n = 4 << m_sketch_level;
+    GroupMask unresolved_groups;
+    if (!all_resolved) {
         for (int gi = 0; gi < n; ++gi) {
             for (int b = gi; b < TOTAL_BUCKETS; b += n) {
                 if (!m_bucket_resolved[b]) {
-                    sketchmask.Set(gi);
+                    unresolved_groups.Set(gi);
                     break;
                 }
             }
         }
     }
+
+    // Partition unresolved groups: request shortids (fallback) or sketches (continue).
+    GroupMask shortidmask;
+    if (round >= 3) shortidmask = unresolved_groups;
+    GroupMask sketchmask = unresolved_groups - shortidmask;
 
     return {all_resolved, shortidmask, sketchmask};
 }
@@ -940,6 +956,7 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
         pt.m_hash = partial->m_hash;
         pt.m_nodeid = nodeid;
         pt.m_time = NodeClock::now();
+        pt.TopoSort();
         m_peer_reconcile.erase(it);
         m_peer_templates.push_back(std::move(pt));
         m_peer_template_cache[nodeid] = &m_peer_templates.back();
@@ -1099,6 +1116,7 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
     pt.m_hash = partial.m_hash;
     pt.m_nodeid = nodeid;
     pt.m_time = NodeClock::now();
+    pt.TopoSort();
     m_peer_reconcile.erase(it);
     m_peer_templates.push_back(std::move(pt));
     m_peer_template_cache[nodeid] = &m_peer_templates.back();
@@ -1117,6 +1135,182 @@ void TemplateManager::ForgetPeer(NodeId nodeid)
     auto it = SetPeerReconcile(nodeid, std::monostate{});
     m_peer_reconcile.erase(it);
     m_peer_template_cache.erase(nodeid);
+}
+
+void PeerTemplate::TopoSort()
+{
+    const uint32_t n = m_txs.size();
+
+    std::unordered_map<Txid, uint32_t, SaltedTxidHasher> txid_pos;
+    txid_pos.reserve(n);
+
+    std::vector<uint32_t> out_degree(n, 0);
+    std::vector<uint32_t> ready;
+
+    // 1. Build txid -> position map
+    for (uint32_t i = 0; i < n; ++i) {
+        txid_pos.emplace(m_txs[i]->tx->GetHash(), i);
+    }
+
+    // 2. Count out-degree (number of in-template children) per tx
+    for (uint32_t i = 0; i < n; ++i) {
+        for (const auto& txin : m_txs[i]->tx->vin) {
+            auto it = txid_pos.find(txin.prevout.hash);
+            if (it != txid_pos.end()) {
+                ++out_degree[it->second];
+            }
+        }
+    }
+
+    // 3. Reverse Kahn's: seed with leaves (out_degree == 0)
+    for (uint32_t i = 0; i < n; ++i) {
+        if (out_degree[i] == 0) ready.push_back(i);
+    }
+
+    // Save nchildren before Kahn's mutates out_degree
+    std::vector<uint32_t> nchildren{out_degree};
+
+    m_pending.clear();
+    m_pending.reserve(n);
+    while (!ready.empty()) {
+        uint32_t pos = ready.back();
+        ready.pop_back();
+
+        m_pending.push_back({.pos = pos, .nchildren = nchildren[pos]});
+
+        // Decrement out_degree of this tx's parents
+        for (const auto& txin : m_txs[pos]->tx->vin) {
+            auto it = txid_pos.find(txin.prevout.hash);
+            if (it != txid_pos.end()) {
+                if (--out_degree[it->second] == 0) {
+                    ready.push_back(it->second);
+                }
+            }
+        }
+    }
+
+    // m_pending is now in reverse topo order: pop_back() yields topo order
+}
+
+TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
+    NodeId nodeid, NodeClock::time_point now,
+    const CTxMemPool& mempool,
+    const uint256& active_tip_hash,
+    const std::map<GenTxid, CTransactionRef>* recent_block_txs)
+{
+    auto cache_it = m_peer_template_cache.find(nodeid);
+    if (cache_it == m_peer_template_cache.end()) return {};
+    PeerTemplate& pt = *cache_it->second;
+
+    // Can't reason about a template with no tip
+    if (!pt.m_tip) return {};
+
+    // Only check recent block txs when the template targets a different tip
+    // (if tips match, all template txs are unconfirmed by definition)
+    const bool check_recent_block = recent_block_txs
+        && pt.m_tip->GetBlockHash() != active_tip_hash;
+
+    const size_t total = pt.m_txs.size();
+
+    while (!pt.m_pending.empty()) {
+        auto [pos, nchildren] = pt.m_pending.back();
+        pt.m_pending.pop_back();
+
+        auto& ttx = *pt.m_txs[pos];
+
+        // Always decrement package candidates for this tx's parents, even if skipping.
+        // No dedupe: nchildren counted with duplicates, so decrement with duplicates.
+        for (const auto& txin : ttx.tx->vin) {
+            auto it = pt.m_package_candidates.find(txin.prevout.hash);
+            if (it != pt.m_package_candidates.end()) {
+                if (--it->second.remaining_children == 0) {
+                    pt.m_package_candidates.erase(it);
+                }
+            }
+        }
+
+        // Skip if not yet ready for retry
+        if (now < ttx.next_mempool_check) continue;
+
+        // Skip if already in mempool
+        const Wtxid& wtxid = ttx.tx->GetWitnessHash();
+        if (mempool.exists(wtxid)) {
+            ttx.next_mempool_check = now + 120s;
+            continue;
+        }
+
+        // Skip if confirmed in recent block (stale template)
+        if (check_recent_block) {
+            auto wit = recent_block_txs->find(GenTxid{wtxid});
+            if (wit != recent_block_txs->end()) {
+                ttx.next_mempool_check = now + 120s;
+                continue;
+            }
+        }
+
+        // Check package candidates for 1p1c opportunity.
+        // Dedupe to handle txs spending multiple outputs of the same parent.
+        CTransactionRef package_parent{nullptr};
+        bool found_multiple{false};
+        for (const auto& txin : ttx.tx->vin) {
+            if (package_parent && txin.prevout.hash == package_parent->GetHash()) continue;
+            auto it = pt.m_package_candidates.find(txin.prevout.hash);
+            if (it != pt.m_package_candidates.end()) {
+                if (package_parent) {
+                    found_multiple = true;
+                    break;
+                } else {
+                    package_parent = it->second.tx;
+                }
+            }
+        }
+        // If multiple low-fee parents, 1p1c won't apply, so skip
+        if (found_multiple) {
+            ttx.next_mempool_check = now + 120s;
+            continue;
+        }
+
+        return NextTemplateTx{ttx.tx, std::move(package_parent), total - pt.m_pending.size(), total, nchildren};
+    }
+
+    return {};
+}
+
+void TemplateManager::ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
+                                       NodeClock::time_point now,
+                                       TemplateATMPResult result, uint32_t nchildren)
+{
+    // 1. Update next_mempool_check based on result
+    auto it = m_pool.find(tx->GetWitnessHash());
+    if (it != m_pool.end()) {
+        switch (result) {
+        case TemplateATMPResult::ACCEPTED:
+        case TemplateATMPResult::ALREADY_IN_MEMPOOL:
+        case TemplateATMPResult::CONFLICT:
+        case TemplateATMPResult::RECONSIDERABLE:
+        case TemplateATMPResult::MISSING_INPUTS:
+            it->next_mempool_check = now + 120s;
+            break;
+        case TemplateATMPResult::PREMATURE_SPEND:
+            it->next_mempool_check = now + 1200s;
+            break;
+        case TemplateATMPResult::UNACCEPTABLE:
+            it->next_mempool_check = NodeClock::time_point::max();
+            break;
+        }
+    }
+
+    // 2. On RECONSIDERABLE with children: stash for potential 1p1c attempts.
+    // Note: if we have a chain grandparent A -> parent B -> child C, and B
+    // fails as reconsiderable, we still add B here, as there may be another
+    // child of A which is tried before C and gets A accepted into the mempool.
+    if (result == TemplateATMPResult::RECONSIDERABLE && nchildren > 0) {
+        auto cache_it = m_peer_template_cache.find(nodeid);
+        if (cache_it != m_peer_template_cache.end()) {
+            cache_it->second->m_package_candidates.emplace(tx->GetHash(),
+                PackageCandidate{tx, nchildren});
+        }
+    }
 }
 
 } // namespace node

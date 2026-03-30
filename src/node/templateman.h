@@ -27,7 +27,9 @@
 #include <vector>
 
 class CBlockIndex;
+class CTxMemPool;
 class FastRandomContext;
+class GenTxid;
 typedef int64_t NodeId;
 
 namespace node {
@@ -77,6 +79,7 @@ struct TemplateTx {
     int32_t weight{0};                 //!< cached GetTransactionWeight result
     mutable uint32_t num_templates{0}; //!< refcount: number of templates referencing this tx
     mutable size_t scannable_idx{0};   //!< index into m_scannable_txns
+    mutable NodeClock::time_point next_mempool_check{NodeClock::time_point::min()}; //!< earliest time to retry ATMP
 
     friend auto operator<=>(const TemplateTx& a, const TemplateTx& b)
     {
@@ -250,6 +253,29 @@ public:
     std::vector<CTransactionRef> GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes);
 };
 
+/** Result of submitting a peer-template tx to ATMP. */
+enum class TemplateATMPResult {
+    ACCEPTED,             //!< VALID
+    ALREADY_IN_MEMPOOL,   //!< MEMPOOL_ENTRY or DIFFERENT_WITNESS
+    CONFLICT,             //!< TX_CONFLICT
+    MISSING_INPUTS,       //!< TX_MISSING_INPUTS
+    RECONSIDERABLE,       //!< TX_RECONSIDERABLE -- 1p1c candidate
+    PREMATURE_SPEND,      //!< TX_PREMATURE_SPEND
+    UNACCEPTABLE,         //!< consensus/policy failures -- permanent reject
+};
+
+/** Entry in PeerTemplate::m_pending (reverse topo order; pop_back for topo order). */
+struct TxPendingATMP {
+    uint32_t pos;
+    uint32_t nchildren;
+};
+
+/** A parent tx that failed as RECONSIDERABLE, stashed for 1p1c attempts with its children. */
+struct PackageCandidate {
+    CTransactionRef tx;
+    uint32_t remaining_children;
+};
+
 /** A completed, hash-verified template received from a peer. */
 class PeerTemplate : public Template {
 public:
@@ -257,6 +283,15 @@ public:
 
     NodeId m_nodeid; //!< peer that sent us this template
     NodeClock::time_point m_time; //!< received time
+
+    /** Reverse-topo-ordered work queue; pop_back() yields next tx to validate. */
+    mutable std::vector<TxPendingATMP> m_pending;
+
+    /** Parent txs that failed as RECONSIDERABLE, keyed by txid for 1p1c lookup. */
+    mutable std::unordered_map<Txid, PackageCandidate, SaltedTxidHasher> m_package_candidates;
+
+    /** Build m_pending via reverse Kahn's algorithm. Called once on template completion. */
+    void TopoSort();
 };
 
 /** Receiver-side sketch reconciliation state for a peer template request.
@@ -309,7 +344,7 @@ public:
 
     struct ProcessResult {
         bool resolved;          //!< all TOTAL_BUCKETS buckets reconciled
-        GroupMask shortidmask;  //!< resolved groups to request shortids for
+        GroupMask shortidmask;  //!< unresolved groups to request shortids for
         GroupMask sketchmask;   //!< unresolved groups to request sketches for
     };
 
@@ -430,7 +465,7 @@ private:
     std::deque<PeerTemplate> m_peer_templates;
 
     /** Most recent completed template per peer (pointer into m_peer_templates). */
-    std::unordered_map<NodeId, const PeerTemplate*> m_peer_template_cache;
+    std::unordered_map<NodeId, PeerTemplate*> m_peer_template_cache;
 
     /** Replace a peer's reconciliation state, releasing pool refs from the old value. */
     template <typename T>
@@ -493,6 +528,9 @@ public:
     /** Number of transactions in the shared pool. */
     size_t PoolSize() const { return m_pool.size(); }
 
+    /** Whether we have generated at least one local template (needed before requesting peer templates). */
+    bool HaveLocalTemplate() const { return !m_templates.empty(); }
+
     TemplateInfo GetInfo() const;
 
     /** Validate internal invariants. Asserts on failure. */
@@ -533,6 +571,31 @@ public:
 
     /** Clean up all state for a disconnected peer. */
     void ForgetPeer(NodeId nodeid);
+
+    struct NextTemplateTx {
+        CTransactionRef tx;
+        CTransactionRef package_parent;  //!< non-null if 1p1c opportunity
+        size_t pos{0};
+        size_t total{0};
+        uint32_t nchildren{0};           //!< passed back to ReportATMPResult
+        explicit operator bool() const { return tx != nullptr; }
+    };
+
+    /** Return the next peer-template tx ready for mempool validation.
+     *  Pops from m_pending (topo order), skipping txs not yet ready,
+     *  txs already in the mempool, and txs confirmed in a recent block.
+     *  Checks package candidates for 1p1c opportunity before returning.
+     *  @param recent_block_txs  if non-null, txs from the most recent block (for stale templates) */
+    NextTemplateTx GetNextTemplateTx(NodeId nodeid, NodeClock::time_point now,
+                                     const CTxMemPool& mempool,
+                                     const uint256& active_tip_hash,
+                                     const std::map<GenTxid, CTransactionRef>* recent_block_txs);
+
+    /** Report ATMP result for a peer-template tx. Updates retry timing and
+     *  stashes RECONSIDERABLE parents for 1p1c attempts with their children. */
+    void ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
+                          NodeClock::time_point now,
+                          TemplateATMPResult result, uint32_t nchildren);
 
     /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
      *  Releases pool refs for local txs absent from the peer's template.
