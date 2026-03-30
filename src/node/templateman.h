@@ -67,6 +67,12 @@ static constexpr auto TEMPLATE_GENERATE_INTERVAL{std::chrono::seconds{30}};
 /** Average interval between gettmplt requests to each peer. */
 static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::minutes{2}};
 
+/** Maximum number of inbound peers to actively request templates from. */
+static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
+
+/** Average number of request cycles before rotating out an active inbound. */
+static constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
+
 /** Skip transactions that entered the mempool this recently (prefer relaying txs normally) */
 static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{10};
 
