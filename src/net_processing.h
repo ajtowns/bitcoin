@@ -71,6 +71,7 @@ struct CNodeStateStats {
     int64_t presync_height{-1};
     std::chrono::seconds time_offset{0};
     NodeClock::time_point m_last_block_announcement;
+    std::string m_template_status;
 };
 
 struct PeerManagerInfo {
