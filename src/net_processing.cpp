@@ -4508,6 +4508,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::TMPLT) {
+        if (!peer.m_gettmplt_active) {
+            LogDebug(BCLog::GETTMPLT, "Ignoring tmplt from inactive peer=%d", pfrom.GetId());
+            return;
+        }
         uint256 hash;
         uint8_t round;
         vRecv >> hash >> round;
@@ -4572,6 +4576,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::TMPLTTXN) {
+        if (!peer.m_gettmplt_active) {
+            LogDebug(BCLog::GETTMPLT, "Ignoring tmplttxn from inactive peer=%d", pfrom.GetId());
+            return;
+        }
         uint256 hash;
         std::vector<CTransactionRef> txs;
         vRecv >> hash >> TX_WITH_WITNESS(txs);
@@ -5728,10 +5736,10 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     AssertLockNotHeld(m_template_mutex);
 
     const auto now = NodeClock::now();
-    if (now < peer.m_next_gettmplt.load()) return;
+    if (now <= peer.m_next_gettmplt.load()) return;
 
     // Block-relay-only cleanup: the one-shot exchange window has expired.
-    if (node.IsBlockOnlyConn() && peer.m_next_gettmplt.load() != NodeClock::time_point::min()) {
+    if (node.IsBlockOnlyConn() && peer.m_gettmplt_active && peer.m_next_gettmplt.load() != NodeClock::time_point::min()) {
         peer.m_next_gettmplt = NodeClock::time_point::max() - NodeClock::duration{1};
         peer.m_gettmplt_active = false;
         LOCK(m_template_mutex);
