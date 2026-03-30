@@ -254,17 +254,13 @@ BOOST_AUTO_TEST_CASE(sketch_selective_masks)
         1, GroupMask{}, GroupMask::Fill(TOTAL_BUCKETS), {}, provider.GetSketches(1));
     BOOST_REQUIRE(!res1);
 
+    // shortidmask empty at round 1 (shortid fallback only at round >= 3).
+    BOOST_CHECK(shortidmask1.None());
+
     // sketchmask should have exactly bits 4..7 (the 4 unresolved stride-8 odd groups).
     GroupMask expected_sketchmask;
     for (int g = 4; g < 8; ++g) expected_sketchmask.Set(g);
     BOOST_CHECK(sketchmask1 == expected_sketchmask);
-
-    // shortidmask should have exactly the unresolved buckets (b%8 ≥ 4).
-    BucketMask expected_shortidmask;
-    for (int b = 0; b < TOTAL_BUCKETS; ++b) {
-        if (b % 8 >= 4) expected_shortidmask.Set(b);
-    }
-    BOOST_CHECK(shortidmask1 == expected_shortidmask);
 
     // Round 2: resolve remaining groups via sketches.
     auto [res2, shortidmask2, sketchmask2] = sketch.Process(
