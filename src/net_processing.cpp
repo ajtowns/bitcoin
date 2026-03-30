@@ -429,8 +429,9 @@ struct Peer {
 
     /** Next time to send gettmplt n=0 to this peer.
      *  max() = never request (peer doesn't support BIN25-2 or is block-relay-only).
-     *  min() = request immediately. */
-    NodeClock::time_point m_next_gettmplt GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::time_point::max()};
+     *  min() = request immediately.
+     *  Atomic because GetNodeStateStats reads it without g_msgproc_mutex. */
+    std::atomic<NodeClock::time_point> m_next_gettmplt{NodeClock::time_point::max()};
 
     /** Whether we are interested in accepting templates from this peer.
      *  For outbound full-relay: always true after feature negotiation.
@@ -2015,6 +2016,14 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
         }
     }
     stats.time_offset = peer->m_time_offset;
+
+    if (peer->m_next_gettmplt.load() == NodeClock::time_point::max()) {
+        stats.m_template_status = "unsupported";
+    } else if (peer->m_gettmplt_active) {
+        stats.m_template_status = "active";
+    } else {
+        stats.m_template_status = "inactive";
+    }
 
     return true;
 }
@@ -5719,11 +5728,11 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     AssertLockNotHeld(m_template_mutex);
 
     const auto now = NodeClock::now();
-    if (now < peer.m_next_gettmplt) return;
+    if (now < peer.m_next_gettmplt.load()) return;
 
     // Block-relay-only cleanup: the one-shot exchange window has expired.
-    if (node.IsBlockOnlyConn() && peer.m_next_gettmplt != NodeClock::time_point::min()) {
-        peer.m_next_gettmplt = NodeClock::time_point::max();
+    if (node.IsBlockOnlyConn() && peer.m_next_gettmplt.load() != NodeClock::time_point::min()) {
+        peer.m_next_gettmplt = NodeClock::time_point::max() - NodeClock::duration{1};
         peer.m_gettmplt_active = false;
         LOCK(m_template_mutex);
         m_templateman.ForgetPeer(node.GetId());
