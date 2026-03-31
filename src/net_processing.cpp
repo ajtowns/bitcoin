@@ -1235,7 +1235,7 @@ private:
     /** Act on the result of InitPeerSketch/UpdatePeerSketch: send the next
      *  gettmplt round, gettmplttxn, or disconnect on error. */
     void ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, const node::TemplateManager::TmpltResult& result)
-        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, m_template_mutex);
 
     /** Send pending tmplt round=0 response and drain any queued tmplttxn chunks. */
     void MaybeSendTemplateMessages(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
@@ -5720,10 +5720,20 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         return;
     }
     case NEEDS_TXS:
-        assert(!result.missing_gr.empty());
-        LogDebug(BCLog::GETTMPLT, "Sending gettmplttxn template=%s peer=%d", result.hash.ToString(), node.GetId());
-        MakeAndPushMessage(node, NetMsgType::GETTMPLTTXN, result.hash, result.missing_gr);
+    {
+        // Try to fill missing positions from local sources before requesting from peer.
+        VectorExtraTransactions extra{vExtraTxnForCompact};
+        auto fill = m_templateman.FillPeerPartialLocally(node.GetId(), m_mempool, extra);
+        LogDebug(BCLog::GETTMPLT, "Local fill for template %s peer=%d: %d from templates, %d from mempool+extra, %d collisions, %d still missing",
+                 result.hash.ToString(), node.GetId(),
+                 fill.from_templates, fill.from_txns, fill.collisions, fill.still_missing);
+        if (fill.still_missing == 0) return;
+        auto missing_gr = m_templateman.GetPeerPartialMissingGR(node.GetId());
+        LogDebug(BCLog::GETTMPLT, "Sending gettmplttxn template=%s %d missing peer=%d",
+                 result.hash.ToString(), fill.still_missing, node.GetId());
+        MakeAndPushMessage(node, NetMsgType::GETTMPLTTXN, result.hash, missing_gr);
         return;
+    }
     case DONE:
         LogDebug(BCLog::GETTMPLT, "Template %s reconciled with no missing txs, peer=%d", result.hash.ToString(), node.GetId());
         return;

@@ -5,6 +5,7 @@
 #include <node/templateman.h>
 #include <node/minisketchwrapper.h>
 
+#include <blockencodings.h>
 #include <chain.h>
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
@@ -16,6 +17,7 @@
 #include <txmempool.h>
 
 #include <util/golombrice.h>
+#include <util/overloaded.h>
 
 #include <algorithm>
 #include <bit>
@@ -292,7 +294,10 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
         return a.first < b.first;
     });
     tmpl.m_txs.clear();
+    uint64_t dup_check = std::numeric_limits<uint64_t>::max();
     for (auto& [sid, ref] : pairs) {
+        if (sid == dup_check) continue; // duplicates can't by expressed by sketches, so drop them
+        dup_check = sid;
         tmpl.shortids.push_back(sid);
         tmpl.m_txs.push_back(ref);
     }
@@ -328,6 +333,14 @@ void TemplateTxnsSelection::Add(uint32_t p)
     size_t chunk_idx = p / CHUNK_SIZE;
     while (m_positions.size() <= chunk_idx) m_positions.emplace_back();
     m_positions[chunk_idx].Set(p % CHUNK_SIZE);
+}
+
+void TemplateTxnsSelection::Remove(uint32_t p)
+{
+    size_t chunk_idx = p / CHUNK_SIZE;
+    if (chunk_idx < m_positions.size()) {
+        m_positions[chunk_idx].Reset(p % CHUNK_SIZE);
+    }
 }
 
 size_t TemplateTxnsSelection::Count() const
@@ -830,11 +843,17 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
     PeerTemplatePartial partial;
     partial.m_tip = sketch.m_tip;
     partial.m_hash = sketch.m_hash;
+    auto shortid_info = std::make_unique<PeerTemplatePartial::ShortIDInfo>();
+    shortid_info->nonce = sketch.m_nonce;
     partial.m_txs.reserve(pairs.size());
     for (size_t i = 0; i < pairs.size(); ++i) {
         partial.m_txs.push_back(pairs[i].second);
-        if (pairs[i].second == pool_end) partial.m_missing.Add(i);
+        if (pairs[i].second == pool_end) {
+            partial.m_missing.Add(i);
+            shortid_info->missing_shortids.push_back(pairs[i].first);
+        }
     }
+    partial.m_shortid_info = std::move(shortid_info);
     return partial;
 }
 
@@ -966,13 +985,13 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
 
     if (!pr.resolved) {
         // XXX store pr.shortidmask/pr.sketchmask on sketch for next round
-        return {TmpltState::UNRESOLVED, templatehash, pr.shortidmask, pr.sketchmask, {}};
+        return {TmpltState::UNRESOLVED, templatehash, pr.shortidmask, pr.sketchmask};
     }
 
     auto partial = MakePeerTemplatePartial(std::move(sketch));
     if (!partial) {
         m_peer_reconcile.erase(it);
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
     if (partial->CompletedSuccessfully()) {
         // All txs matched locally; promote directly.
@@ -986,11 +1005,10 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
         m_peer_reconcile.erase(it);
         m_peer_templates.push_back(std::move(pt));
         m_peer_template_cache[nodeid] = &m_peer_templates.back();
-        return {TmpltState::DONE, templatehash, {}, {}, {}};
+        return {TmpltState::DONE, templatehash, {}, {}};
     }
-    auto missing_gr = partial->m_missing.GREncode();
     SetPeerReconcile(nodeid, std::move(*partial));
-    return {TmpltState::NEEDS_TXS, templatehash, {}, {}, std::move(missing_gr)};
+    return {TmpltState::NEEDS_TXS, templatehash, {}, {}};
 }
 
 void TemplateManager::WaitingForPeerSketch(NodeId nodeid)
@@ -1011,7 +1029,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
             SetPeerReconcile(nodeid, std::monostate{});
             m_peer_reconcile.erase(nodeid);
         }
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
 
     const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
@@ -1034,7 +1052,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
             } catch (...) {
                 // sending corrupt shortid data suggests sketches might be corrupt too,
                 // so don't try to recover automatically
-                return {TmpltState::ERROR, templatehash, {}, {}, {}};
+                return {TmpltState::ERROR, templatehash, {}, {}};
             }
             txs.reserve(sel.Count());
             shortids.reserve(sel.Count());
@@ -1043,7 +1061,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
                     uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
                     if (pos >= basis.m_txs.size()) {
                         RemoveTxs(std::move(txs));
-                        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+                        return {TmpltState::ERROR, templatehash, {}, {}};
                     }
                     const auto& ref = basis.m_txs[pos];
                     ++ref->num_templates;
@@ -1080,7 +1098,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
         pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches);
     } catch (...) {
         RemoveTxs(std::move(sketch.m_txs));
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
     auto rec_it = SetPeerReconcile(nodeid, std::move(sketch));
     return CompleteSketchRound(rec_it, pr);
@@ -1095,32 +1113,149 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     // Must be a PeerTemplateSketch with matching hash.
     auto [is_sketch, it] = GetPeerRecState<PeerTemplateSketch>(m_peer_reconcile, nodeid);
     if (!is_sketch) {
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
     auto& sketch = std::get<PeerTemplateSketch>(it->second);
     if (sketch.m_hash != templatehash) {
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
 
     // Validate masks: must not overlap, and must cover exactly the unresolved groups.
     if ((shortidmask & sketchmask).Any()) {
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
     // Compute resolved groups at current level: a group is resolved if all its buckets are.
     const int num_groups = 4 << sketch.m_sketch_level;
     GroupMask resolved_groups = GroupMask::Fill(num_groups) & sketch.m_bucket_resolved;
     if (((shortidmask | sketchmask) ^ resolved_groups) != GroupMask::Fill(num_groups)) {
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
 
     PeerTemplateSketch::ProcessResult pr;
     try {
         pr = sketch.Process(round, shortidmask, sketchmask, shortid_bytes, sketches);
     } catch (...) {
-        return {TmpltState::ERROR, templatehash, {}, {}, {}};
+        return {TmpltState::ERROR, templatehash, {}, {}};
     }
 
     return CompleteSketchRound(it, pr);
+}
+
+TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId nodeid, const CTxMemPool& mempool, ExtraTransactions& extra_txns)
+{
+    LocalFillResult res{};
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+    if (!is_partial) return res;
+    auto& partial = std::get<PeerTemplatePartial>(it->second);
+    if (!partial.m_shortid_info) { res.still_missing = partial.m_missing.Count(); return res; }
+
+    auto info = std::move(partial.m_shortid_info);
+    partial.m_shortid_info.reset();
+
+    const auto& missing_sids = info->missing_shortids;
+    if (missing_sids.empty()) { res.still_missing = partial.m_missing.Count(); return res; }
+
+    // Build shortid → position-in-m_txs map.
+    std::unordered_map<uint64_t, uint32_t> sid_to_pos(missing_sids.size());
+    {
+        size_t i = 0;
+        for (size_t chunk_idx = 0; chunk_idx < partial.m_missing.m_positions.size(); ++chunk_idx) {
+            for (unsigned bit : partial.m_missing.m_positions[chunk_idx]) {
+                if (i >= missing_sids.size()) break;
+                uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
+                auto [sit, inserted] = sid_to_pos.emplace(missing_sids[i], pos);
+                Assume(inserted); // already guaranteed by MakePeerTemplatePartial
+                ++i;
+            }
+        }
+    }
+
+    const uint256& tip_hash = partial.m_tip ? partial.m_tip->GetBlockHash() : uint256::ZERO;
+    ShortIDHasher hasher(tip_hash, info->nonce);
+
+    // Candidates keyed by position in m_txs: false = no match,
+    // CTransactionRef = mempool/extra hit, TemplateTxRef = pool hit, true = collision.
+    using Hit = std::variant<bool, CTransactionRef, TemplateTxRef>;
+    std::unordered_map<uint32_t, Hit> candidates;
+    size_t match_count = 0;
+
+    auto try_match = [&](const Wtxid& wtxid, const auto& tx) {
+        uint64_t sid = hasher.GetShortID(wtxid);
+        auto find_it = sid_to_pos.find(sid);
+        if (find_it == sid_to_pos.end()) return;
+        uint32_t pos = find_it->second;
+        auto [cit, inserted] = candidates.try_emplace(pos, tx);
+        if (inserted) {
+            ++match_count;
+        } else if (!std::holds_alternative<bool>(cit->second)) {
+            // Already have a candidate — check if it's the same tx.
+            const Wtxid* existing_wtxid = nullptr;
+            if (auto* ref = std::get_if<CTransactionRef>(&cit->second)) {
+                existing_wtxid = &(*ref)->GetWitnessHash();
+            } else if (auto* ref = std::get_if<TemplateTxRef>(&cit->second)) {
+                existing_wtxid = &(*ref)->tx->GetWitnessHash();
+            }
+            if (existing_wtxid && *existing_wtxid != wtxid) {
+                cit->second = true; // collision
+                --match_count;
+            }
+        }
+    };
+
+    // Scan template pool.
+    for (const auto& [wtxid, ref] : m_scannable_txns) {
+        try_match(wtxid, ref);
+        if (match_count == sid_to_pos.size()) break;
+    }
+
+    // Scan mempool.
+    if (match_count < sid_to_pos.size()) {
+        LOCK(mempool.cs);
+        for (const auto& [wtxid, txit] : mempool.txns_randomized) {
+            try_match(wtxid, txit->GetSharedTx());
+            if (match_count == sid_to_pos.size()) break;
+        }
+    }
+
+    // Scan extra transactions.
+    while (match_count < sid_to_pos.size()) {
+        auto [wtxid, tx] = extra_txns.next();
+        if (!tx) break;
+        try_match(*wtxid, *tx);
+    }
+
+    // Fill matched positions, counting by source type.
+    for (auto& [pos, hit] : candidates) {
+        std::visit(util::Overloaded(
+            [&](bool&& collision) { if (collision) ++res.collisions; },
+            [&](CTransactionRef&& tx) {
+                auto ref = AddTx(std::move(tx));
+                partial.m_weight += ref->weight;
+                partial.m_txs[pos] = std::move(ref);
+                partial.m_missing.Remove(pos);
+                ++partial.m_filled;
+                ++res.from_txns;
+            },
+            [&](TemplateTxRef&& ref) {
+                ++ref->num_templates;
+                partial.m_weight += ref->weight;
+                partial.m_txs[pos] = std::move(ref);
+                partial.m_missing.Remove(pos);
+                ++partial.m_filled;
+                ++res.from_templates;
+            }
+        ), std::move(hit));
+    }
+
+    res.still_missing = partial.m_missing.Count();
+    return res;
+}
+
+std::vector<uint8_t> TemplateManager::GetPeerPartialMissingGR(NodeId nodeid)
+{
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+    if (!is_partial) return {};
+    return std::get<PeerTemplatePartial>(it->second).m_missing.GREncode();
 }
 
 std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)

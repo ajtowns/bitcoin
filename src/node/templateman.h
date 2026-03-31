@@ -29,6 +29,7 @@
 
 class CBlockIndex;
 class CTxMemPool;
+class ExtraTransactions;
 class GenTxid;
 typedef int64_t NodeId;
 
@@ -213,6 +214,9 @@ public:
 
     /** Set position p, extending m_positions with empty chunks as needed. */
     void Add(uint32_t p);
+
+    /** Clear position p. */
+    void Remove(uint32_t p);
 
     // Golomb-Rice encode positions: compact_size(n) + P + GR-encoded gaps, or empty if none.
     std::vector<uint8_t> GREncode() const;
@@ -416,6 +420,13 @@ public:
     TemplateTxnsSelection m_missing; //!< bitset of unfilled positions
     size_t m_filled{0};              //!< number of positions filled so far
 
+    /** Short ID info for local fill, cleared after use. */
+    struct ShortIDInfo {
+        uint64_t nonce;
+        std::vector<uint64_t> missing_shortids; //!< parallel to m_missing positions
+    };
+    std::unique_ptr<ShortIDInfo> m_shortid_info;
+
     /** Fill the next missing positions using the provided txrefs (in position order).
      *  Returns true if all positions are now filled. */
     bool Fill(std::vector<TemplateTxRef>&& refs);
@@ -454,7 +465,6 @@ public:
         TmpltState state;
         uint256 hash;                    //!< template hash
         GroupMask shortidmask, sketchmask; //!< only meaningful when state == UNRESOLVED
-        std::vector<uint8_t> missing_gr; //!< GR-encoded missing positions; only when state == NEEDS_TXS
     };
 
     /** Return a jittered time point uniformly distributed in [now + avg/2, now + 3*avg/2). */
@@ -594,6 +604,20 @@ public:
      *  Returns {ERROR, 0} on unexpected state or hash mismatch,
      *  {NEEDS_TXS, 0} if more data is needed, or {DONE, ntxs} on success. */
     std::pair<TmpltState, uint32_t> FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs);
+
+    struct LocalFillResult {
+        size_t still_missing;  //!< positions still unfilled after local scan
+        size_t from_templates; //!< matched from template tx pool (TemplateTxRef)
+        size_t from_txns;      //!< matched from mempool or extra txns (CTransactionRef)
+        size_t collisions;     //!< short ID collisions (left unfilled)
+    };
+
+    /** Try to fill missing partial positions from local sources (template pool,
+     *  mempool, extra txns). Consumes and clears m_shortid_info. */
+    LocalFillResult FillPeerPartialLocally(NodeId nodeid, const CTxMemPool& mempool, ExtraTransactions& extra_txns);
+
+    /** GR-encode the current missing positions for a peer's partial template. */
+    std::vector<uint8_t> GetPeerPartialMissingGR(NodeId nodeid);
 
     /** Return the hash of the most recent completed template from this peer,
      *  for use as a basis hint in the next gettmplt n=0. */
