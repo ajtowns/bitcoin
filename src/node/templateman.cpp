@@ -1267,7 +1267,11 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
 
     auto refs = AddTxs(txs);
     if (!partial.Fill(std::move(refs))) return {TmpltState::NEEDS_TXS, 0};
-    if (!partial.CompletedSuccessfully()) return {TmpltState::ERROR, 0};
+    if (!partial.CompletedSuccessfully()) {
+        RemoveTxs(std::move(partial.m_txs));
+        m_peer_reconcile.erase(it);
+        return {TmpltState::ERROR, 0};
+    }
 
     // Promote to completed PeerTemplate.
     uint32_t ntxs = partial.m_txs.size();
