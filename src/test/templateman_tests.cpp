@@ -191,8 +191,9 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_decode_mask)
 
     // Round 0 should fail: per stride-4 group diff = 72 > 64 (SKETCH_CAPACITY).
     // Each stride-4 group has 4 even buckets (diff 9 each = 36) + 4 odd buckets (diff 9 each = 36) = 72.
-    BOOST_REQUIRE(!sketch.Init(std::move(txs), std::move(sids), basis_count,
-                               provider.GetSketches(0)).resolved);
+    auto init_result = sketch.Init(std::move(txs), std::move(sids), basis_count,
+                                    provider.GetSketches(0));
+    BOOST_REQUIRE(!init_result.resolved);
 
     // Round 1 should resolve: each stride-8 group has diff 36 ≤ 64.
     // Even stride-8 groups resolve via basis-only; odd stride-8 groups via basis+local.
