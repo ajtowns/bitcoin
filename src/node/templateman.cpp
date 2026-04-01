@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <iostream>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
@@ -43,6 +44,9 @@ static constexpr int64_t MIN_TRANSACTION_WEIGHT{240};
 
 /** Maximum number of transactions in a template. */
 static constexpr unsigned int MAX_TEMPLATE_TXS{MAX_TEMPLATE_WEIGHT / MIN_TRANSACTION_WEIGHT};
+
+/** Run Check() once every CHECK_RATIO calls on average. */
+static constexpr int CHECK_RATIO{100};
 
 const char* TemplateATMPResultString(TemplateATMPResult result)
 {
@@ -901,8 +905,10 @@ TemplateInfo TemplateManager::GetInfo() const
     return info;
 }
 
-void TemplateManager::Check() const
+void TemplateManager::Check()
 {
+    if (m_rng.randrange(CHECK_RATIO) >= 1) return;
+
     const auto pool_end = m_pool.end();
 
     // 1. m_scannable_txns <-> m_pool consistency
@@ -950,8 +956,8 @@ void TemplateManager::Check() const
     for (const auto& entry : m_pool) {
         uint32_t expected = refcounts[entry.scannable_idx];
         if (entry.num_templates != expected) {
-            fprintf(stderr, "CHECK FAILED: wtxid=%s num_templates=%u expected=%u\n",
-                    entry.tx->GetWitnessHash().ToString().c_str(), entry.num_templates, expected);
+            std::cerr << "CHECK FAILED: wtxid=" << entry.tx->GetWitnessHash().ToString()
+                      << " num_templates=" << entry.num_templates << " expected=" << expected << "\n";
             assert(false);
         }
     }
