@@ -572,7 +572,7 @@ public:
     TemplateInfo GetInfo() const;
 
     /** Validate internal invariants. Asserts on failure. */
-    void Check() const;
+    void Check();
 
     // -- Receiver-side methods (called from net_processing) --
 
