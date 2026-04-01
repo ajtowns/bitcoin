@@ -348,10 +348,10 @@ public:
     BucketMask m_decoded_by_basis;
 
     /** Decoded symmetric difference shortids accumulated across all rounds. */
-    std::vector<uint64_t> m_diff_shortids;
+    std::vector<uint64_t> m_decoded_shortids;
 
-    /** Provider shortids received via round-4 fallback. */
-    std::vector<uint64_t> m_extra_shortids;
+    /** Provided shortids */
+    std::vector<uint64_t> m_provided_shortids;
 
     /** Current sketch split level: sketches are partitioned into 2^m_sketch_level groups.
      *  Set to 0 after Init, updated to `round` after PrepareRound(round). During

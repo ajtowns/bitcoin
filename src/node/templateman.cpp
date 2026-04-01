@@ -567,7 +567,7 @@ bool PeerTemplateSketch::TryDecodeGroups()
             Minisketch diff = sk.m_basis_sketches[gi].sketch;
             diff.Merge(sk.m_provider_sketches[gi].sketch);
             if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
-                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
                 for (int b = gi; b < TOTAL_BUCKETS; b += n) {
                     m_bucket_resolved.Set(b);
                     m_decoded_by_basis.Set(b);
@@ -582,7 +582,7 @@ bool PeerTemplateSketch::TryDecodeGroups()
             Minisketch diff = sk.m_local_sketches[gi].sketch;
             diff.Merge(sk.m_provider_sketches[gi].sketch);
             if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
-                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
                 for (int b = gi; b < TOTAL_BUCKETS; b += n) {
                     m_bucket_resolved.Set(b);
                 }
@@ -702,12 +702,12 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
             diff.Merge(recv_sketch);
             diff.Merge(sk.m_provider_sketches[gi].sketch);
             if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
-                for (uint64_t sid : *decoded) m_diff_shortids.push_back(sid);
+                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
                 for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
                     m_bucket_resolved.Set(b);
                     m_decoded_by_basis.Set(b);
                 }
-                for (uint64_t sid : recv) m_extra_shortids.push_back(sid);
+                for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
             }
         }
     }
@@ -721,21 +721,21 @@ void PeerTemplateSketch::FinalizeShortids()
     //      → local in diff means local IS in provider (keep); local not in diff → zero
     //  - basis+local: diff = (basis+local) Δ provider
     //      → local in diff means local NOT in provider (zero); local not in diff → keep
-    std::unordered_set<uint64_t> diff_set(m_diff_shortids.begin(), m_diff_shortids.end());
+    std::unordered_set<uint64_t> decoded_set(m_decoded_shortids.begin(), m_decoded_shortids.end());
     std::unordered_set<uint64_t> our_set(m_shortids.begin(), m_shortids.end());
 
     for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
         uint64_t sid = m_shortids[i];
-        bool in_diff = diff_set.count(sid);
-        bool in_provider = m_decoded_by_basis[sid & (TOTAL_BUCKETS - 1)] ? in_diff : !in_diff;
+        bool in_decoded = decoded_set.count(sid);
+        bool in_provider = m_decoded_by_basis[sid & (TOTAL_BUCKETS - 1)] ? in_decoded : !in_decoded;
         if (!in_provider) m_shortids[i] = 0;
     }
 
     // Append provider shortids we don't have in our local/basis set
-    for (uint64_t sid : m_diff_shortids) {
+    for (uint64_t sid : m_decoded_shortids) {
         if (our_set.insert(sid).second) m_shortids.push_back(sid);
     }
-    for (uint64_t sid : m_extra_shortids) {
+    for (uint64_t sid : m_provided_shortids) {
         if (our_set.insert(sid).second) m_shortids.push_back(sid);
     }
 }
