@@ -113,7 +113,7 @@ const LocalTemplate::Delta& LocalTemplate::GetDelta(const Template& basis)
         // Collect retained positions (in basis order) into a TemplateTxnsSelection
         TemplateTxnsSelection sel;
         for (size_t i = 0; i < basis.m_txs.size(); ++i) {
-            if (retained_set.count(basis.m_txs[i]->tx.get())) {
+            if (retained_set.contains(basis.m_txs[i]->tx.get())) {
                 sel.Add(i);
             }
         }
@@ -1115,7 +1115,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
         txs.reserve(basis_count + local_tmpl.m_txs.size());
         shortids.reserve(basis_count + local_tmpl.m_txs.size());
         for (const auto& ref : local_tmpl.m_txs) {
-            if (basis_tx_set.count(ref->tx.get())) continue;
+            if (basis_tx_set.contains(ref->tx.get())) continue;
             ++ref->num_templates;
             shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
             txs.push_back(ref);
