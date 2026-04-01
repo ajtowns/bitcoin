@@ -1443,7 +1443,8 @@ std::pair<bool, CTransactionRef> PeerTemplate::ConsumeParentCandidates(const CTr
 
 void PeerTemplate::StashPackageCandidate(CTransactionRef tx, uint32_t nchildren) const
 {
-    m_package_candidates.emplace(tx->GetHash(), PackageCandidate{std::move(tx), nchildren});
+    const auto& txid = tx->GetHash();
+    m_package_candidates.emplace(txid, PackageCandidate{std::move(tx), nchildren});
 }
 
 TemplateManager::NextTemplateTx TemplateManager::GetNextTemplateTx(
