@@ -10,6 +10,7 @@
 #include <test/util/random.h>
 
 #include <algorithm>
+#include <iostream>
 #include <array>
 #include <numeric>
 #include <vector>
@@ -157,19 +158,19 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     if (!is_honest) return;
 
     if (result != prov_sids) {
-        fprintf(stderr, "MISMATCH result.size=%zu prov_sids.size=%zu\n", result.size(), prov_sids.size());
-        fprintf(stderr, "decoded_by_basis.Count()=%u basis_count=%zu\n", sketch.m_decoded_by_basis.Count(), sketch.m_basis_count);
-        fprintf(stderr, "shortids(%zu):", sketch.m_shortids.size());
-        for (uint64_t sid : sketch.m_shortids) fprintf(stderr, " %llu", (unsigned long long)sid);
-        fprintf(stderr, "\nprov_sids(%zu):", prov_sids.size());
-        for (uint64_t sid : prov_sids) fprintf(stderr, " %llu", (unsigned long long)sid);
-        fprintf(stderr, "\nresult(%zu):", result.size());
-        for (uint64_t sid : result) fprintf(stderr, " %llu", (unsigned long long)sid);
-        fprintf(stderr, "\ndiff_shortids(%zu):", sketch.m_diff_shortids.size());
-        for (uint64_t sid : sketch.m_diff_shortids) fprintf(stderr, " %llu", (unsigned long long)sid);
-        fprintf(stderr, "\nextra_shortids(%zu):", sketch.m_extra_shortids.size());
-        for (uint64_t sid : sketch.m_extra_shortids) fprintf(stderr, " %llu", (unsigned long long)sid);
-        fprintf(stderr, "\n");
+        std::cerr << "MISMATCH result.size=" << result.size() << " prov_sids.size=" << prov_sids.size() << "\n";
+        std::cerr << "decoded_by_basis.Count()=" << sketch.m_decoded_by_basis.Count() << " basis_count=" << sketch.m_basis_count << "\n";
+        std::cerr << "shortids(" << sketch.m_shortids.size() << "):";
+        for (uint64_t sid : sketch.m_shortids) std::cerr << " " << sid;
+        std::cerr << "\nprov_sids(" << prov_sids.size() << "):";
+        for (uint64_t sid : prov_sids) std::cerr << " " << sid;
+        std::cerr << "\nresult(" << result.size() << "):";
+        for (uint64_t sid : result) std::cerr << " " << sid;
+        std::cerr << "\ndiff_shortids(" << sketch.m_diff_shortids.size() << "):";
+        for (uint64_t sid : sketch.m_diff_shortids) std::cerr << " " << sid;
+        std::cerr << "\nextra_shortids(" << sketch.m_extra_shortids.size() << "):";
+        for (uint64_t sid : sketch.m_extra_shortids) std::cerr << " " << sid;
+        std::cerr << "\n";
     }
     assert(result == prov_sids);
 }
