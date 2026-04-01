@@ -80,9 +80,6 @@ static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{10};
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 
-/** Maximum number of transactions in a template (minimum tx weight = 60 bytes * 4 = 240). */
-static constexpr unsigned int MAX_TEMPLATE_TXS{MAX_TEMPLATE_WEIGHT / 240};
-
 /** Entry in the shared template tx pool. Ordered by wtxid. */
 struct TemplateTx {
     CTransactionRef tx;
@@ -610,6 +607,7 @@ public:
         size_t from_templates; //!< matched from template tx pool (TemplateTxRef)
         size_t from_txns;      //!< matched from mempool or extra txns (CTransactionRef)
         size_t collisions;     //!< short ID collisions (left unfilled)
+        bool oversize{false};  //!< estimated weight exceeds MAX_TEMPLATE_WEIGHT
     };
 
     /** Try to fill missing partial positions from local sources (template pool,
