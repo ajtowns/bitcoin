@@ -678,8 +678,9 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
         }
     }
 
-    // For each unresolved group, try (basis + received_outer) XOR provider.
-    // Since received_outer ⊆ provider, diff = provider_inner \ basis (≤SKETCH_CAPACITY elements).
+    // For each unresolved group, XOR provided shortids with provider sketch
+    // to recover the inner shortids (≤SKETCH_CAPACITY). Full provider set for
+    // this group = provided + decoded inner.
     auto& sk = *m_sketches;
     for (int gi = 0; gi < num_groups; ++gi) {
         // Check if group is already fully resolved
@@ -690,24 +691,19 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
         if (group_resolved) continue;
 
         auto& recv = received[gi];
-        int basis_count    = sk.m_basis_sketches[gi].count;
-        int received_count = static_cast<int>(recv.size());
-        int provider_count = sk.m_provider_sketches[gi].count;
+        if (recv.empty()) continue;
 
-        if (basis_count + received_count + SKETCH_CAPACITY >= provider_count) {
-            Minisketch recv_sketch = MakeMinisketch46(SKETCH_CAPACITY);
-            for (uint64_t sid : recv) recv_sketch.Add(sid);
+        // recv XOR provider = inner shortids (outer cancels)
+        Minisketch recv_sketch = MakeMinisketch46(SKETCH_CAPACITY);
+        for (uint64_t sid : recv) recv_sketch.Add(sid);
+        recv_sketch.Merge(sk.m_provider_sketches[gi].sketch);
 
-            Minisketch diff = sk.m_basis_sketches[gi].sketch;
-            diff.Merge(recv_sketch);
-            diff.Merge(sk.m_provider_sketches[gi].sketch);
-            if (auto decoded = diff.Decode(SKETCH_CAPACITY)) {
-                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
-                for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
-                    m_bucket_resolved.Set(b);
-                    m_decoded_by_basis.Set(b);
-                }
-                for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
+        if (auto decoded = recv_sketch.Decode(SKETCH_CAPACITY)) {
+            for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
+            for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
+            for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+                m_bucket_resolved.Set(b);
+                m_has_provided.Set(b);
             }
         }
     }
@@ -715,23 +711,29 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
 
 void PeerTemplateSketch::FinalizeShortids()
 {
-    // diff semantics differ by decode type:
-    //  - basis-only (m_decoded_by_basis bit set): diff = provider \ basis
-    //      (assumes basis ⊆ provider; see TryDecodeGroups comment)
-    //      → local in diff means local IS in provider (keep); local not in diff → zero
-    //  - basis+local: diff = (basis+local) Δ provider
-    //      → local in diff means local NOT in provider (zero); local not in diff → keep
     std::unordered_set<uint64_t> decoded_set(m_decoded_shortids.begin(), m_decoded_shortids.end());
+    std::unordered_set<uint64_t> provided_set(m_provided_shortids.begin(), m_provided_shortids.end());
     std::unordered_set<uint64_t> our_set(m_shortids.begin(), m_shortids.end());
 
+    // Discard shortids from local set that didn't turn out to be in the template:
+    //  - has_provided: provider = provided ∪ decoded
+    //  - decoded_by_basis: provider = basis ∪ decoded
+    //  - else (basis+local): provider = basis ∪ (local XOR decoded)
     for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
         uint64_t sid = m_shortids[i];
-        bool in_decoded = decoded_set.count(sid);
-        bool in_provider = m_decoded_by_basis[sid & (TOTAL_BUCKETS - 1)] ? in_decoded : !in_decoded;
-        if (!in_provider) m_shortids[i] = 0;
+        int b = sid & (TOTAL_BUCKETS - 1);
+        bool keep_in_template;
+        if (m_has_provided[b]) {
+            keep_in_template = provided_set.contains(sid) || decoded_set.contains(sid);
+        } else if (m_decoded_by_basis[b]) {
+            keep_in_template = decoded_set.contains(sid);
+        } else {
+            keep_in_template = !decoded_set.contains(sid);
+        }
+        if (!keep_in_template) m_shortids[i] = 0;
     }
 
-    // Append provider shortids we don't have in our local/basis set
+    // Append provider shortids we didn't have in our original basis/local set
     for (uint64_t sid : m_decoded_shortids) {
         if (our_set.insert(sid).second) m_shortids.push_back(sid);
     }

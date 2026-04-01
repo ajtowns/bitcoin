@@ -340,17 +340,18 @@ public:
     /** Bitmask: bit b set once bucket b is reconciled. */
     BucketMask m_bucket_resolved;
 
-    /** Bitmask tracking which buckets were decoded via basis^provider (rather than
-     *  (basis+local)^provider). In these buckets the diff shortids represent provider-only
-     *  elements (provider\basis); in other buckets the diff is the full symmetric difference.
-     *  Used by FinalizeShortids to correctly classify diff elements as kept-local vs
-     *  provider-only. */
+    /** Bitmask: bucket resolved via basis-only sketch decode.
+     *  decoded_shortids for these buckets = provider \ basis. */
     BucketMask m_decoded_by_basis;
 
-    /** Decoded symmetric difference shortids accumulated across all rounds. */
+    /** Bitmask: bucket resolved via shortid fallback (provided + decoded).
+     *  Provider set = provided_shortids ∪ decoded_shortids for these buckets. */
+    BucketMask m_has_provided;
+
+    /** Decoded shortids from sketch decode (≤64 per sketch). */
     std::vector<uint64_t> m_decoded_shortids;
 
-    /** Provided shortids */
+    /** Explicitly provided shortids (from shortid fallback). */
     std::vector<uint64_t> m_provided_shortids;
 
     /** Current sketch split level: sketches are partitioned into 2^m_sketch_level groups.
