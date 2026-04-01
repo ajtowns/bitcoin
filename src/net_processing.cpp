@@ -1330,6 +1330,13 @@ static bool CanServeWitnesses(const Peer& peer)
     return peer.m_their_services & NODE_WITNESS;
 }
 
+/** Whether this peer supports template sharing (GETTMPLT/TMPLT).
+ *  Block-relay-only and private broadcast connections do not participate. */
+static bool PeerCanGETTMPLT(const CNode& node)
+{
+    return !node.IsBlockOnlyConn() && !node.IsPrivateBroadcastConn();
+}
+
 std::chrono::microseconds PeerManagerImpl::NextInvToInbounds(std::chrono::microseconds now,
                                                              std::chrono::seconds average_interval,
                                                              uint64_t network_key)
@@ -4070,7 +4077,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         if (greatest_common_version >= FEATURE_VERSION) {
             // announce supported features
-            if (!pfrom.IsBlockOnlyConn()) {
+            if (PeerCanGETTMPLT(pfrom)) {
                 // Announce BIN-2025-0002 template sharing support
                 MakeAndPushFeature(pfrom, NetMsgFeature::BIN25_2);
             }
@@ -4413,9 +4420,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::GETTMPLT) {
-        if (pfrom.IsBlockOnlyConn()) {
-            LogDebug(BCLog::GETTMPLT, "Disconnecting: got GETTMPLT from block-relay-only %s",
-                     pfrom.LogPeer());
+        if (!PeerCanGETTMPLT(pfrom)) {
+            LogDebug(BCLog::GETTMPLT, "Disconnecting: got GETTMPLT from %s %s",
+                     pfrom.ConnectionTypeAsString(), pfrom.LogPeer());
             pfrom.fDisconnect = true;
             return;
         }
@@ -4476,9 +4483,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     }
 
     if (msg_type == NetMsgType::GETTMPLTTXN) {
-        if (pfrom.IsBlockOnlyConn()) {
-            LogDebug(BCLog::GETTMPLT, "Disconnecting: got GETTMPLTTXN from block-relay-only %s",
-                     pfrom.LogPeer());
+        if (!PeerCanGETTMPLT(pfrom)) {
+            LogDebug(BCLog::GETTMPLT, "Disconnecting: got GETTMPLTTXN from %s %s",
+                     pfrom.ConnectionTypeAsString(), pfrom.LogPeer());
             pfrom.fDisconnect = true;
             return;
         }
