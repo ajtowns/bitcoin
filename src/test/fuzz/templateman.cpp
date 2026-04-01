@@ -166,10 +166,10 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
         for (uint64_t sid : prov_sids) std::cerr << " " << sid;
         std::cerr << "\nresult(" << result.size() << "):";
         for (uint64_t sid : result) std::cerr << " " << sid;
-        std::cerr << "\ndiff_shortids(" << sketch.m_diff_shortids.size() << "):";
-        for (uint64_t sid : sketch.m_diff_shortids) std::cerr << " " << sid;
-        std::cerr << "\nextra_shortids(" << sketch.m_extra_shortids.size() << "):";
-        for (uint64_t sid : sketch.m_extra_shortids) std::cerr << " " << sid;
+        std::cerr << "\ndiff_shortids(" << sketch.m_decoded_shortids.size() << "):";
+        for (uint64_t sid : sketch.m_decoded_shortids) std::cerr << " " << sid;
+        std::cerr << "\nextra_shortids(" << sketch.m_provided_shortids.size() << "):";
+        for (uint64_t sid : sketch.m_provided_shortids) std::cerr << " " << sid;
         std::cerr << "\n";
     }
     assert(result == prov_sids);
