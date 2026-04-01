@@ -5709,7 +5709,10 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         return;
     case UNRESOLVED:
     {
-        assert(round < 4);
+        if (round >= 4) {
+            LogDebug(BCLog::GETTMPLT, "Template reconciliation unresolved after round 4 peer=%d (bug?), ignoring", node.GetId());
+            return;
+        }
         uint32_t shortidmask_raw{0}, sketchmask_raw{0};
         result.shortidmask.ToUint32(std::span{&shortidmask_raw, 1});
         result.sketchmask.ToUint32(std::span{&sketchmask_raw, 1});
