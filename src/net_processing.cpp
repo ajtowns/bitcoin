@@ -5724,9 +5724,14 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         // Try to fill missing positions from local sources before requesting from peer.
         VectorExtraTransactions extra{vExtraTxnForCompact};
         auto fill = m_templateman.FillPeerPartialLocally(node.GetId(), m_mempool, extra);
-        LogDebug(BCLog::GETTMPLT, "Local fill for template %s peer=%d: %d from templates, %d from mempool+extra, %d collisions, %d still missing",
+        LogDebug(BCLog::GETTMPLT, "Local fill for template %s peer=%d: %d from templates, %d from mempool+extra, %d collisions, %d still missing%s",
                  result.hash.ToString(), node.GetId(),
-                 fill.from_templates, fill.from_txns, fill.collisions, fill.still_missing);
+                 fill.from_templates, fill.from_txns, fill.collisions, fill.still_missing,
+                 fill.oversize ? " (OVERSIZE, abandoned)" : "");
+        if (fill.oversize) {
+            peer.m_next_gettmplt = NodeClock::time_point::max();
+            return;
+        }
         if (fill.still_missing == 0) return;
         auto missing_gr = m_templateman.GetPeerPartialMissingGR(node.GetId());
         LogDebug(BCLog::GETTMPLT, "Sending gettmplttxn template=%s %d missing peer=%d",

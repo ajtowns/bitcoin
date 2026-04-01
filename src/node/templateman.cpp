@@ -38,6 +38,12 @@ static constexpr auto ATMP_RETRY_SLOW_INTERVAL{std::chrono::seconds{1200}};
 
 namespace node {
 
+/** Minimum transaction weight (60 bytes * 4 = 240 wu). */
+static constexpr int64_t MIN_TRANSACTION_WEIGHT{240};
+
+/** Maximum number of transactions in a template. */
+static constexpr unsigned int MAX_TEMPLATE_TXS{MAX_TEMPLATE_WEIGHT / MIN_TRANSACTION_WEIGHT};
+
 const char* TemplateATMPResultString(TemplateATMPResult result)
 {
     using enum TemplateATMPResult;
@@ -786,6 +792,7 @@ bool PeerTemplatePartial::Fill(std::vector<TemplateTxRef>&& refs)
             if (ref_it == refs.end()) break;
             uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
             if (!Assume(pos < m_txs.size())) continue;
+            m_weight += (*ref_it)->weight;
             m_txs[pos] = *ref_it++;
             m_missing.m_positions[chunk_idx].Reset(bit);
             ++m_filled;
@@ -845,13 +852,21 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
     partial.m_hash = sketch.m_hash;
     auto shortid_info = std::make_unique<PeerTemplatePartial::ShortIDInfo>();
     shortid_info->nonce = sketch.m_nonce;
+    int64_t min_missing_weight{0};
     partial.m_txs.reserve(pairs.size());
     for (size_t i = 0; i < pairs.size(); ++i) {
         partial.m_txs.push_back(pairs[i].second);
         if (pairs[i].second == pool_end) {
             partial.m_missing.Add(i);
             shortid_info->missing_shortids.push_back(pairs[i].first);
+            min_missing_weight += MIN_TRANSACTION_WEIGHT;
+        } else {
+            partial.m_weight += pairs[i].second->weight;
         }
+    }
+    if (partial.m_weight + min_missing_weight > MAX_TEMPLATE_WEIGHT) {
+        RemoveTxs(std::move(partial.m_txs));
+        return std::nullopt;
     }
     partial.m_shortid_info = std::move(shortid_info);
     return partial;
@@ -983,6 +998,12 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
     auto& sketch = std::get<PeerTemplateSketch>(it->second);
     const uint256 templatehash = sketch.m_hash;
 
+    if (sketch.m_shortids.size() > MAX_TEMPLATE_TXS) {
+        RemoveTxs(std::move(sketch.m_txs));
+        m_peer_reconcile.erase(it);
+        return {TmpltState::ERROR, templatehash, {}, {}};
+    }
+
     if (!pr.resolved) {
         // XXX store pr.shortidmask/pr.sketchmask on sketch for next round
         return {TmpltState::UNRESOLVED, templatehash, pr.shortidmask, pr.sketchmask};
@@ -994,9 +1015,15 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
         return {TmpltState::ERROR, templatehash, {}, {}};
     }
     if (partial->CompletedSuccessfully()) {
+        if (partial->m_weight > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial->m_txs));
+            m_peer_reconcile.erase(it);
+            return {TmpltState::ERROR, templatehash, {}, {}};
+        }
         // All txs matched locally; promote directly.
         PeerTemplate pt;
         pt.m_txs = std::move(partial->m_txs);
+        pt.m_weight = partial->m_weight;
         pt.m_tip = partial->m_tip;
         pt.m_hash = partial->m_hash;
         pt.m_nodeid = nodeid;
@@ -1225,12 +1252,14 @@ TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId 
     }
 
     // Fill matched positions, counting by source type.
+    auto n_missing = partial.m_missing.Count();
     for (auto& [pos, hit] : candidates) {
         std::visit(util::Overloaded(
             [&](bool&& collision) { if (collision) ++res.collisions; },
             [&](CTransactionRef&& tx) {
                 auto ref = AddTx(std::move(tx));
                 partial.m_weight += ref->weight;
+                --n_missing;
                 partial.m_txs[pos] = std::move(ref);
                 partial.m_missing.Remove(pos);
                 ++partial.m_filled;
@@ -1239,15 +1268,23 @@ TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId 
             [&](TemplateTxRef&& ref) {
                 ++ref->num_templates;
                 partial.m_weight += ref->weight;
+                --n_missing;
                 partial.m_txs[pos] = std::move(ref);
                 partial.m_missing.Remove(pos);
                 ++partial.m_filled;
                 ++res.from_templates;
             }
         ), std::move(hit));
+        if (partial.m_weight + n_missing * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial.m_txs));
+            m_peer_reconcile.erase(it);
+            res.oversize = true;
+            res.still_missing = 0;
+            return res;
+        }
     }
 
-    res.still_missing = partial.m_missing.Count();
+    res.still_missing = n_missing;
     return res;
 }
 
@@ -1266,7 +1303,14 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
     if (partial.m_hash != hash) return {TmpltState::ERROR, 0};
 
     auto refs = AddTxs(txs);
-    if (!partial.Fill(std::move(refs))) return {TmpltState::NEEDS_TXS, 0};
+    if (!partial.Fill(std::move(refs))) {
+        if (partial.m_weight + int64_t(partial.m_missing.Count()) * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial.m_txs));
+            m_peer_reconcile.erase(it);
+            return {TmpltState::ERROR, 0};
+        }
+        return {TmpltState::NEEDS_TXS, 0};
+    }
     if (!partial.CompletedSuccessfully()) {
         RemoveTxs(std::move(partial.m_txs));
         m_peer_reconcile.erase(it);
@@ -1274,9 +1318,15 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
     }
 
     // Promote to completed PeerTemplate.
+    if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
+        RemoveTxs(std::move(partial.m_txs));
+        m_peer_reconcile.erase(it);
+        return {TmpltState::ERROR, 0};
+    }
     uint32_t ntxs = partial.m_txs.size();
     PeerTemplate pt;
     pt.m_txs = std::move(partial.m_txs);
+    pt.m_weight = partial.m_weight;
     pt.m_tip = partial.m_tip;
     pt.m_hash = partial.m_hash;
     pt.m_nodeid = nodeid;
