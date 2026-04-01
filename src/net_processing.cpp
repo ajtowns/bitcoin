@@ -4597,7 +4597,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs));
         using enum node::TemplateManager::TmpltState;
         switch (state) {
-        case ERROR:
+        case FAILED:
             LogDebug(BCLog::GETTMPLT, "Got tmplttxn for unexpected state peer=%d, ignoring", pfrom.GetId());
             break;
         case NEEDS_TXS:
@@ -5703,7 +5703,7 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
 
     using enum node::TemplateManager::TmpltState;
     switch (result.state) {
-    case ERROR:
+    case FAILED:
         LogDebug(BCLog::GETTMPLT, "Template reconciliation error at round %d peer=%d, disabling requests", round, node.GetId());
         peer.m_next_gettmplt = NodeClock::time_point::max();
         return;

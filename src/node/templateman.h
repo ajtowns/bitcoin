@@ -456,7 +456,7 @@ class TemplateManager
 public:
     explicit TemplateManager(bool deterministic = false) : m_rng{deterministic} {}
 
-    enum class TmpltState { ERROR, UNRESOLVED, NEEDS_TXS, DONE };
+    enum class TmpltState { FAILED, UNRESOLVED, NEEDS_TXS, DONE };
 
     struct TmpltResult {
         TmpltState state;

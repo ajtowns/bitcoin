@@ -1001,7 +1001,7 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
     if (sketch.m_shortids.size() > MAX_TEMPLATE_TXS) {
         RemoveTxs(std::move(sketch.m_txs));
         m_peer_reconcile.erase(it);
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
     if (!pr.resolved) {
@@ -1012,13 +1012,13 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
     auto partial = MakePeerTemplatePartial(std::move(sketch));
     if (!partial) {
         m_peer_reconcile.erase(it);
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
     if (partial->CompletedSuccessfully()) {
         if (partial->m_weight > MAX_TEMPLATE_WEIGHT) {
             RemoveTxs(std::move(partial->m_txs));
             m_peer_reconcile.erase(it);
-            return {TmpltState::ERROR, templatehash, {}, {}};
+            return {TmpltState::FAILED, templatehash, {}, {}};
         }
         // All txs matched locally; promote directly.
         PeerTemplate pt;
@@ -1056,7 +1056,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
             SetPeerReconcile(nodeid, std::monostate{});
             m_peer_reconcile.erase(nodeid);
         }
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
     const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
@@ -1079,7 +1079,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
             } catch (...) {
                 // sending corrupt shortid data suggests sketches might be corrupt too,
                 // so don't try to recover automatically
-                return {TmpltState::ERROR, templatehash, {}, {}};
+                return {TmpltState::FAILED, templatehash, {}, {}};
             }
             txs.reserve(sel.Count());
             shortids.reserve(sel.Count());
@@ -1088,7 +1088,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
                     uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
                     if (pos >= basis.m_txs.size()) {
                         RemoveTxs(std::move(txs));
-                        return {TmpltState::ERROR, templatehash, {}, {}};
+                        return {TmpltState::FAILED, templatehash, {}, {}};
                     }
                     const auto& ref = basis.m_txs[pos];
                     ++ref->num_templates;
@@ -1125,7 +1125,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
         pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches);
     } catch (...) {
         RemoveTxs(std::move(sketch.m_txs));
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
     auto rec_it = SetPeerReconcile(nodeid, std::move(sketch));
     return CompleteSketchRound(rec_it, pr);
@@ -1140,29 +1140,29 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     // Must be a PeerTemplateSketch with matching hash.
     auto [is_sketch, it] = GetPeerRecState<PeerTemplateSketch>(m_peer_reconcile, nodeid);
     if (!is_sketch) {
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
     auto& sketch = std::get<PeerTemplateSketch>(it->second);
     if (sketch.m_hash != templatehash) {
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
     // Validate masks: must not overlap, and must cover exactly the unresolved groups.
     if ((shortidmask & sketchmask).Any()) {
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
     // Compute resolved groups at current level: a group is resolved if all its buckets are.
     const int num_groups = 4 << sketch.m_sketch_level;
     GroupMask resolved_groups = GroupMask::Fill(num_groups) & sketch.m_bucket_resolved;
     if (((shortidmask | sketchmask) ^ resolved_groups) != GroupMask::Fill(num_groups)) {
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
     PeerTemplateSketch::ProcessResult pr;
     try {
         pr = sketch.Process(round, shortidmask, sketchmask, shortid_bytes, sketches);
     } catch (...) {
-        return {TmpltState::ERROR, templatehash, {}, {}};
+        return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
     return CompleteSketchRound(it, pr);
@@ -1298,30 +1298,30 @@ std::vector<uint8_t> TemplateManager::GetPeerPartialMissingGR(NodeId nodeid)
 std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)
 {
     auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
-    if (!is_partial) return {TmpltState::ERROR, 0};
+    if (!is_partial) return {TmpltState::FAILED, 0};
     auto& partial = std::get<PeerTemplatePartial>(it->second);
-    if (partial.m_hash != hash) return {TmpltState::ERROR, 0};
+    if (partial.m_hash != hash) return {TmpltState::FAILED, 0};
 
     auto refs = AddTxs(txs);
     if (!partial.Fill(std::move(refs))) {
         if (partial.m_weight + int64_t(partial.m_missing.Count()) * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
             RemoveTxs(std::move(partial.m_txs));
             m_peer_reconcile.erase(it);
-            return {TmpltState::ERROR, 0};
+            return {TmpltState::FAILED, 0};
         }
         return {TmpltState::NEEDS_TXS, 0};
     }
     if (!partial.CompletedSuccessfully()) {
         RemoveTxs(std::move(partial.m_txs));
         m_peer_reconcile.erase(it);
-        return {TmpltState::ERROR, 0};
+        return {TmpltState::FAILED, 0};
     }
 
     // Promote to completed PeerTemplate.
     if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
         RemoveTxs(std::move(partial.m_txs));
         m_peer_reconcile.erase(it);
-        return {TmpltState::ERROR, 0};
+        return {TmpltState::FAILED, 0};
     }
     uint32_t ntxs = partial.m_txs.size();
     PeerTemplate pt;
