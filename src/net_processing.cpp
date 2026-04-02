@@ -5742,7 +5742,15 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
             peer.m_next_gettmplt = NodeClock::time_point::max();
             return;
         }
-        if (fill.still_missing == 0) return;
+        if (fill.still_missing == 0) {
+            // Local fill found everything; finalize without requesting from peer.
+            auto [state, ntxs] = m_templateman.FillPeerPartial(node.GetId(), result.hash, {});
+            if (state == DONE) {
+                LogDebug(BCLog::GETTMPLT, "Completed peer template %s (%d txs, no remote fetch) peer=%d",
+                         result.hash.ToString(), ntxs, node.GetId());
+            }
+            return;
+        }
         auto missing_gr = m_templateman.GetPeerPartialMissingGR(node.GetId());
         LogDebug(BCLog::GETTMPLT, "Sending gettmplttxn template=%s %d missing peer=%d",
                  result.hash.ToString(), fill.still_missing, node.GetId());
