@@ -5920,8 +5920,9 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     WITH_LOCK(m_template_mutex,
               m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, next.nchildren));
 
-    LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d children=%d wtxid=%s peer=%d",
-             node::TemplateATMPResultString(result), next.pos, next.total, next.nchildren,
+    LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d 1p1c=%d children=%d wtxid=%s peer=%d",
+             node::TemplateATMPResultString(result), next.pos, next.total,
+             next.package_parent ? 1 : 0, next.nchildren,
              next.tx->GetWitnessHash().ToString(), peer.m_id);
     return true;
 }
