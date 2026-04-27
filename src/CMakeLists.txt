@@ -158,7 +158,6 @@ if(ENABLE_WALLET)
   if(BUILD_WALLET_TOOL)
     add_executable(bitcoin-wallet
       bitcoin-wallet.cpp
-      init/bitcoin-wallet.cpp
       wallet/wallettool.cpp
     )
     add_windows_resources(bitcoin-wallet bitcoin-wallet-res.rc)

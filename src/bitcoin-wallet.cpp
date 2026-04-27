@@ -11,10 +11,10 @@
 #include <common/license_info.h>
 #include <common/system.h>
 #include <compat/compat.h>
-#include <interfaces/init.h>
 #include <key.h>
 #include <logging.h>
 #include <pubkey.h>
+#include <random.h>
 #include <tinyformat.h>
 #include <util/exception.h>
 #include <util/translation.h>
@@ -95,12 +95,6 @@ static std::optional<int> WalletAppInit(ArgsManager& args, int argc, char* argv[
 MAIN_FUNCTION
 {
     ArgsManager& args = gArgs;
-
-    int exit_status;
-    std::unique_ptr<interfaces::Init> init = interfaces::MakeWalletInit(argc, argv, exit_status);
-    if (!init) {
-        return exit_status;
-    }
 
     SetupEnvironment();
     RandomInit();
