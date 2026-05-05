@@ -304,13 +304,18 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
         return a.first < b.first;
     });
     tmpl.m_txs.clear();
+    std::vector<TemplateTxRef> dups;
     uint64_t dup_check = std::numeric_limits<uint64_t>::max();
     for (auto& [sid, ref] : pairs) {
-        if (sid == dup_check) continue; // duplicates can't by expressed by sketches, so drop them
+        if (sid == dup_check) {
+            dups.push_back(ref);
+            continue; // duplicates can't by expressed by sketches, so drop them
+        }
         dup_check = sid;
         tmpl.shortids.push_back(sid);
         tmpl.m_txs.push_back(ref);
     }
+    RemoveTxs(std::move(dups));
 
     // Hash over tip_hash then wtxids in shortid order; receiver can verify independently.
     tmpl.m_hash = tmpl.ComputeHash();
