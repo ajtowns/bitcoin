@@ -7,11 +7,13 @@
 #include <random.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
+#include <test/fuzz/util.h>
 #include <test/util/random.h>
 
 #include <algorithm>
-#include <iostream>
 #include <array>
+#include <iostream>
+#include <map>
 #include <numeric>
 #include <vector>
 
@@ -187,4 +189,179 @@ FUZZ_TARGET(templateman_slow, .init = initialize_templateman)
 {
     FuzzedDataProvider fdp{buffer.data(), buffer.size()};
     run_templateman(fdp, TOTAL_BUCKETS);
+}
+
+// TemplateManager lifecycle target: exercises full TemplateManager API including
+// template generation (refcount management, shortid collision handling), trimming,
+// peer reconciliation state transitions, and invariant checking via Check().
+FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
+{
+    SeedRandomStateForTest(SeedRand::ZEROS);
+    FuzzedDataProvider fdp{buffer.data(), buffer.size()};
+
+    TemplateManager mgr{/*deterministic=*/true};
+
+    // Pre-generate a pool of lightweight transactions with unique wtxids.
+    // 3000 txs allows templates of ~2500 to overflow sketch buckets at round 0.
+    static constexpr size_t TX_POOL_SIZE = 3000;
+    std::vector<CTransactionRef> all_txs;
+    all_txs.reserve(TX_POOL_SIZE);
+    for (uint32_t i = 0; i < TX_POOL_SIZE; ++i) {
+        CMutableTransaction mtx;
+        mtx.version = CTransaction::CURRENT_VERSION;
+        uint8_t buf[32] = {};
+        WriteLE32(buf, i);
+        mtx.vin.emplace_back(COutPoint{Txid::FromUint256(uint256{buf}), 0});
+        mtx.vout.emplace_back(0, CScript{});
+        all_txs.push_back(MakeTransactionRef(std::move(mtx)));
+    }
+
+    static constexpr NodeId PEER_IDS[] = {0, 1, 2, 3};
+    auto pick_peer = [&]() {
+        return PEER_IDS[fdp.ConsumeIntegralInRange<size_t>(0, 3)];
+    };
+
+    // Select a subset of txs; duplicates allowed to trigger shortid collisions.
+    auto pick_txs = [&]() -> std::vector<CTransactionRef> {
+        std::vector<CTransactionRef> txs;
+        uint16_t count = fdp.ConsumeIntegralInRange<uint16_t>(0, 2500);
+        txs.reserve(count);
+        for (uint16_t i = 0; i < count; ++i) {
+            txs.push_back(all_txs[fdp.ConsumeIntegralInRange<size_t>(0, TX_POOL_SIZE - 1)]);
+        }
+        return txs;
+    };
+
+    int64_t time_sec = 1000;
+    auto now = [&]() { return NodeClock::time_point{std::chrono::seconds{time_sec}}; };
+
+    std::vector<uint256> generated_hashes;
+
+    // Track per-peer unresolved sketch state so UpdatePeerSketch can
+    // construct valid masks matching the sketch's actual resolved state.
+    struct PeerSketchState {
+        uint256 hash;
+        int round;
+        GroupMask shortidmask, sketchmask;
+    };
+    std::map<NodeId, PeerSketchState> peer_sketch_state;
+
+    auto handle_result = [&](NodeId peer, int round, const TemplateManager::TmpltResult& result) {
+        if (result.state == TemplateManager::TmpltState::UNRESOLVED) {
+            peer_sketch_state[peer] = {result.hash, round, result.shortidmask, result.sketchmask};
+        } else {
+            peer_sketch_state.erase(peer);
+        }
+    };
+
+    LIMITED_WHILE(fdp.remaining_bytes() > 0, 200) {
+        if (fdp.ConsumeBool()) {
+            time_sec += fdp.ConsumeIntegralInRange<int64_t>(0, 600);
+        }
+
+        CallOneOf(fdp,
+            [&]() {
+                // GenerateTemplate
+                auto txs = pick_txs();
+                if (txs.empty()) return;
+                std::span<CTransactionRef> txspan{txs};
+                uint256 hash = mgr.GenerateTemplate(now(), nullptr, txspan);
+                generated_hashes.push_back(hash);
+                if (generated_hashes.size() > 20) {
+                    generated_hashes.erase(generated_hashes.begin());
+                }
+            },
+            [&]() {
+                // TrimTemplates
+                mgr.TrimTemplates(now());
+            },
+            [&]() {
+                // WaitingForPeerSketch
+                NodeId peer = pick_peer();
+                mgr.WaitingForPeerSketch(peer);
+                peer_sketch_state.erase(peer);
+            },
+            [&]() {
+                // InitPeerSketch — use a local template as provider data
+                if (generated_hashes.empty()) return;
+                NodeId peer = pick_peer();
+                mgr.WaitingForPeerSketch(peer);
+                peer_sketch_state.erase(peer);
+                size_t idx = fdp.ConsumeIntegralInRange<size_t>(0, generated_hashes.size() - 1);
+                const LocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx]);
+                if (!tmpl) return;
+                auto result = mgr.InitPeerSketch(peer, nullptr, tmpl->m_hash,
+                                   tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), now());
+                handle_result(peer, 0, result);
+            },
+            [&]() {
+                // UpdatePeerSketch — continue a previously-started sketch reconciliation
+                NodeId peer = pick_peer();
+                auto ps_it = peer_sketch_state.find(peer);
+                if (ps_it == peer_sketch_state.end()) return;
+                auto& ps = ps_it->second;
+                if (ps.round >= 4) return;
+                const LocalTemplate* tmpl = mgr.GetLocalTemplate(ps.hash);
+                if (!tmpl) { peer_sketch_state.erase(ps_it); return; }
+                int round = ps.round + 1;
+
+                // Simulate provider side: build shortid_bytes and filtered sketches
+                // matching the masks from the previous round's result.
+                std::vector<uint8_t> shortid_bytes;
+                if (ps.shortidmask.Any()) {
+                    shortid_bytes = tmpl->GetShortIdBytes(round, ps.shortidmask);
+                }
+
+                GroupMask sketchmask = ps.sketchmask;
+                sketchmask.LimitToRound(round);
+                sketchmask -= ps.shortidmask;
+                std::vector<LocalTemplate::Sketch> filtered_sketches;
+                if (sketchmask.Any()) {
+                    auto all_sketches = tmpl->GetSketches(round);
+                    for (int i : sketchmask) {
+                        if (static_cast<size_t>(i) < all_sketches.size()) {
+                            filtered_sketches.push_back(all_sketches[i]);
+                        }
+                    }
+                }
+
+                auto result = mgr.UpdatePeerSketch(peer, ps.hash, round,
+                                     ps.shortidmask, sketchmask,
+                                     shortid_bytes, filtered_sketches, now());
+                handle_result(peer, round, result);
+            },
+            [&]() {
+                // FillPeerPartial
+                NodeId peer = pick_peer();
+                uint256 hash;
+                if (!generated_hashes.empty()) {
+                    hash = generated_hashes[fdp.ConsumeIntegralInRange<size_t>(0, generated_hashes.size() - 1)];
+                }
+                auto txs = pick_txs();
+                mgr.FillPeerPartial(peer, hash, std::move(txs), now());
+            },
+            [&]() {
+                // ForgetPeer
+                NodeId peer = pick_peer();
+                mgr.ForgetPeer(peer);
+                peer_sketch_state.erase(peer);
+            },
+            [&]() {
+                // GetLastPeerTemplateHash
+                mgr.GetLastPeerTemplateHash(pick_peer());
+            },
+            [&]() {
+                // Explicit Check
+                mgr.Check();
+            }
+        );
+
+        mgr.Check();
+    }
+
+    // Final cleanup: expire everything and verify invariants.
+    time_sec += 100000;
+    mgr.TrimTemplates(now());
+    for (NodeId peer : PEER_IDS) mgr.ForgetPeer(peer);
+    for (int i = 0; i < 200; ++i) mgr.Check();
 }
