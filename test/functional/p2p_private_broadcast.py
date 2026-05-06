@@ -14,7 +14,6 @@ from test_framework.p2p import (
     P2PDataStore,
     P2PInterface,
     P2P_SERVICES,
-    P2P_VERSION,
 )
 from test_framework.messages import (
     CAddress,
@@ -47,6 +46,7 @@ from test_framework.wallet import (
     MiniWallet,
 )
 
+P2P_PRIVATE_VERSION = 70016
 NUM_PRIVATE_BROADCAST_PER_TX = 3
 
 # Fill addrman with these addresses. Must have enough Tor addresses, so that even
@@ -333,7 +333,7 @@ class P2PPrivateBroadcast(BitcoinTestFramework):
             })
             dummy_address = CAddress()
             dummy_address.nServices = 0
-            assert_equal(peer.last_message["version"].nVersion, P2P_VERSION)
+            assert_equal(peer.last_message["version"].nVersion, P2P_PRIVATE_VERSION)
             assert_equal(peer.last_message["version"].nServices, 0)
             assert_equal(peer.last_message["version"].nTime, 0)
             assert_equal(peer.last_message["version"].addrTo, dummy_address)
