@@ -4557,7 +4557,8 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
             LOCK(m_template_mutex);
             auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
-                                                       basis_hash, basis_delta, sketches);
+                                                       basis_hash, basis_delta, sketches,
+                                                       NodeClock::now());
             ProcessTemplateSketchUpdate(pfrom, peer, 0, result);
         } else if (round <= 4) {
             uint32_t shortidmask_raw{0}, sketchmask_raw{0};
@@ -4574,7 +4575,8 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             LOCK(m_template_mutex);
             auto result = m_templateman.UpdatePeerSketch(pfrom.GetId(), hash, round,
                                                          shortidmask, sketchmask,
-                                                         shortid_bytes, sketches);
+                                                         shortid_bytes, sketches,
+                                                         NodeClock::now());
             ProcessTemplateSketchUpdate(pfrom, peer, round, result);
         } else {
             LogDebug(BCLog::GETTMPLT, "Got tmplt invalid round=%d peer=%d, ignoring", round, pfrom.GetId());
@@ -4601,7 +4603,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
 
         LOCK(m_template_mutex);
-        auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs));
+        auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs), NodeClock::now());
         using enum node::TemplateManager::TmpltState;
         switch (state) {
         case FAILED:
@@ -5744,7 +5746,7 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         }
         if (fill.still_missing == 0) {
             // Local fill found everything; finalize without requesting from peer.
-            auto [state, ntxs] = m_templateman.FillPeerPartial(node.GetId(), result.hash, {});
+            auto [state, ntxs] = m_templateman.FillPeerPartial(node.GetId(), result.hash, {}, NodeClock::now());
             if (state == DONE) {
                 LogDebug(BCLog::GETTMPLT, "Completed peer template %s (%d txs, no remote fetch) peer=%d",
                          result.hash.ToString(), ntxs, node.GetId());
