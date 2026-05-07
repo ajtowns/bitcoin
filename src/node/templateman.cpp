@@ -1005,7 +1005,8 @@ TemplateManager::PeerReconcileMap::iterator TemplateManager::SetPeerReconcile(No
 
 TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
     PeerReconcileMap::iterator it,
-    const PeerTemplateSketch::ProcessResult& pr)
+    const PeerTemplateSketch::ProcessResult& pr,
+    NodeClock::time_point now)
 {
     NodeId nodeid = it->first;
     auto& sketch = std::get<PeerTemplateSketch>(it->second);
@@ -1040,7 +1041,7 @@ TemplateManager::TmpltResult TemplateManager::CompleteSketchRound(
         pt.m_tip = partial->m_tip;
         pt.m_hash = partial->m_hash;
         pt.m_nodeid = nodeid;
-        pt.m_time = NodeClock::now();
+        pt.m_time = now;
         pt.TopoSort();
         m_peer_reconcile.erase(it);
         m_peer_templates.push_back(std::move(pt));
@@ -1060,7 +1061,8 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
     uint64_t nonce, uint256 basis_hash,
     std::span<const uint8_t> basis_delta,
-    std::span<const LocalTemplate::Sketch> sketches)
+    std::span<const LocalTemplate::Sketch> sketches,
+    NodeClock::time_point now)
 {
     // Must be in monostate (awaiting round-0 response).
     auto [is_mono, it] = GetPeerRecState<std::monostate>(m_peer_reconcile, nodeid);
@@ -1141,14 +1143,15 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
         return {TmpltState::FAILED, templatehash, {}, {}};
     }
     auto rec_it = SetPeerReconcile(nodeid, std::move(sketch));
-    return CompleteSketchRound(rec_it, pr);
+    return CompleteSketchRound(rec_it, pr, now);
 }
 
 TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     NodeId nodeid, uint256 templatehash, int round,
     GroupMask shortidmask, GroupMask sketchmask,
     std::span<const uint8_t> shortid_bytes,
-    std::span<const LocalTemplate::Sketch> sketches)
+    std::span<const LocalTemplate::Sketch> sketches,
+    NodeClock::time_point now)
 {
     // Must be a PeerTemplateSketch with matching hash.
     auto [is_sketch, it] = GetPeerRecState<PeerTemplateSketch>(m_peer_reconcile, nodeid);
@@ -1178,7 +1181,7 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
         return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
-    return CompleteSketchRound(it, pr);
+    return CompleteSketchRound(it, pr, now);
 }
 
 TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId nodeid, const CTxMemPool& mempool, ExtraTransactions& extra_txns)
@@ -1308,7 +1311,7 @@ std::vector<uint8_t> TemplateManager::GetPeerPartialMissingGR(NodeId nodeid)
     return std::get<PeerTemplatePartial>(it->second).m_missing.GREncode();
 }
 
-std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs)
+std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs, NodeClock::time_point now)
 {
     auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
     if (!is_partial) return {TmpltState::FAILED, 0};
@@ -1343,7 +1346,7 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
     pt.m_tip = partial.m_tip;
     pt.m_hash = partial.m_hash;
     pt.m_nodeid = nodeid;
-    pt.m_time = NodeClock::now();
+    pt.m_time = now;
     pt.TopoSort();
     m_peer_reconcile.erase(it);
     m_peer_templates.push_back(std::move(pt));

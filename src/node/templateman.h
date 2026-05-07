@@ -513,7 +513,8 @@ private:
      *  if not, store masks and return UNRESOLVED.
      *  Iterator must point to a PeerTemplateSketch entry. May erase it. */
     TmpltResult CompleteSketchRound(PeerReconcileMap::iterator it,
-                                    const PeerTemplateSketch::ProcessResult& pr);
+                                    const PeerTemplateSketch::ProcessResult& pr,
+                                    NodeClock::time_point now);
 
     /** Find transaction in the pool, adding if necessary. Bumps refcount. */
     TemplateTxRef AddTx(CTransactionRef tx);
@@ -586,7 +587,8 @@ public:
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
                                uint64_t nonce, uint256 basis_hash,
                                std::span<const uint8_t> basis_delta,
-                               std::span<const LocalTemplate::Sketch> sketches);
+                               std::span<const LocalTemplate::Sketch> sketches,
+                               NodeClock::time_point now);
 
     /** Feed round 1-4 data into an existing peer sketch.
      *  shortidmask/sketchmask are parsed from the peer's tmplt message; must partition
@@ -595,13 +597,14 @@ public:
     TmpltResult UpdatePeerSketch(NodeId nodeid, uint256 templatehash, int round,
                                  GroupMask shortidmask, GroupMask sketchmask,
                                  std::span<const uint8_t> shortid_bytes,
-                                 std::span<const LocalTemplate::Sketch> sketches);
+                                 std::span<const LocalTemplate::Sketch> sketches,
+                                 NodeClock::time_point now);
 
     /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
      *  On completion, verifies hash and promotes to PeerTemplate.
      *  Returns {ERROR, 0} on unexpected state or hash mismatch,
      *  {NEEDS_TXS, 0} if more data is needed, or {DONE, ntxs} on success. */
-    std::pair<TmpltState, uint32_t> FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs);
+    std::pair<TmpltState, uint32_t> FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs, NodeClock::time_point now);
 
     struct LocalFillResult {
         size_t still_missing;  //!< positions still unfilled after local scan
