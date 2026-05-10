@@ -111,9 +111,41 @@ struct TemplateTx {
 using TemplateTxSet = std::set<TemplateTx, std::less<>>;
 using TemplateTxRef = TemplateTxSet::iterator;
 
+class TemplateTxVec {
+private:
+    friend class TemplateManager;
+    std::vector<TemplateTxRef> values;
+
+public:
+    TemplateTxVec() = default;
+    TemplateTxVec(TemplateTxVec&& other) { values.swap(other.values); }
+    TemplateTxVec& operator=(TemplateTxVec&& other)
+    {
+        Assume(values.empty());
+        values.swap(other.values);
+        return *this;
+    }
+
+    void reserve(size_t cap) { values.reserve(cap); }
+    bool empty() const { return values.empty(); }
+    size_t size() const { return values.size(); }
+    const TemplateTxRef& operator[](size_t i) const { return values[i]; }
+
+    auto begin() const { return values.begin(); }
+    auto end() const { return values.end(); }
+
+    // Used by tests
+    void push_back_placeholder(const TemplateTxSet& pool) { values.push_back(pool.end()); }
+    void clear_placeholders(const TemplateTxSet& pool) {
+        std::erase_if(values, [&pool](const TemplateTxRef& v) { return v == pool.end(); });
+    }
+
+    ~TemplateTxVec() { Assume(empty()); }
+};
+
 class Template {
 public:
-    std::vector<TemplateTxRef> m_txs;    //!< ordered tx list
+    TemplateTxVec m_txs;    //!< ordered tx list
     const CBlockIndex* m_tip{nullptr};   //!< chain tip this template targets
     uint256 m_hash;                      //!< SHA256(tip_hash || wtxid1 || wtxid2 || ...) in m_txs order
     int64_t m_weight{0};                 //!< total transaction weight
@@ -374,7 +406,7 @@ public:
      *  txs[0..basis_count) are basis txs, txs[basis_count..] are local txs.
      *  shortids is parallel to txs.
      *  May throw on malformed sketch data. */
-    ProcessResult Init(std::vector<TemplateTxRef>&& txs,
+    ProcessResult Init(TemplateTxVec&& txs,
                        std::vector<uint64_t>&& shortids,
                        size_t basis_count,
                        std::span<const LocalTemplate::Sketch> combined_sketches);
@@ -425,10 +457,6 @@ public:
     };
     std::unique_ptr<ShortIDInfo> m_shortid_info;
 
-    /** Fill the next missing positions using the provided txrefs (in position order).
-     *  Returns true if all positions are now filled. */
-    bool Fill(std::vector<TemplateTxRef>&& refs);
-
     /** Check whether all positions are filled and the hash matches.
      *  Returns true on hash match (ready to promote to PeerTemplate). */
     bool CompletedSuccessfully() const;
@@ -456,6 +484,8 @@ class TemplateManager
 {
 public:
     explicit TemplateManager(bool deterministic = false) : m_rng{deterministic} {}
+
+    ~TemplateManager();
 
     enum class TmpltState { FAILED, UNRESOLVED, NEEDS_TXS, DONE };
 
@@ -520,10 +550,17 @@ private:
     TemplateTxRef AddTx(CTransactionRef tx);
 
     /** Find transactions in the pool, adding if necessary. Bumps refcounts. */
-    std::vector<TemplateTxRef> AddTxs(std::span<CTransactionRef> txs);
+    TemplateTxVec AddTxs(std::span<CTransactionRef> txs);
+
+    /** Decrement refcount and erase tx with zero refs. */
+    void RemoveTx(TemplateTxRef ref);
 
     /** Decrement refcounts and erase txs with zero refs. */
-    void RemoveTxs(std::vector<TemplateTxRef>&& vec);
+    void RemoveTxs(TemplateTxVec&& vec);
+
+    /** Fill the next missing positions in partial using the provided txrefs (in position order).
+     *  Returns true if all positions are now filled. */
+    bool FillPartialTxs(PeerTemplatePartial& partial, TemplateTxVec&& refs);
 
 public:
     /** Check if it's time to generate a template. Updates the timer if so.
