@@ -198,6 +198,21 @@ void LocalTemplate::GenerateSketches()
     }
 }
 
+TemplateManager::~TemplateManager()
+{
+    // Cleanup data, so that reference counts are cleared and
+    // TemplateTxVec destructor assertion is okay
+    for (auto& tmpl : m_templates) RemoveTxs(std::move(tmpl.m_txs));
+    for (auto& pt : m_peer_templates) RemoveTxs(std::move(pt.m_txs));
+    for (auto& [nodeid, state] : m_peer_reconcile) {
+        std::visit([&](auto& s) {
+            if constexpr (!std::is_same_v<std::decay_t<decltype(s)>, std::monostate>) {
+                RemoveTxs(std::move(s.m_txs));
+            }
+        }, state);
+    }
+}
+
 TemplateTxRef TemplateManager::AddTx(CTransactionRef tx)
 {
     const int32_t w = GetTransactionWeight(*tx);
@@ -211,33 +226,40 @@ TemplateTxRef TemplateManager::AddTx(CTransactionRef tx)
     return it;
 }
 
-std::vector<TemplateTxRef> TemplateManager::AddTxs(std::span<CTransactionRef> txs)
+TemplateTxVec TemplateManager::AddTxs(std::span<CTransactionRef> txs)
 {
-    std::vector<TemplateTxRef> refs;
-    refs.reserve(txs.size());
+    TemplateTxVec refs;
+    refs.values.reserve(txs.size());
     for (auto& tx : txs) {
-        refs.push_back(AddTx(std::move(tx)));
+        refs.values.push_back(AddTx(std::move(tx)));
     }
     return refs;
 }
 
-void TemplateManager::RemoveTxs(std::vector<TemplateTxRef>&& vec)
+void TemplateManager::RemoveTx(TemplateTxRef ref)
 {
-    const auto pool_end = m_pool.end();
-    for (auto& it : vec) {
-        if (it == pool_end) continue;
-        if (--it->num_templates == 0) {
-            m_pool_weight -= it->weight;
-            // Swap-to-back removal from m_scannable_txns
-            size_t idx = it->scannable_idx;
-            if (idx != m_scannable_txns.size() - 1) {
-                m_scannable_txns[idx] = std::move(m_scannable_txns.back());
-                m_scannable_txns[idx].second->scannable_idx = idx;
-            }
-            m_scannable_txns.pop_back();
-            m_pool.erase(it);
-        }
+    if (ref == m_pool.end()) return;
+    if (--ref->num_templates > 0) return;
+
+    m_pool_weight -= ref->weight;
+
+    // Swap-to-back removal from m_scannable_txns
+    size_t idx = ref->scannable_idx;
+    if (idx != m_scannable_txns.size() - 1) {
+        m_scannable_txns[idx] = std::move(m_scannable_txns.back());
+        m_scannable_txns[idx].second->scannable_idx = idx;
     }
+    m_scannable_txns.pop_back();
+
+    m_pool.erase(ref);
+}
+
+void TemplateManager::RemoveTxs(TemplateTxVec&& vec)
+{
+    for (auto& ref : vec.values) {
+        RemoveTx(ref);
+    }
+    vec.values.clear();
 }
 
 const LocalTemplate* TemplateManager::GetLocalTemplate(const uint256& hash) const
@@ -303,19 +325,20 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
     std::stable_sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) {
         return a.first < b.first;
     });
-    tmpl.m_txs.clear();
-    std::vector<TemplateTxRef> dups;
+    tmpl.m_txs.values.clear(); // references have been taken over by `pairs` at this point
+
     uint64_t dup_check = std::numeric_limits<uint64_t>::max();
     for (auto& [sid, ref] : pairs) {
         if (sid == dup_check) {
-            dups.push_back(ref);
-            continue; // duplicates can't by expressed by sketches, so drop them
+            // duplicates can't by expressed by sketches, so drop them
+            RemoveTx(ref);
+            continue;
         }
         dup_check = sid;
         tmpl.shortids.push_back(sid);
-        tmpl.m_txs.push_back(ref);
+        tmpl.m_txs.values.push_back(ref);
     }
-    RemoveTxs(std::move(dups));
+    pairs.clear(); // references have been taken over by `m_txs` or dropped
 
     // Hash over tip_hash then wtxids in shortid order; receiver can verify independently.
     tmpl.m_hash = tmpl.ComputeHash();
@@ -603,7 +626,7 @@ bool PeerTemplateSketch::TryDecodeGroups()
 }
 
 PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
-    std::vector<TemplateTxRef>&& txs,
+    TemplateTxVec&& txs,
     std::vector<uint64_t>&& shortids,
     size_t basis_count,
     std::span<const LocalTemplate::Sketch> combined_sketches)
@@ -795,25 +818,27 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Process(
     return {all_resolved, shortidmask, sketchmask};
 }
 
-bool PeerTemplatePartial::Fill(std::vector<TemplateTxRef>&& refs)
+bool TemplateManager::FillPartialTxs(PeerTemplatePartial& partial, TemplateTxVec&& refs)
 {
     auto ref_it = refs.begin();
-    for (size_t chunk_idx = 0; chunk_idx < m_missing.m_positions.size() && ref_it != refs.end(); ++chunk_idx) {
-        for (unsigned bit : m_missing.m_positions[chunk_idx]) {
+    for (size_t chunk_idx = 0; chunk_idx < partial.m_missing.m_positions.size() && ref_it != refs.end(); ++chunk_idx) {
+        for (unsigned bit : partial.m_missing.m_positions[chunk_idx]) {
             if (ref_it == refs.end()) break;
             uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
-            if (!Assume(pos < m_txs.size())) continue;
-            m_weight += (*ref_it)->weight;
-            m_txs[pos] = *ref_it++;
-            m_missing.m_positions[chunk_idx].Reset(bit);
-            ++m_filled;
+            if (!Assume(pos < partial.m_txs.size())) continue;
+            if (!Assume(partial.m_txs[pos] == m_pool.end())) continue;
+            partial.m_weight += (*ref_it)->weight;
+            partial.m_txs.values[pos] = *ref_it++;
+            partial.m_missing.m_positions[chunk_idx].Reset(bit);
+            ++partial.m_filled;
         }
     }
     // Append any excess refs so they're tracked (hash check will catch mismatches).
     while (ref_it != refs.end()) {
-        m_txs.push_back(*ref_it++);
+        partial.m_txs.values.push_back(*ref_it++);
     }
-    return m_missing.empty();
+    refs.values.clear();
+    return partial.m_missing.empty();
 }
 
 bool PeerTemplatePartial::CompletedSuccessfully() const
@@ -828,32 +853,29 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
 
     // Pair up provider shortids with local refs; collect local-only refs to release.
     std::vector<std::pair<uint64_t, TemplateTxRef>> pairs;
-    std::vector<TemplateTxRef> to_release;
     for (size_t i = 0; i < orig_size; ++i) {
         if (sketch.m_shortids[i] != 0) {
             pairs.emplace_back(sketch.m_shortids[i], sketch.m_txs[i]);
         } else {
-            to_release.push_back(sketch.m_txs[i]);
+            RemoveTx(sketch.m_txs[i]);
         }
     }
     // Provider-only shortids (appended beyond m_txs, no local ref).
     for (size_t i = orig_size; i < sketch.m_shortids.size(); ++i) {
         pairs.emplace_back(sketch.m_shortids[i], pool_end);
     }
-    // Clear sketch's refs — ownership is now split between pairs and to_release.
-    sketch.m_txs.clear();
-    RemoveTxs(std::move(to_release));
+    // Clear sketch's refs, ownership is now held by `pairs`
+    sketch.m_txs.values.clear();
 
     std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    // Shortid collision → reject.
+    // On shortid collision, just reject the entire template
     for (size_t i = 1; i < pairs.size(); ++i) {
         if (pairs[i].first == pairs[i - 1].first) {
-            std::vector<TemplateTxRef> collision_release;
             for (auto& [sid, ref] : pairs) {
-                if (ref != pool_end) collision_release.push_back(ref);
+                RemoveTx(ref);
             }
-            RemoveTxs(std::move(collision_release));
+            pairs.clear();
             return std::nullopt;
         }
     }
@@ -866,7 +888,7 @@ std::optional<PeerTemplatePartial> TemplateManager::MakePeerTemplatePartial(Peer
     int64_t min_missing_weight{0};
     partial.m_txs.reserve(pairs.size());
     for (size_t i = 0; i < pairs.size(); ++i) {
-        partial.m_txs.push_back(pairs[i].second);
+        partial.m_txs.values.push_back(pairs[i].second);
         if (pairs[i].second == pool_end) {
             partial.m_missing.Add(i);
             shortid_info->missing_shortids.push_back(pairs[i].first);
@@ -942,7 +964,7 @@ void TemplateManager::Check()
     // 3. Count actual references to each pool entry
     std::vector<uint32_t> refcounts;
     refcounts.resize(m_pool.size());
-    auto count_refs = [&](const std::vector<TemplateTxRef>& txs) {
+    auto count_refs = [&](const TemplateTxVec& txs) {
         for (const auto& ref : txs) {
             if (ref != pool_end) ++refcounts[ref->scannable_idx];
         }
@@ -1079,7 +1101,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
 
     // Build txs and shortids arrays: basis segment then local.
     std::unordered_set<const CTransaction*> basis_tx_set;
-    std::vector<TemplateTxRef> txs;
+    TemplateTxVec txs;
     std::vector<uint64_t> shortids;
     size_t basis_count = 0;
 
@@ -1108,7 +1130,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
                     const auto& ref = basis.m_txs[pos];
                     ++ref->num_templates;
                     shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
-                    txs.push_back(ref);
+                    txs.values.push_back(ref);
                     basis_tx_set.insert(ref->tx.get());
                 }
             }
@@ -1125,7 +1147,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
             if (basis_tx_set.contains(ref->tx.get())) continue;
             ++ref->num_templates;
             shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
-            txs.push_back(ref);
+            txs.values.push_back(ref);
         }
     }
 
@@ -1276,7 +1298,7 @@ TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId 
                 auto ref = AddTx(std::move(tx));
                 partial.m_weight += ref->weight;
                 --n_missing;
-                partial.m_txs[pos] = std::move(ref);
+                partial.m_txs.values[pos] = std::move(ref);
                 partial.m_missing.Remove(pos);
                 ++partial.m_filled;
                 ++res.from_txns;
@@ -1285,7 +1307,7 @@ TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId 
                 ++ref->num_templates;
                 partial.m_weight += ref->weight;
                 --n_missing;
-                partial.m_txs[pos] = std::move(ref);
+                partial.m_txs.values[pos] = std::move(ref);
                 partial.m_missing.Remove(pos);
                 ++partial.m_filled;
                 ++res.from_templates;
@@ -1319,7 +1341,7 @@ std::pair<TemplateManager::TmpltState, uint32_t> TemplateManager::FillPeerPartia
     if (partial.m_hash != hash) return {TmpltState::FAILED, 0};
 
     auto refs = AddTxs(txs);
-    if (!partial.Fill(std::move(refs))) {
+    if (!FillPartialTxs(partial, std::move(refs))) {
         if (partial.m_weight + int64_t(partial.m_missing.Count()) * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
             RemoveTxs(std::move(partial.m_txs));
             m_peer_reconcile.erase(it);

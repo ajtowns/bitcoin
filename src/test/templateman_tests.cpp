@@ -4,6 +4,7 @@
 
 #include <node/templateman.h>
 #include <test/util/setup_common.h>
+#include <test/util/templateman.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -47,13 +48,13 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
     std::sort(basis_sids.begin(), basis_sids.end());
     std::sort(local_sids.begin(), local_sids.end());
 
-    std::vector<TemplateTxRef> txs;
+    TemplateTxVec txs;
     std::vector<uint64_t> sids;
-    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : basis_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
     size_t basis_count = txs.size();
-    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : local_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
 
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
 
     auto reconstruct = [&](int round) {
         std::vector<uint64_t> result;
@@ -63,17 +64,25 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
         std::sort(result.begin(), result.end());
         BOOST_CHECK_EQUAL(round, expected_rounds);
         BOOST_CHECK(result == provider.shortids);
+        BOOST_TEST_CHECKPOINT( "Inside reconstruct(round=" << round << ")");
     };
 
-    if (sketch.Init(std::move(txs), std::move(sids), basis_count,
-                    provider.GetSketches(0)).resolved) { reconstruct(0); return; }
+    if (sketch.Init(std::move(txs), std::move(sids), basis_count, provider.GetSketches(0)).resolved) {
+        reconstruct(0);
+        return;
+    }
 
     for (int round = 1; round <= 4; ++round) {
         std::vector<uint8_t> shortid_bytes;
-        if (round == 4) shortid_bytes = provider.GetShortIdBytes(4, GroupMask::Fill(TOTAL_BUCKETS));
+        if (round == 4) {
+            shortid_bytes = provider.GetShortIdBytes(4, GroupMask::Fill(TOTAL_BUCKETS));
+        }
         auto [res, shortidmask, sketchmask] = sketch.Process(
             round, GroupMask::Fill(TOTAL_BUCKETS), GroupMask::Fill(TOTAL_BUCKETS), shortid_bytes, provider.GetSketches(round));
-        if (res) { reconstruct(round); return; }
+        if (res) {
+            reconstruct(round);
+            return;
+        }
     }
     BOOST_ERROR("reconciliation did not resolve");
 }
@@ -107,7 +116,7 @@ BOOST_AUTO_TEST_CASE(sketch_shortid_early_round1)
     auto prov_sids = range_sids(1, 5001);
     auto provider = MakeProvider(prov_sids);
     TemplateTxSet pool;
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
 
     BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
@@ -181,13 +190,13 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_decode_mask)
     std::sort(basis_sids.begin(), basis_sids.end());
     std::sort(local_sids.begin(), local_sids.end());
 
-    std::vector<TemplateTxRef> txs;
+    TemplateTxVec txs;
     std::vector<uint64_t> sids;
-    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : basis_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
     size_t basis_count = txs.size();
-    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : local_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
 
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
 
     // Round 0 should fail: per stride-4 group diff = 72 > 64 (SKETCH_CAPACITY).
     // Each stride-4 group has 4 even buckets (diff 9 each = 36) + 4 odd buckets (diff 9 each = 36) = 72.
@@ -247,7 +256,7 @@ BOOST_AUTO_TEST_CASE(sketch_selective_masks)
     auto provider = MakeProvider(prov_sids);
 
     TemplateTxSet pool;
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
     BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Round 1: stride-8 even groups resolve, odd don't.
@@ -299,7 +308,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_shortid_and_sketch)
     auto provider = MakeProvider(prov_sids);
 
     TemplateTxSet pool;
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
     BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Request outer shortids only for the large groups (0,1); sketches for all.

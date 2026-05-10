@@ -9,6 +9,7 @@
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <test/util/random.h>
+#include <test/util/templateman.h>
 
 #include <algorithm>
 #include <array>
@@ -125,13 +126,13 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     provider.shortids = send_sids; // replace for GetShortIdBytes
 
     TemplateTxSet pool;
-    std::vector<TemplateTxRef> txs;
+    TemplateTxVec txs;
     std::vector<uint64_t> sids;
-    for (auto s : basis_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : basis_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
     size_t basis_count = txs.size();
-    for (auto s : local_sids) { txs.push_back(pool.end()); sids.push_back(s); }
+    for (auto s : local_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
 
-    PeerTemplateSketch sketch;
+    TestPeerTemplateSketch sketch{pool};
     auto [resolved, _sid, _sk] = sketch.Init(std::move(txs), std::move(sids), basis_count,
                                              provider.GetSketches(0));
 
