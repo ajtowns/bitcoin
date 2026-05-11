@@ -598,6 +598,8 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
 
     /** Implement PeerManager */
+    virtual ~PeerManagerImpl();
+
     void StartScheduledTasks(CScheduler& scheduler) override;
     void CheckForStaleTipAndEvictPeers() override;
     util::Expected<void, std::string> FetchBlock(NodeId peer_id, const CBlockIndex& block_index) override
@@ -618,6 +620,9 @@ public:
     void UnitTestMisbehaving(NodeId peer_id) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex) { Misbehaving(*Assert(GetPeerRef(peer_id)), ""); };
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
+    void Start() override;
+    void Interrupt() override;
+    void Stop() override;
 
 private:
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received,
@@ -6550,4 +6555,22 @@ bool PeerManagerImpl::SendMessages(CNode& node)
     } // release cs_main
     MaybeSendFeefilter(node, peer, current_time);
     return true;
+}
+
+void PeerManagerImpl::Start()
+{
+}
+
+void PeerManagerImpl::Interrupt()
+{
+}
+
+void PeerManagerImpl::Stop()
+{
+}
+
+PeerManagerImpl::~PeerManagerImpl()
+{
+    Interrupt();
+    Stop();
 }

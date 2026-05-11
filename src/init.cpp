@@ -302,6 +302,7 @@ void Interrupt(NodeContext& node)
         node.tor_controller->Interrupt();
     }
     InterruptMapPort();
+    if (node.peerman) node.peerman->Interrupt();
     if (node.connman)
         node.connman->Interrupt();
     for (auto* index : node.indexes) {
@@ -341,6 +342,7 @@ void Shutdown(NodeContext& node)
     // Because these depend on each-other, we make sure that neither can be
     // using the other before destroying them.
     if (node.peerman && node.validation_signals) node.validation_signals->UnregisterValidationInterface(node.peerman.get());
+    if (node.peerman) node.peerman->Stop();
     if (node.connman) node.connman->Stop();
 
     if (node.tor_controller) {
@@ -2370,7 +2372,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         banman->DumpBanlist();
     }, DUMP_BANS_INTERVAL);
 
-    if (node.peerman) node.peerman->StartScheduledTasks(scheduler);
+    if (node.peerman) {
+        node.peerman->StartScheduledTasks(scheduler);
+        node.peerman->Start();
+    }
 
 #if HAVE_SYSTEM
     StartupNotify(args);
