@@ -59,6 +59,7 @@
 #include <util/check.h>
 #include <util/hasher.h>
 #include <util/strencodings.h>
+#include <util/thread.h>
 #include <util/time.h>
 #include <util/tokenbucket.h>
 #include <util/trace.h>
@@ -85,6 +86,7 @@
 #include <ratio>
 #include <set>
 #include <span>
+#include <thread>
 #include <typeinfo>
 #include <unordered_set>
 #include <utility>
@@ -625,6 +627,11 @@ public:
     void Stop() override;
 
 private:
+    std::thread m_msghandler_thread;
+
+    /// \anchor msghand
+    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
+
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received,
                         const std::atomic<bool>& interruptMsgProc)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
@@ -6559,18 +6566,94 @@ bool PeerManagerImpl::SendMessages(CNode& node)
 
 void PeerManagerImpl::Start()
 {
+    {
+        LOCK(m_connman.mutexMsgProc);
+        m_connman.flagInterruptMsgProc = false;
+        m_connman.fMsgProcWake = false;
+    }
+    m_msghandler_thread = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
 }
 
 void PeerManagerImpl::Interrupt()
 {
+    WITH_LOCK(m_connman.mutexMsgProc, m_connman.flagInterruptMsgProc = true);
+    m_connman.condMsgProc.notify_all();
 }
 
 void PeerManagerImpl::Stop()
 {
+    if (m_msghandler_thread.joinable()) m_msghandler_thread.join();
 }
 
 PeerManagerImpl::~PeerManagerImpl()
 {
     Interrupt();
     Stop();
+}
+
+Mutex NetEventsInterface::g_msgproc_mutex;
+
+namespace {
+class PeerSnapshot
+{
+private:
+    std::vector<PeerRef> m_snap;
+
+public:
+    explicit PeerSnapshot(const auto& peers)
+    {
+        m_snap.reserve(peers.size());
+        for (auto& [id, peer] : peers) {
+            m_snap.push_back(peer);
+        }
+    }
+
+    void shuffle()
+    {
+        std::shuffle(m_snap.begin(), m_snap.end(), FastRandomContext{});
+    }
+
+    auto begin() const { return m_snap.begin(); }
+    auto end() const { return m_snap.end(); }
+
+    ~PeerSnapshot() = default;
+};
+}
+
+void PeerManagerImpl::ThreadMessageHandler()
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+
+    while (!m_connman.flagInterruptMsgProc)
+    {
+        bool fMoreWork = false;
+
+        {
+            // Randomize the order in which we process messages from/to our peers.
+            // This prevents attacks in which an attacker exploits having multiple
+            // consecutive connections in the m_nodes list.
+            auto snap = WITH_LOCK(m_peer_mutex, return PeerSnapshot{m_peer_map});
+            snap.shuffle();
+
+            for (auto& peer : snap) {
+                auto node = m_connman.SlowGetNodeHandle(peer->m_id);
+                if (!node.Available()) continue;
+
+                // Receive messages
+                bool fMoreNodeWork{ProcessMessages(*node, m_connman.flagInterruptMsgProc)};
+                fMoreWork |= (fMoreNodeWork && !node.Paused());
+                if (m_connman.flagInterruptMsgProc) return;
+
+                // Send messages
+                SendMessages(*node);
+                if (m_connman.flagInterruptMsgProc) return;
+            }
+        }
+
+        WAIT_LOCK(m_connman.mutexMsgProc, lock);
+        if (!fMoreWork) {
+            m_connman.condMsgProc.wait_until(lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(100), [this]() EXCLUSIVE_LOCKS_REQUIRED(m_connman.mutexMsgProc) { return m_connman.fMsgProcWake; });
+        }
+        m_connman.fMsgProcWake = false;
+    }
 }

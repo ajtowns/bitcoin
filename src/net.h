@@ -1127,6 +1127,11 @@ protected:
     ~NetEventsInterface() = default;
 };
 
+
+namespace { // NOLINT(fuchsia-header-anon-namespaces)
+class PeerManagerImpl; // hack to allow CConnman to declare as friend
+}
+
 class CConnman
 {
 public:
@@ -1213,7 +1218,7 @@ public:
 
     ~CConnman();
 
-    bool Start(CScheduler& scheduler, const Options& options) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !m_added_nodes_mutex, !m_addr_fetches_mutex, !mutexMsgProc);
+    bool Start(CScheduler& scheduler, const Options& options) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex, !m_added_nodes_mutex, !m_addr_fetches_mutex);
 
     void StopThreads();
     void StopNodes() EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex, !m_reconnections_mutex);
@@ -1225,7 +1230,7 @@ public:
         StopNodes();
     };
 
-    void Interrupt() EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc);
+    void Interrupt();
     bool GetNetworkActive() const { return fNetworkActive; };
     bool GetUseAddrmanOutgoing() const { return m_use_addrman_outgoing; };
     void SetNetworkActive(bool active);
@@ -1476,6 +1481,19 @@ public:
     bool MultipleManualOrFullOutboundConns(Network net) const EXCLUSIVE_LOCKS_REQUIRED(m_nodes_mutex);
 
 private:
+    friend PeerManagerImpl; // hack to support partially moving responsibilities to PeerManagerImpl
+
+    NodeHandle SlowGetNodeHandle(NodeId nodeid) EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex)
+    {
+         LOCK(m_nodes_mutex);
+         for (CNode* node : m_nodes) {
+             if (node && node->GetId() == nodeid) {
+                 return NodeHandle(node);
+             }
+         }
+         return NodeHandle();
+    }
+
     struct ListenSocket {
     public:
         std::shared_ptr<Sock> sock;
@@ -1517,8 +1535,6 @@ private:
                                  !m_reconnections_mutex,
                                  !m_unused_i2p_sessions_mutex);
 
-    /// \anchor msghand
-    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex, !mutexMsgProc);
     /// \anchor i2paccept
     void ThreadI2PAcceptIncoming() EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex);
     void ThreadPrivateBroadcast() EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex, !m_unused_i2p_sessions_mutex);
@@ -1821,7 +1837,6 @@ private:
     std::thread threadSocketHandler;
     std::thread threadOpenAddedConnections;
     std::thread threadOpenConnections;
-    std::thread threadMessageHandler;
     std::thread threadI2PAcceptIncoming;
     std::thread threadPrivateBroadcast;
 
