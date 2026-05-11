@@ -235,6 +235,8 @@ struct Peer {
     /** Same id as the CNode object for this peer */
     const NodeId m_id{0};
 
+    NodeHandle m_nodehandle GUARDED_BY(PeerManager::g_msgproc_mutex);
+
     /** Services we offered to this peer.
      *
      *  This is supplied by CConnman during peer initialization. It's const
@@ -422,8 +424,9 @@ struct Peer {
      * timestamp the peer sent in the version message. */
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
-    explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
+    explicit Peer(NodeId id, CNode& node, ServiceFlags our_services, bool is_inbound)
         : m_id{id}
+        , m_nodehandle{&node}
         , m_our_services{our_services}
         , m_is_inbound{is_inbound}
     {}
@@ -591,7 +594,7 @@ public:
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex);
 
     /** Implement NetEventsInterface */
-    void InitializeNode(const CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
+    void InitializeNode(CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
     void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
     bool HasAllDesirableServiceFlags(ServiceFlags services) const override;
     bool ProcessMessages(CNode& node) override
@@ -1719,7 +1722,7 @@ void PeerManagerImpl::UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_s
     if (state) state->m_last_block_announcement = time_in_seconds;
 }
 
-void PeerManagerImpl::InitializeNode(const CNode& node, ServiceFlags our_services)
+void PeerManagerImpl::InitializeNode(CNode& node, ServiceFlags our_services)
 {
     NodeId nodeid = node.GetId();
     {
@@ -1732,7 +1735,7 @@ void PeerManagerImpl::InitializeNode(const CNode& node, ServiceFlags our_service
         our_services = static_cast<ServiceFlags>(our_services | NODE_BLOOM);
     }
 
-    PeerRef peer = std::make_shared<Peer>(nodeid, our_services, node.IsInboundConn());
+    PeerRef peer = std::make_shared<Peer>(nodeid, node, our_services, node.IsInboundConn());
     {
         LOCK(m_peer_mutex);
         m_peer_map.emplace_hint(m_peer_map.end(), nodeid, peer);
@@ -6636,8 +6639,11 @@ void PeerManagerImpl::ThreadMessageHandler()
             snap.shuffle();
 
             for (auto& peer : snap) {
-                auto node = m_connman.SlowGetNodeHandle(peer->m_id);
-                if (!node.Available()) continue;
+                auto& node = peer->m_nodehandle;
+                if (!node.Available()) {
+                    peer->m_nodehandle.Reset(); // release reference so net can cleanup
+                    continue;
+                }
 
                 // Receive messages
                 bool fMoreNodeWork{ProcessMessages(*node)};
