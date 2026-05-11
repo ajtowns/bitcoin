@@ -1031,6 +1031,55 @@ private:
     std::unique_ptr<i2p::sam::Session> m_i2p_sam_session GUARDED_BY(m_sock_mutex);
 };
 
+class NodeHandle
+{
+private:
+    CNode* m_node{nullptr};
+
+public:
+    explicit NodeHandle() = default;
+
+    explicit NodeHandle(CNode* pnode) : m_node{pnode}
+    {
+        // This function must only be called:
+        //  (a) when pnode is in m_nodes and m_nodes_mutex is held, or
+        //  (b) from NetEventsInterface::IniitalizeNode()
+        m_node->AddRef();
+    }
+
+    void Reset()
+    {
+        if (m_node != nullptr) {
+            m_node->Release();
+            m_node = nullptr;
+        }
+    }
+
+    NodeHandle(NodeHandle&& other) : m_node{other.m_node}
+    {
+        other.m_node = nullptr;
+    }
+
+    NodeHandle& operator=(NodeHandle&& other)
+    {
+        std::swap(m_node, other.m_node);
+        other.Reset();
+        return *this;
+    }
+
+    ~NodeHandle() { Reset(); }
+
+    // No copying
+    NodeHandle(const NodeHandle&) = delete;
+    NodeHandle& operator=(const NodeHandle&) = delete;
+
+    bool Available() const { return m_node != nullptr && !m_node->fDisconnect; }
+    bool Paused() const { return !Available() || m_node->fPauseSend; }
+
+    CNode* ptr() { return m_node; }
+    CNode& operator*() { return *m_node; }
+};
+
 /**
  * Interface for message handling
  */
