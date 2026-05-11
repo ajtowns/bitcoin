@@ -124,7 +124,7 @@ FUZZ_TARGET(process_message, .init = initialize_process_message)
     while (more_work) {
         p2p_node.fPauseSend = false;
         try {
-            more_work = connman.ProcessMessagesOnce(p2p_node);
+            more_work = connman.ProcessMessagesOnce(*node.peerman, p2p_node);
         } catch (const std::ios_base::failure&) {
         }
         node.peerman->SendMessages(p2p_node);

@@ -891,7 +891,7 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
         NetMsg::Make(NetMsgType::VERSION, PROTOCOL_VERSION, services, time, services, CAddress::V1_NETWORK(peer_us));
     Assert(connman.ReceiveMsgFrom(peer, std::move(msg_version_receive)));
     peer.fPauseSend = false;
-    bool more_work{connman.ProcessMessagesOnce(peer)};
+    bool more_work{connman.ProcessMessagesOnce(*m_node.peerman, peer)};
     Assert(!more_work);
 
     m_node.peerman->SendMessages(peer);
@@ -900,7 +900,7 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     Assert(connman.ReceiveMsgFrom(peer, NetMsg::Make(NetMsgType::VERACK)));
     peer.fPauseSend = false;
     // Will set peer.fSuccessfullyConnected to true (necessary in SendMessages()).
-    more_work = connman.ProcessMessagesOnce(peer);
+    more_work = connman.ProcessMessagesOnce(*m_node.peerman, peer);
     Assert(!more_work);
 
     // Ensure that peer_us_addr:bind_port is sent to the peer.

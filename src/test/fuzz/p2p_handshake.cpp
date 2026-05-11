@@ -105,7 +105,7 @@ FUZZ_TARGET(p2p_handshake, .init = ::initialize)
             connection.fPauseSend = false;
 
             try {
-                more_work = connman.ProcessMessagesOnce(connection);
+                more_work = connman.ProcessMessagesOnce(*node.peerman, connection);
             } catch (const std::ios_base::failure&) {
             }
             node.peerman->SendMessages(connection);

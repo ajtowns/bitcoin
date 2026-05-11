@@ -120,6 +120,21 @@ public:
     virtual ~PeerManager() = default;
 
     /**
+     * Process protocol messages received from a given node
+     *
+     * @param[in]   node            The node which we have received messages from.
+     */
+    virtual bool ProcessMessages(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex) = 0;
+
+    /**
+     * Send queued protocol messages to a given node.
+     *
+     * @param[in]   node            The node which we are sending messages to.
+     * @return                      True if there is more work to be done
+     */
+    virtual bool SendMessages(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex) = 0;
+
+    /**
      * Attempt to manually fetch block from a given peer. We must already have the header.
      *
      * @param[in]  peer_id      The peer id

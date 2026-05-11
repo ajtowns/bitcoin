@@ -123,7 +123,7 @@ FUZZ_TARGET(process_messages, .init = initialize_process_messages)
             random_node.fPauseSend = false;
 
             try {
-                more_work = connman.ProcessMessagesOnce(random_node);
+                more_work = connman.ProcessMessagesOnce(*node.peerman, random_node);
             } catch (const std::ios_base::failure&) {
             }
             node.peerman->SendMessages(random_node);

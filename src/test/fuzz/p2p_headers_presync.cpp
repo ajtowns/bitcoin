@@ -93,7 +93,7 @@ void HeadersSyncSetup::SendMessage(FuzzedDataProvider& fuzzed_data_provider, CSe
     (void)connman.ReceiveMsgFrom(connection, std::move(msg));
     connection.fPauseSend = false;
     try {
-        connman.ProcessMessagesOnce(connection);
+        connman.ProcessMessagesOnce(*m_node.peerman, connection);
     } catch (const std::ios_base::failure&) {
     }
     m_node.peerman->SendMessages(connection);

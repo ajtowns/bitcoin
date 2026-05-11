@@ -243,7 +243,7 @@ FUZZ_TARGET(p2p_private_broadcast, .init = ::initialize)
             while (more_work) {
                 p2p_node.fPauseSend = false;
                 try {
-                    more_work = connman.ProcessMessagesOnce(p2p_node);
+                    more_work = connman.ProcessMessagesOnce(*node.peerman, p2p_node);
                 } catch (const std::ios_base::failure&) {
                 }
                 node.peerman->SendMessages(p2p_node);

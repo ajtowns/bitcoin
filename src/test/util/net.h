@@ -102,9 +102,9 @@ struct ConnmanTestMsg : public CConnman {
                    bool relay_txs)
         EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
 
-    bool ProcessMessagesOnce(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
+    bool ProcessMessagesOnce(PeerManager& peerman, CNode& node) EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
     {
-        return m_msgproc->ProcessMessages(node);
+        return peerman.ProcessMessages(node);
     }
 
     void NodeReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const;
