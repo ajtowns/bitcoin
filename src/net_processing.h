@@ -119,6 +119,9 @@ public:
                                              CTxMemPool& pool, node::Warnings& warnings, Options opts);
     virtual ~PeerManager() = default;
 
+    /** Mutex for anything that is only accessed via the msg processing thread */
+    static Mutex g_msgproc_mutex;
+
     /**
      * Process protocol messages received from a given node
      *

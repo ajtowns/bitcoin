@@ -86,7 +86,7 @@ FUZZ_TARGET(p2p_private_broadcast, .init = ::initialize)
         seeded_txs.push_back(tx);
     }
 
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     static NodeId node_id{0};
     // Create at least one PRIVATE_BROADCAST peer, optionally add others of random types.

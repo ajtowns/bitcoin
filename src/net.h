@@ -1086,9 +1086,6 @@ public:
 class NetEventsInterface
 {
 public:
-    /** Mutex for anything that is only accessed via the msg processing thread */
-    static Mutex g_msgproc_mutex;
-
     /** Initialize a peer (setup state) */
     virtual void InitializeNode(const CNode& node, ServiceFlags our_services) = 0;
 

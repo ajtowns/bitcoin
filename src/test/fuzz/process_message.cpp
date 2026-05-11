@@ -93,7 +93,7 @@ FUZZ_TARGET(process_message, .init = initialize_process_message)
 
     connman.SetMsgProc(node.peerman.get());
     connman.SetAddrman(*node.addrman);
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     const std::string random_message_type{fuzzed_data_provider.ConsumeBytesAsString(CMessageHeader::MESSAGE_TYPE_SIZE).c_str()};
     if (!LIMIT_TO_MESSAGE_TYPE.empty() && random_message_type != LIMIT_TO_MESSAGE_TYPE) {

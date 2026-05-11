@@ -100,9 +100,9 @@ struct ConnmanTestMsg : public CConnman {
                    ServiceFlags local_services,
                    int32_t version,
                    bool relay_txs)
-        EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(PeerManager::g_msgproc_mutex);
 
-    bool ProcessMessagesOnce(PeerManager& peerman, CNode& node) EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
+    bool ProcessMessagesOnce(PeerManager& peerman, CNode& node) EXCLUSIVE_LOCKS_REQUIRED(PeerManager::g_msgproc_mutex)
     {
         return peerman.ProcessMessages(node);
     }

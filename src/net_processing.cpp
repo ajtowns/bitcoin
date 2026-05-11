@@ -277,7 +277,7 @@ struct Peer {
     uint256 m_continuation_block GUARDED_BY(m_block_inv_mutex) {};
 
     /** Set to true once initial VERSION message was sent (only relevant for outbound peers). */
-    bool m_outbound_version_message_sent GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+    bool m_outbound_version_message_sent GUARDED_BY(PeerManager::g_msgproc_mutex){false};
 
     /** The pong reply we're expecting, or 0 if no pong expected. */
     std::atomic<uint64_t> m_ping_nonce_sent{0};
@@ -291,10 +291,10 @@ struct Peer {
     /** The feerate in the most recent BIP133 `feefilter` message sent to the peer.
      *  It is *not* a p2p protocol violation for the peer to send us
      *  transactions with a lower fee rate than this. See BIP133. */
-    CAmount m_fee_filter_sent GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+    CAmount m_fee_filter_sent GUARDED_BY(PeerManager::g_msgproc_mutex){0};
     /** Timestamp after which we will send the next BIP133 `feefilter` message
       * to the peer. */
-    std::chrono::microseconds m_next_send_feefilter GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+    std::chrono::microseconds m_next_send_feefilter GUARDED_BY(PeerManager::g_msgproc_mutex){0};
 
     struct TxRelay {
         mutable RecursiveMutex m_bloom_filter_mutex;
@@ -343,7 +343,7 @@ struct Peer {
     };
 
     /** A vector of addresses to send to the peer, limited to MAX_ADDR_TO_SEND. */
-    std::vector<CAddress> m_addrs_to_send GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    std::vector<CAddress> m_addrs_to_send GUARDED_BY(PeerManager::g_msgproc_mutex);
     /** Probabilistic filter to track recent addr messages relayed with this
      *  peer. Used to avoid relaying redundant addresses to this peer.
      *
@@ -353,7 +353,7 @@ struct Peer {
      *
      *  Presence of this filter must correlate with m_addr_relay_enabled.
      **/
-    std::unique_ptr<CRollingBloomFilter> m_addr_known GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    std::unique_ptr<CRollingBloomFilter> m_addr_known GUARDED_BY(PeerManager::g_msgproc_mutex);
     /** Whether we are participating in address relay with this connection.
      *
      *  We set this bool to true for outbound peers (other than
@@ -370,7 +370,7 @@ struct Peer {
      *  initialized.*/
     std::atomic_bool m_addr_relay_enabled{false};
     /** Whether a getaddr request to this peer is outstanding. */
-    bool m_getaddr_sent GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+    bool m_getaddr_sent GUARDED_BY(PeerManager::g_msgproc_mutex){false};
     /** Guards address sending timers. */
     mutable Mutex m_addr_send_times_mutex;
     /** Time point to send the next ADDR message to this peer. */
@@ -381,19 +381,19 @@ struct Peer {
      *  messages, indicating a preference to receive ADDRv2 instead of ADDR ones. */
     std::atomic_bool m_wants_addrv2{false};
     /** Whether this peer has already sent us a getaddr message. */
-    bool m_getaddr_recvd GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+    bool m_getaddr_recvd GUARDED_BY(PeerManager::g_msgproc_mutex){false};
     /** Number of addresses that can be processed from this peer. Start at 1 to
      *  permit self-announcement. */
-    double m_addr_token_bucket GUARDED_BY(NetEventsInterface::g_msgproc_mutex){1.0};
+    double m_addr_token_bucket GUARDED_BY(PeerManager::g_msgproc_mutex){1.0};
     /** When m_addr_token_bucket was last updated */
-    NodeClock::time_point m_addr_token_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){NodeClock::now()};
+    NodeClock::time_point m_addr_token_timestamp GUARDED_BY(PeerManager::g_msgproc_mutex){NodeClock::now()};
     /** Total number of addresses that were dropped due to rate limiting. */
     std::atomic<uint64_t> m_addr_rate_limited{0};
     /** Total number of addresses that were processed (excludes rate-limited ones). */
     std::atomic<uint64_t> m_addr_processed{0};
 
     /** Whether we've sent this peer a getheaders in response to an inv prior to initial-headers-sync completing */
-    bool m_inv_triggered_getheaders_before_sync GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+    bool m_inv_triggered_getheaders_before_sync GUARDED_BY(PeerManager::g_msgproc_mutex){false};
 
     /** Protects m_getdata_requests **/
     Mutex m_getdata_requests_mutex;
@@ -401,7 +401,7 @@ struct Peer {
     std::deque<CInv> m_getdata_requests GUARDED_BY(m_getdata_requests_mutex);
 
     /** Time of the last getheaders message to this peer */
-    NodeClock::time_point m_last_getheaders_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){};
+    NodeClock::time_point m_last_getheaders_timestamp GUARDED_BY(PeerManager::g_msgproc_mutex){};
 
     /** Protects m_headers_sync **/
     Mutex m_headers_sync_mutex;
@@ -413,10 +413,10 @@ struct Peer {
     std::atomic<bool> m_sent_sendheaders{false};
 
     /** When to potentially disconnect peer for stalling headers download */
-    std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(PeerManager::g_msgproc_mutex){0us};
 
     /** Whether this peer wants invs or headers (when possible) for block announcements */
-    bool m_prefers_headers GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
+    bool m_prefers_headers GUARDED_BY(PeerManager::g_msgproc_mutex){false};
 
     /** Time offset computed during the version handshake based on the
      * timestamp the peer sent in the version message. */
@@ -632,7 +632,7 @@ private:
     std::atomic<bool> flagInterruptMsgProc{false};
 
     /// \anchor msghand
-    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
+    void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!PeerManager::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
 
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
@@ -858,11 +858,11 @@ private:
     /** Send `feefilter` message. */
     void MaybeSendFeefilter(CNode& node, Peer& peer, std::chrono::microseconds current_time) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
-    FastRandomContext m_rng GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    FastRandomContext m_rng GUARDED_BY(PeerManager::g_msgproc_mutex);
 
     /** Copied into short-lived tx INV deduplication sets to avoid generating salts per message. */
     const SaltedUint256Hasher m_txhash_hasher;
-    FeeFilterRounder m_fee_filter_rounder GUARDED_BY(NetEventsInterface::g_msgproc_mutex);
+    FeeFilterRounder m_fee_filter_rounder GUARDED_BY(PeerManager::g_msgproc_mutex);
 
     const CChainParams& m_chainparams;
     CConnman& m_connman;
@@ -1065,7 +1065,7 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, !tx_relay.m_tx_inventory_mutex);
 
     void ProcessGetData(CNode& pfrom, Peer& peer)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, peer.m_getdata_requests_mutex, NetEventsInterface::g_msgproc_mutex)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, peer.m_getdata_requests_mutex, PeerManager::g_msgproc_mutex)
         LOCKS_EXCLUDED(::cs_main);
 
     /** Process a new block. Perform any post-processing housekeeping */
@@ -6591,7 +6591,7 @@ PeerManagerImpl::~PeerManagerImpl()
     Stop();
 }
 
-Mutex NetEventsInterface::g_msgproc_mutex;
+Mutex PeerManager::g_msgproc_mutex;
 
 namespace {
 class PeerSnapshot
@@ -6622,7 +6622,7 @@ public:
 
 void PeerManagerImpl::ThreadMessageHandler()
 {
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     while (!flagInterruptMsgProc)
     {

@@ -839,7 +839,7 @@ BOOST_AUTO_TEST_CASE(LocalAddress_nScore_Overflow)
 
 BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
 {
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
     auto& connman{static_cast<ConnmanTestMsg&>(*m_node.connman)};
 
     // Tests the following scenario:
@@ -1629,7 +1629,7 @@ BOOST_AUTO_TEST_CASE(v2transport_test)
 
 BOOST_AUTO_TEST_CASE(private_broadcast_version_does_not_update_addrman_services)
 {
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     const CNetAddr source{LookupHost("2.3.4.5", /*fAllowLookup=*/false).value()};
     const CAddress addr{Lookup("1.2.3.4", 8333, /*fAllowLookup=*/false).value(), NODE_NONE};

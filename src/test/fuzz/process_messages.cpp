@@ -85,7 +85,7 @@ FUZZ_TARGET(process_messages, .init = initialize_process_messages)
 
     node.validation_signals->RegisterValidationInterface(node.peerman.get());
 
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     std::vector<CNode*> peers;
     const auto num_peers_to_add = fuzzed_data_provider.ConsumeIntegralInRange(1, 3);

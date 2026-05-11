@@ -305,6 +305,6 @@ auto ConsumeNode(FuzzedDataProvider& fuzzed_data_provider, FakeSteadyClock& cloc
 }
 inline std::unique_ptr<CNode> ConsumeNodeAsUniquePtr(FuzzedDataProvider& fdp, FakeSteadyClock& clock, const std::optional<NodeId>& node_id_in = std::nullopt) { return ConsumeNode<true>(fdp, clock, node_id_in); }
 
-void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, CNode& node) noexcept EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
+void FillNode(FuzzedDataProvider& fuzzed_data_provider, ConnmanTestMsg& connman, CNode& node) noexcept EXCLUSIVE_LOCKS_REQUIRED(PeerManager::g_msgproc_mutex);
 
 #endif // BITCOIN_TEST_FUZZ_UTIL_NET_H

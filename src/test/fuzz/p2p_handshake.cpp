@@ -60,7 +60,7 @@ FUZZ_TARGET(p2p_handshake, .init = ::initialize)
     connman.SetMsgProc(node.peerman.get());
     connman.SetAddrman(*node.addrman);
 
-    LOCK(NetEventsInterface::g_msgproc_mutex);
+    LOCK(PeerManager::g_msgproc_mutex);
 
     std::vector<CNode*> peers;
     const auto num_peers_to_add = fuzzed_data_provider.ConsumeIntegralInRange(1, 3);
