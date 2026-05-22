@@ -237,7 +237,7 @@ std::vector<BCLog::CategoryInfo> BCLog::Logger::LogCategoriesInfo() const
     return ret;
 }
 
-std::string BCLog::Logger::LogCategoriesString() const
+std::string BCLog::Logger::LogCategoriesString()
 {
     return util::Join(LOG_CATEGORIES_BY_STR, ", ", [&](const auto& i) { return i.first; });
 }
@@ -248,7 +248,7 @@ static constexpr std::array<BCLog::Level, 3> LogLevelsList()
     return {BCLog::Level::Info, BCLog::Level::Debug, BCLog::Level::Trace};
 }
 
-std::string BCLog::Logger::LogLevelsString() const
+std::string BCLog::Logger::LogLevelsString()
 {
     const auto& levels = LogLevelsList();
     return Join(std::vector<BCLog::Level>{levels.begin(), levels.end()}, ", ", [](BCLog::Level level) { return LogLevelToStr(level); });
