@@ -962,8 +962,16 @@ inline void formatImpl(std::ostream& out, const char* fmt,
 class FormatList
 {
     public:
-        FormatList(detail::FormatArg* args, int N)
+        FormatList(const detail::FormatArg* args, int N)
             : m_args(args), m_N(N) { }
+
+        /// Return a FormatList referring to a contiguous subrange of this
+        /// list's args. The returned list aliases this list's storage --
+        /// it remains valid only while `*this` is alive.
+        FormatList sublist(std::size_t start, std::size_t count) const
+        {
+            return FormatList(m_args + start, static_cast<int>(count));
+        }
 
         friend void vformat(std::ostream& out, const char* fmt,
                             const FormatList& list);
