@@ -787,6 +787,25 @@ attacks. For the cases where this protection is undesirable,
 rate-limiting can be avoided with the `util::log::NO_RATE_LIMIT` tag, eg
 `LogInfo(util::log::NO_RATE_LIMIT, "UpdateTip: new best=%s ...",...)`.
 
+In order to take best advantage of structured logging support, runtime
+values should be specified as key=value, eg:
+
+```
+    LogInfo("received: msg=%s peer=%d size=%dkB", msg_type, peer.GetId(), size/1024);
+```
+
+To avoid repeating common key/value pairs, `LogKVs` can be used, eg:
+
+```
+    auto DisconnectMsg()
+    {
+         fDisconnect = true; // actually disconnect this peer
+         return LogKVs("peer=%d disconnecting=%d", GetId(), 1);
+    }
+
+    LogInfo("peer behaved badly.", peer.DisconnectMsg());
+```
+
 ## General C++
 
 For general C++ guidelines, you may refer to the [C++ Core
