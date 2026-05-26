@@ -10,6 +10,7 @@
 #include <logging/categories.h> // IWYU pragma: export
 #include <tinyformat.h>
 #include <util/check.h>
+#include <util/kvformat.h>
 #include <util/threadnames.h>
 #include <util/time.h>
 
@@ -17,6 +18,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /// Like std::source_location, but allowing to override the function name.
 class SourceLocation
@@ -66,43 +68,72 @@ struct Entry {
     std::string thread_name{util::ThreadGetInternalName()};
     SourceLocation source_loc;
     std::string message;
+    std::vector<util::kvformat::KV> kvs;
 };
 
 /** Send message to be logged. Applications using the logging library need to provide this. */
 void Log(Entry entry);
 
 namespace detail {
-template <typename... Args>
-inline void LogWithSrcLoc(bool should_ratelimit, SourceLocation&& source_loc, BCLog::LogFlags flag, util::log::Level level, util::ConstevalFormatString<sizeof...(Args)> fmt, const Args&... args)
+
+//! Describe a tinyformat failure: the prose portion of the original
+//! format string and the exception message are surfaced as structured
+//! kvs.
+inline util::kvformat::Formatted MakeFmtErrorFormatted(std::string_view orig_msg, std::string_view error_what)
 {
-    std::string log_msg;
+    util::kvformat::Formatted f;
+    f.msg = "Error while formatting log message";
+    f.kvs.push_back({.name = "msg", .kind = util::kvformat::Kind::String, .value = std::string{orig_msg}});
+    f.kvs.push_back({.name = "error", .kind = util::kvformat::Kind::String, .value = std::string{error_what}});
+    return f;
+}
+
+/**
+ * Format the msg + kvs into a `Formatted`, wrap it in an owned `Entry`,
+ * and dispatch to `Log()`. Partitioning of positional vs provider args
+ * lives in `ConstevalMsgWithKVs<N>::format`. Tinyformat failures are
+ * caught and turned into a self-describing entry so a bad call site
+ * doesn't propagate an exception out of the logging path.
+ */
+template <std::size_t N, typename... Args>
+inline void DoLog(SourceLocation&& source_loc, BCLog::LogFlags flag, Level level,
+                  bool should_ratelimit,
+                  const util::kvformat::ConstevalMsgWithKVs<N>& msg,
+                  const Args&... args)
+{
+    util::kvformat::Formatted f;
     try {
-        log_msg = tfm::format(fmt, args...);
+        f = msg.format(args...);
     } catch (tinyformat::format_error& fmterr) {
-        log_msg = "Error \"" + std::string{fmterr.what()} + "\" while formatting log message: " + fmt.fmt;
+        f = MakeFmtErrorFormatted(msg.msg, fmterr.what());
     }
-    util::log::Log(util::log::Entry{
+    util::log::Log(Entry{
         .category = flag,
         .level = level,
         .should_ratelimit = should_ratelimit,
         .source_loc = std::move(source_loc),
-        .message = std::move(log_msg)});
+        .message = std::move(f.msg),
+        .kvs = std::move(f.kvs),
+    });
 }
 
-/* Treats lack of NO_RATE_LIMIT tag as should_ratelimit=true and delegates to function above */
+//! Default overload: rate-limited.
 template <typename... Args>
-inline void LogWithSrcLoc(SourceLocation&& source_loc, BCLog::LogFlags flag, util::log::Level level, util::ConstevalFormatString<sizeof...(Args)> fmt, const Args&... args)
+inline void LogWithSrcLoc(SourceLocation&& source_loc, BCLog::LogFlags flag, Level level,
+                          const util::kvformat::ConstevalMsgFor<Args...>& fmt, const Args&... args)
 {
-    return LogWithSrcLoc(/*should_ratelimit=*/true, std::move(source_loc), flag, level, fmt, args...);
+    DoLog(std::move(source_loc), flag, level, /*should_ratelimit=*/true, fmt, args...);
 }
 
-/* Treats presence of NO_RATE_LIMIT tag as should_ratelimit=false and delegates to function above */
+//! With explicit `NoRateLimitTag` before the format string.
 template <typename... Args>
-inline void LogWithSrcLoc(SourceLocation&& source_loc, BCLog::LogFlags flag, util::log::Level level, util::log::NoRateLimitTag, util::ConstevalFormatString<sizeof...(Args)> fmt, const Args&... args)
+inline void LogWithSrcLoc(SourceLocation&& source_loc, BCLog::LogFlags flag, Level level, NoRateLimitTag,
+                          const util::kvformat::ConstevalMsgFor<Args...>& fmt, const Args&... args)
 {
-    return LogWithSrcLoc(/*should_ratelimit=*/false, std::move(source_loc), flag, level, fmt, args...);
+    DoLog(std::move(source_loc), flag, level, /*should_ratelimit=*/false, fmt, args...);
 }
-} // namespace util::log::detail
+
+} // namespace detail
 
 /**
  * Holds the global "is this category enabled?" state used by the
@@ -160,6 +191,9 @@ using Level = util::log::Level;
 // Be conservative when using functions that unconditionally log to debug.log!
 // It should not be the case that an inbound peer can fill up a user's storage
 // with debug.log entries.
+//
+// Rate limiting can be skipped on a per-call basis by passing
+// `util::log::NO_RATE_LIMIT` as the first argument.
 #define LogInfo(...) detail_LogWithSrcLoc(BCLog::LogFlags::ALL, util::log::Level::Info, __VA_ARGS__)
 #define LogWarning(...) detail_LogWithSrcLoc(BCLog::LogFlags::ALL, util::log::Level::Warning, __VA_ARGS__)
 #define LogError(...) detail_LogWithSrcLoc(BCLog::LogFlags::ALL, util::log::Level::Error, __VA_ARGS__)
@@ -180,5 +214,23 @@ using Level = util::log::Level;
 // Log conditionally, prefixing the output with the passed category name.
 #define LogDebug(category, ...) detail_LogIfCategoryAndLevelEnabled(category, util::log::ShouldDebugLog, util::log::Level::Debug, __VA_ARGS__)
 #define LogTrace(category, ...) detail_LogIfCategoryAndLevelEnabled(category, util::log::ShouldTraceLog, util::log::Level::Trace, __VA_ARGS__)
+
+/**
+ * Construct a structured-context bundle from a format string of
+ * `name=value` tokens, to attach to a log line as a trailing arg:
+ *
+ *     class CNode {
+ *         auto DisconnectMsg() {
+ *             return LogKVs("peer=%d disconnected=%d", GetId(), true);
+ *         }
+ *     };
+ *     LogInfo("dropping connection", node.DisconnectMsg());
+ *
+ * The format string must contain only `name=value` tokens (no prose
+ * msg, no positional `%`-specs); enforced at compile time by `MakeKVs`'s
+ * consteval-parsing of the format string.
+ */
+#define LogKVs(...) \
+    ::util::kvformat::MakeKVs(__VA_ARGS__)
 
 #endif // BITCOIN_UTIL_LOG_H

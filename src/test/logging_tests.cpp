@@ -31,6 +31,17 @@
 using util::SplitString;
 using util::TrimString;
 
+namespace {
+//! A type whose ostream insertion throws `tinyformat::format_error`, used
+//! to exercise the runtime fallback path in `util::log::detail::DoLog`.
+struct ThrowingFormatArg {
+};
+[[maybe_unused]] std::ostream& operator<<(std::ostream&, const ThrowingFormatArg&)
+{
+    throw tinyformat::format_error("simulated format failure");
+}
+} // namespace
+
 BOOST_FIXTURE_TEST_SUITE(logging_tests, BasicTestingSetup)
 
 static void ResetLogger()
@@ -127,10 +138,68 @@ BOOST_FIXTURE_TEST_CASE(logging_LogPrint, LogSetup)
     std::vector<std::string> expected;
     for (auto& [msg, category, level, prefix, loc] : cases) {
         expected.push_back(tfm::format("[%s:%s] [%s] %s%s", util::RemovePrefix(loc.file_name(), "./"), loc.line(), loc.function_name_short(), prefix, msg));
-        LogInstance().LogPrint({.category = category, .level = level, .should_ratelimit = false, .source_loc = std::move(loc), .message = msg});
+        LogInstance().LogPrint({.category = category, .level = level, .should_ratelimit = false, .source_loc = std::move(loc), .message = msg, .kvs = {}});
     }
     std::vector<std::string> log_lines{ReadDebugLogLines()};
     BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(), expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_kv_wrap, LogSetup)
+{
+    // The msg portion of each call is the same; only the kv values vary.
+    // Values that contain space, `=`, `"`, `\`, or control bytes are
+    // wrapped in `"..."` with C-style escapes.
+
+    // No wrap needed: bare value.
+    LogInfo("msg peer=%d", 42);
+    // Space forces wrap.
+    LogInfo("msg subver=%s", "user agent");
+    // '=' in value forces wrap.
+    LogInfo("msg data=%s", "x=y");
+    // '"' in value: wrap + escape.
+    LogInfo("msg note=%s", "a\"b");
+    // Backslash in value: wrap + escape.
+    LogInfo("msg path=%s", "a\\b");
+    // Newline in value: wrap + C-style escape.
+    LogInfo("msg text=%s", "line1\nline2");
+    // Tab + carriage return.
+    LogInfo("msg text=%s", "a\tb\rc");
+    // Other control bytes get \xHH form.
+    LogInfo("msg bin=%s", "x\x01y");
+    // Multiple kvs in one call: each rendered independently, space-separated.
+    LogInfo("msg peer=%d subver=%s", 7, "user agent");
+
+    std::vector<std::string> expected = {
+        "msg peer=42",
+        "msg subver=\"user agent\"",
+        "msg data=\"x=y\"",
+        "msg note=\"a\\\"b\"",
+        "msg path=\"a\\\\b\"",
+        "msg text=\"line1\\nline2\"",
+        "msg text=\"a\\tb\\rc\"",
+        "msg bin=\"x\\x01y\"",
+        "msg peer=7 subver=\"user agent\"",
+    };
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_fmt_error_fallback, LogSetup)
+{
+    // A runtime tinyformat failure (the arg's operator<< throws) must not
+    // propagate out of the logging path; DoLog catches and logs a
+    // self-describing entry with the original msg and the error captured
+    // as structured kvs.
+    LogInfo("hello %s", ThrowingFormatArg{});
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        "Error while formatting log message msg=\"hello %s\" error=\"simulated format failure\"",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
 }
 
 BOOST_FIXTURE_TEST_CASE(logging_LogPrintMacros, LogSetup)

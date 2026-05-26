@@ -7,6 +7,7 @@
 #include <memusage.h>
 #include <util/check.h>
 #include <util/fs.h>
+#include <util/kvformat.h>
 #include <util/string.h>
 #include <util/threadnames.h>
 #include <util/time.h>
@@ -80,6 +81,7 @@ bool BCLog::Logger::StartLogging()
             .should_ratelimit = false,
             .source_loc = SourceLocation{__func__},
             .message = strprintf("Early logging buffer overflowed, %d log lines discarded.", m_buffer_lines_discarded),
+            .kvs = {},
         });
     }
     while (!m_msgs_before_open.empty()) {
@@ -295,6 +297,41 @@ namespace BCLog {
         }
         return ret;
     }
+
+    //! True iff `v` should be wrapped in quotes in flat-file output to
+    //! avoid ambiguity at the `name=value name=value ...` parse level.
+    static bool NeedsKvWrap(std::string_view v)
+    {
+        for (uint8_t c : v) {
+            if (c == ' ' || c == '=' || c == '"' || c == '\\' || c < 32 || c == 0x7f) return true;
+        }
+        return false;
+    }
+
+    //! Append `v` to `out` wrapped in `"..."`, with `\\`, `\"`, `\n`,
+    //! `\r`, `\t` and `\xHH` escapes for backslash, quote, and any
+    //! control byte that would split the line or interfere with parsing.
+    static void AppendEscapedKvValue(std::string& out, std::string_view v)
+    {
+        out += '"';
+        for (char ch_in : v) {
+            uint8_t c = (uint8_t)ch_in;
+            switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 32 || c == 0x7f) {
+                    out += strprintf("\\x%02x", c);
+                } else {
+                    out += ch_in;
+                }
+            }
+        }
+        out += '"';
+    }
 } // namespace BCLog
 
 std::string BCLog::Logger::GetLogPrefix(BCLog::LogFlags category, BCLog::Level level) const
@@ -325,8 +362,13 @@ std::string BCLog::Logger::GetLogPrefix(BCLog::LogFlags category, BCLog::Level l
 
 static size_t MemUsage(const util::log::Entry& log)
 {
+    size_t kvs_usage = memusage::DynamicUsage(log.kvs);
+    for (const auto& kv : log.kvs) {
+        kvs_usage += memusage::DynamicUsage(kv.name) + memusage::DynamicUsage(kv.value);
+    }
     return memusage::DynamicUsage(log.message) +
            memusage::DynamicUsage(log.thread_name) +
+           kvs_usage +
            memusage::MallocUsage(sizeof(memusage::list_node<util::log::Entry>));
 }
 
@@ -374,7 +416,22 @@ std::string BCLog::Logger::Format(const util::log::Entry& entry) const
     }
 
     result += GetLogPrefix(static_cast<LogFlags>(entry.category), entry.level);
-    result += LogEscapeMessage(entry.message);
+
+    // Reassemble the flat-file line from the formatted msg plus the
+    // structured kvs (printed as space-separated `name=value`; values
+    // are wrapped in `"..."` with C-style escapes when needed).
+    std::string message{entry.message};
+    for (const auto& kv : entry.kvs) {
+        if (!message.empty() && message.back() != '\n') message += ' ';
+        message += kv.name;
+        message += '=';
+        if (NeedsKvWrap(kv.value)) {
+            AppendEscapedKvValue(message, kv.value);
+        } else {
+            message += kv.value;
+        }
+    }
+    result += LogEscapeMessage(message);
 
     if (!result.ends_with('\n')) result += '\n';
     return result;
@@ -427,6 +484,7 @@ void BCLog::Logger::LogPrint_(util::log::Entry entry)
                     entry.source_loc.file_name(), entry.source_loc.line(), entry.source_loc.function_name_short(),
                     m_limiter->m_max_bytes,
                     Ticks<std::chrono::seconds>(m_limiter->m_reset_window)),
+                .kvs = {},
             });
         } else if (status == LogRateLimiter::Status::STILL_SUPPRESSED) {
             ratelimit = true;
@@ -496,6 +554,7 @@ void BCLog::Logger::ShrinkDebugFile()
                 .should_ratelimit = true,
                 .source_loc = SourceLocation{__func__},
                 .message = "Failed to shrink debug log file: fseek(...) failed",
+                .kvs = {},
             });
             fclose(file);
             return;
