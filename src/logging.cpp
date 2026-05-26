@@ -403,8 +403,146 @@ BCLog::LogRateLimiter::Status BCLog::LogRateLimiter::Consume(
     return status;
 }
 
+//! Check whether @p s is a valid RFC 8259 JSON number (so we can safely emit
+//! it unquoted). Rejects nan, inf, leading-zero ints, lone '.', empty, etc.
+static bool IsValidJsonNumber(std::string_view s)
+{
+    if (s.empty()) return false;
+    std::size_t i = 0;
+    if (s[i] == '-') ++i;
+    if (i >= s.size()) return false;
+    // int part: "0" | [1-9][0-9]*
+    if (s[i] == '0') {
+        ++i;
+    } else if (s[i] >= '1' && s[i] <= '9') {
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+            ++i;
+        }
+    } else {
+        return false;
+    }
+    // fractional part
+    if (i < s.size() && s[i] == '.') {
+        ++i;
+        if (i >= s.size() || s[i] < '0' || s[i] > '9') return false;
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+            ++i;
+        }
+    }
+    // exponent
+    if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+        ++i;
+        if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
+        if (i >= s.size() || s[i] < '0' || s[i] > '9') return false;
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
+            ++i;
+        }
+    }
+    return i == s.size();
+}
+
+//! Minimal RFC 8259 string-escape for JSON log output.
+static void JsonAppendEscaped(std::string& out, std::string_view s)
+{
+    for (char c : s) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\b': out += "\\b"; break;
+        case '\f': out += "\\f"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                out += strprintf("\\u%04x", static_cast<unsigned char>(c));
+            } else {
+                out += c;
+            }
+        }
+    }
+}
+
+std::string BCLog::Logger::FormatJSON(const util::log::Entry& entry) const
+{
+    std::string result;
+    result.reserve(256);
+    result += '{';
+
+    if (m_log_timestamps) {
+        const auto micros{std::chrono::duration_cast<std::chrono::microseconds>(entry.timestamp.time_since_epoch()).count()};
+        result += "\"t\":";
+        result += util::ToString(micros);
+        result += ',';
+        if (entry.mocktime > 0s) {
+            result += "\"mocktime\":";
+            result += util::ToString(std::chrono::duration_cast<std::chrono::microseconds>(entry.mocktime).count());
+            result += ',';
+        }
+    }
+
+    if (m_log_threadnames) {
+        result += "\"th\":\"";
+        JsonAppendEscaped(result, entry.thread_name.empty() ? "unknown" : entry.thread_name);
+        result += "\",";
+    }
+
+    if (m_log_sourcelocations) {
+        result += "\"src\":\"";
+        JsonAppendEscaped(result, RemovePrefixView(entry.source_loc.file_name(), "./"));
+        result += "\",\"line\":";
+        result += util::ToString(entry.source_loc.line());
+        result += ",\"fn\":\"";
+        JsonAppendEscaped(result, entry.source_loc.function_name_short());
+        result += "\",";
+    }
+
+    result += "\"c\":\"";
+    result += LogCategoryToStr(static_cast<LogFlags>(entry.category));
+    result += "\",\"l\":\"";
+    result += LogLevelToStr(entry.level);
+    result += "\",\"m\":\"";
+    // The JSON line terminator already separates entries; a trailing newline
+    // baked into the msg would just show up as a literal "\n" inside "m".
+    std::string_view msg_view{entry.message};
+    while (!msg_view.empty() && msg_view.back() == '\n') {
+        msg_view.remove_suffix(1);
+    }
+    JsonAppendEscaped(result, msg_view);
+    result += "\"";
+
+    if (!entry.kvs.empty()) {
+        result += ",\"k\":{";
+        for (std::size_t i = 0; i < entry.kvs.size(); ++i) {
+            const auto& kv = entry.kvs[i];
+            if (i) result += ',';
+            result += '"';
+            JsonAppendEscaped(result, kv.name);
+            result += "\":";
+            const bool numeric = (kv.kind != util::kvformat::Kind::String) && IsValidJsonNumber(kv.value);
+            if (numeric) {
+                // Integer/Float that formats as a well-formed JSON number.
+                result += kv.value;
+            } else {
+                // Fallback: emit as a quoted string. Covers Kind::String,
+                // and also numeric specs whose formatting isn't a valid JSON
+                // number (e.g. nan/inf for %f, leading-zero widths like %05d).
+                result += '"';
+                JsonAppendEscaped(result, kv.value);
+                result += '"';
+            }
+        }
+        result += '}';
+    }
+
+    result += "}\n";
+    return result;
+}
+
 std::string BCLog::Logger::Format(const util::log::Entry& entry) const
 {
+    if (m_log_json) return FormatJSON(entry);
+
     std::string result{LogTimestampStr(entry.timestamp, entry.mocktime)};
 
     if (m_log_threadnames) {
@@ -492,9 +630,15 @@ void BCLog::Logger::LogPrint_(util::log::Entry entry)
     }
 
     // To avoid confusion caused by dropped log messages when debugging an issue,
-    // we prefix log lines with "[*]" when there are any suppressed source locations.
+    // we mark log lines whenever any source location is currently suppressed:
+    // flat-file output gets a "[*]" prefix; JSON output gets an "rl":true field.
     if (m_limiter && m_limiter->SuppressionsActive()) {
-        str_prefixed.insert(0, "[*] ");
+        if (m_log_json) {
+            auto pos = str_prefixed.rfind('}');
+            if (pos != std::string::npos) str_prefixed.replace(pos, 1, ",\"rl\":true}");
+        } else {
+            str_prefixed.insert(0, "[*] ");
+        }
     }
 
     if (m_print_to_console) {

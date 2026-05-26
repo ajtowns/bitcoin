@@ -202,6 +202,149 @@ BOOST_FIXTURE_TEST_CASE(logging_fmt_error_fallback, LogSetup)
                                   expected.begin(), expected.end());
 }
 
+BOOST_FIXTURE_TEST_CASE(logging_json_basic, LogSetup)
+{
+    // All conditional fields off (LogSetup disables timestamps, threadnames,
+    // sourcelocations); the JSON output is the minimal shape.
+    LogInstance().m_log_json = true;
+    LogInfo("hello");
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        R"({"c":"all","l":"info","m":"hello"})",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_timestamps, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    LogInstance().m_log_timestamps = true;
+    SetMockTime(std::chrono::seconds{1234567890});
+
+    const auto t_before = std::chrono::duration_cast<std::chrono::microseconds>(
+                              SystemClock::now().time_since_epoch())
+                              .count();
+    LogInfo("hi");
+    const auto t_after = std::chrono::duration_cast<std::chrono::microseconds>(
+                             SystemClock::now().time_since_epoch())
+                             .count();
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    BOOST_REQUIRE_EQUAL(log_lines.size(), 1u);
+    // Output shape: {"t":<µs>,"mocktime":<µs>,"c":"all","l":"info","m":"hi"}
+    BOOST_CHECK(log_lines[0].starts_with(R"({"t":)"));
+    BOOST_CHECK(log_lines[0].ends_with(R"(,"mocktime":1234567890000000,"c":"all","l":"info","m":"hi"})"));
+    // Extract the t value and check it sits between the surrounding clock reads.
+    const auto t_start = log_lines[0].find(R"("t":)") + 4;
+    const auto t_end = log_lines[0].find(',', t_start);
+    BOOST_REQUIRE_NE(t_end, std::string::npos);
+    const int64_t t = *Assert(ToIntegral<int64_t>(log_lines[0].substr(t_start, t_end - t_start)));
+    BOOST_CHECK_GE(t, t_before);
+    BOOST_CHECK_LE(t, t_after);
+
+    SetMockTime(0s);
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_threadnames, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    LogInstance().m_log_threadnames = true;
+    const std::string prev_name{util::ThreadGetInternalName()};
+    util::ThreadSetInternalName("test-thread");
+    LogInfo("hi");
+    util::ThreadSetInternalName(prev_name);
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        R"({"th":"test-thread","c":"all","l":"info","m":"hi"})",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_sourcelocations, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    LogInstance().m_log_sourcelocations = true;
+    SourceLocation here{__func__};
+    LogInfo("hi");
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    BOOST_REQUIRE_EQUAL(log_lines.size(), 1u);
+    // Source-loc fields contain the actual file/line/fn of the LogInfo call;
+    // assert the *shape* rather than pinning the line number.
+    const std::string expected_prefix = strprintf(
+        R"({"src":"%s","line":)",
+        util::RemovePrefix(here.file_name(), "./"));
+    BOOST_CHECK(log_lines[0].starts_with(expected_prefix));
+    BOOST_CHECK(log_lines[0].find(R"("fn":")") != std::string::npos);
+    BOOST_CHECK(log_lines[0].ends_with(R"("c":"all","l":"info","m":"hi"})"));
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_kvs, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    // String kvs quoted; valid-number Integer/Float kvs unquoted.
+    LogInfo("event=%s n=%d r=%.1f", "started", 42, 1.5);
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        R"({"c":"all","l":"info","m":"","k":{"event":"started","n":42,"r":1.5}})",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_kv_fallback, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    // A numeric spec whose formatted value isn't a valid JSON number
+    // (leading-zero from `%05d`) falls back to a quoted string.
+    LogInfo("count=%05d", 42);
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        R"({"c":"all","l":"info","m":"","k":{"count":"00042"}})",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_escapes, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    // Special chars in msg and kv values get RFC 8259 escapes:
+    //   `"` -> \"   `\` -> \\   `\n` -> \n   ctrl byte -> \u00HH
+    LogInfo("a \"quote\" and a \\backslash\n and a \x01 byte");
+    LogInfo("note=%s", "has \"quote\" and \nctrl\x01");
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    std::vector<std::string> expected = {
+        R"({"c":"all","l":"info","m":"a \"quote\" and a \\backslash\n and a \u0001 byte"})",
+        R"({"c":"all","l":"info","m":"","k":{"note":"has \"quote\" and \nctrl\u0001"}})",
+    };
+    BOOST_CHECK_EQUAL_COLLECTIONS(log_lines.begin(), log_lines.end(),
+                                  expected.begin(), expected.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(logging_json_suppression, LogSetup)
+{
+    LogInstance().m_log_json = true;
+    // Tiny budget so the first rate-limited log activates suppression for
+    // its source location; the second log then sees SuppressionsActive() == true
+    // and gets the `,"rl":true` injected before the closing `}`.
+    LogInstance().SetRateLimiting(BCLog::LogRateLimiter::Create([](auto, auto) {}, /*max_bytes=*/16, /*reset_window=*/1h));
+    LogInfo("first message that exceeds the byte budget for this source location");
+    LogInfo("second");
+
+    std::vector<std::string> log_lines{ReadDebugLogLines()};
+    BOOST_REQUIRE_GE(log_lines.size(), 2u);
+    // The second line should have "rl":true injected before the closing brace.
+    BOOST_CHECK(log_lines.back().ends_with(R"(,"rl":true})"));
+}
+
 BOOST_FIXTURE_TEST_CASE(logging_LogPrintMacros, LogSetup)
 {
     LogInstance().SetCategoryLogLevel(BCLog::NET, BCLog::Level::Debug);

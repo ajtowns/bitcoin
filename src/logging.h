@@ -33,6 +33,7 @@ static const bool DEFAULT_LOGTIMESTAMPS = true;
 static const bool DEFAULT_LOGTHREADNAMES = false;
 static const bool DEFAULT_LOGSOURCELOCATIONS = false;
 static constexpr bool DEFAULT_LOGLEVELALWAYS = false;
+static constexpr bool DEFAULT_LOGJSON = false;
 extern const char * const DEFAULT_DEBUGLOGFILE;
 
 extern bool fLogIPs;
@@ -143,6 +144,7 @@ namespace BCLog {
         std::atomic<bool> m_log_threadnames = DEFAULT_LOGTHREADNAMES;
         std::atomic<bool> m_log_sourcelocations = DEFAULT_LOGSOURCELOCATIONS;
         std::atomic<bool> m_always_print_category_level = DEFAULT_LOGLEVELALWAYS;
+        std::atomic<bool> m_log_json = DEFAULT_LOGJSON;
         std::atomic<bool> m_reopen_file{false};
 
     private:
@@ -168,6 +170,7 @@ namespace BCLog {
         // Internal methods
 
         std::string Format(const util::log::Entry& entry) const;
+        std::string FormatJSON(const util::log::Entry& entry) const;
 
         std::string LogTimestampStr(SystemClock::time_point now, std::chrono::seconds mocktime) const;
 
