@@ -20,11 +20,14 @@
 
 namespace util {
 namespace detail {
-template <unsigned num_params>
-constexpr static void CheckNumFormatSpecifiers(const char* str)
+struct FormatSpecifierCounts {
+    unsigned count_normal{0}; //!< Number of "normal" specifiers, like %s
+    unsigned count_pos{0};    //!< Max number in positional specifier, like %8$s
+};
+
+constexpr FormatSpecifierCounts CountNumFormatSpecifiers(const char* str)
 {
-    unsigned count_normal{0}; // Number of "normal" specifiers, like %s
-    unsigned count_pos{0};    // Max number in positional specifier, like %8$s
+    FormatSpecifierCounts r;
     for (auto it{str}; *it != '\0'; ++it) {
         if (*it != '%' || *++it == '%') continue; // Skip escaped %%
 
@@ -40,10 +43,10 @@ constexpr static void CheckNumFormatSpecifiers(const char* str)
                 ++it;
                 // Positional specifier, like %8$s
                 if (maybe_num == 0) throw "Positional format specifier must have position of at least 1";
-                count_pos = std::max(count_pos, maybe_num);
+                r.count_pos = std::max(r.count_pos, maybe_num);
             } else {
                 // Non-positional specifier, like %s
-                ++count_normal;
+                ++r.count_normal;
             }
         };
 
@@ -76,8 +79,15 @@ constexpr static void CheckNumFormatSpecifiers(const char* str)
         // Length and type in "[flags][width][.precision][length]type"
         // is not checked. Parsing continues with the next '%'.
     }
+    return r;
+}
+
+template <unsigned num_params>
+constexpr void CheckNumFormatSpecifiers(const char* str)
+{
+    const auto [count_normal, count_pos]{CountNumFormatSpecifiers(str)};
     if (count_normal && count_pos) throw "Format specifiers must be all positional or all non-positional!";
-    unsigned count{count_normal | count_pos};
+    const unsigned count{count_normal | count_pos};
     if (num_params != count) throw "Format specifier count must match the argument count!";
 }
 } // namespace detail
