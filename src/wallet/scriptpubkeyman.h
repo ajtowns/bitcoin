@@ -144,11 +144,11 @@ public:
     /** Returns a set of all the scriptPubKeys that this ScriptPubKeyMan watches */
     virtual std::unordered_set<CScript, SaltedSipHasher> GetScriptPubKeys() const { return {}; };
 
-    /** Prepends the wallet name in logging output to ease debugging in multi-wallet use cases */
+    /** Attaches the wallet name as a `wallet=` structured field on every log line, to ease debugging in multi-wallet use cases. */
     template <typename... Params>
-    void WalletLogPrintf(util::ConstevalFormatString<sizeof...(Params)> wallet_fmt, const Params&... params) const
+    void WalletLogPrintf(const util::kvformat::ConstevalMsgFor<Params...>& wallet_fmt, const Params&... params) const
     {
-        LogInfo("[%s] %s", m_storage.LogName(), tfm::format(wallet_fmt, params...));
+        LogInfo(wallet_fmt, params..., LogKVs("wallet=%s", m_storage.LogName()));
     };
 
     /** Keypool has new keys */

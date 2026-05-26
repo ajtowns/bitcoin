@@ -932,11 +932,11 @@ public:
         return name.empty() ? _("default wallet") : name;
     };
 
-    /** Prepends the wallet name in logging output to ease debugging in multi-wallet use cases */
+    /** Attaches the wallet name as a `wallet=` structured field on every log line, to ease debugging in multi-wallet use cases. */
     template <typename... Params>
-    void WalletLogPrintf(util::ConstevalFormatString<sizeof...(Params)> wallet_fmt, const Params&... params) const
+    void WalletLogPrintf(const util::kvformat::ConstevalMsgFor<Params...>& wallet_fmt, const Params&... params) const
     {
-        LogInfo("[%s] %s", LogName(), tfm::format(wallet_fmt, params...));
+        LogInfo(wallet_fmt, params..., LogKVs("wallet=%s", LogName()));
     };
 
     void LogStats() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet)
