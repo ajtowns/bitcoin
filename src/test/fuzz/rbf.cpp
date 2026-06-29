@@ -70,25 +70,25 @@ FUZZ_TARGET(rbf, .init = initialize_rbf)
         if (!another_mtx) {
             break;
         }
-        const CTransaction another_tx{*another_mtx};
+        CTransactionRef another_ptx{MakeTransactionRef(*another_mtx)};
         if (fuzzed_data_provider.ConsumeBool() && !mtx->vin.empty()) {
-            mtx->vin[0].prevout = COutPoint{another_tx.GetHash(), 0};
+            mtx->vin[0].prevout = COutPoint{another_ptx->GetHash(), 0};
         }
         LOCK2(cs_main, pool.cs);
-        if (!pool.GetIter(another_tx.GetHash())) {
-            TryAddToMempool(pool, ConsumeTxMemPoolEntry(fuzzed_data_provider, another_tx));
+        if (!pool.GetIter(another_ptx->GetHash())) {
+            TryAddToMempool(pool, ConsumeTxMemPoolEntry(fuzzed_data_provider, another_ptx));
         }
     }
-    const CTransaction tx{*mtx};
+    const CTransactionRef ptx{MakeTransactionRef(*mtx)};
     if (fuzzed_data_provider.ConsumeBool()) {
         LOCK2(cs_main, pool.cs);
-        if (!pool.GetIter(tx.GetHash())) {
-            TryAddToMempool(pool, ConsumeTxMemPoolEntry(fuzzed_data_provider, tx));
+        if (!pool.GetIter(ptx->GetHash())) {
+            TryAddToMempool(pool, ConsumeTxMemPoolEntry(fuzzed_data_provider, ptx));
         }
     }
     {
         LOCK(pool.cs);
-        (void)IsRBFOptIn(tx, pool);
+        (void)IsRBFOptIn(*ptx, pool);
     }
 }
 
@@ -108,7 +108,7 @@ FUZZ_TARGET(package_rbf, .init = initialize_package_rbf)
     Assert(error.empty());
 
     // Add a bunch of parent-child pairs to the mempool, and remember them.
-    std::vector<CTransaction> mempool_txs;
+    std::vector<CTransactionRef> mempool_txs;
     uint32_t iter{0};
 
     // Keep track of the total vsize of CTxMemPoolEntry's being added to the mempool to avoid overflow
@@ -119,8 +119,7 @@ FUZZ_TARGET(package_rbf, .init = initialize_package_rbf)
     }
     replacement_tx->vin.resize(1);
     replacement_tx->vin[0].prevout = g_outpoints.at(iter++);
-    CTransaction replacement_tx_final{*replacement_tx};
-    auto replacement_entry = ConsumeTxMemPoolEntry(fuzzed_data_provider, replacement_tx_final);
+    auto replacement_entry = ConsumeTxMemPoolEntry(fuzzed_data_provider, MakeTransactionRef(*replacement_tx));
     int32_t replacement_weight = replacement_entry.GetAdjustedWeight();
     // Ensure that we don't hit FeeFrac limits, as we store TxGraph entries in terms of FeePerWeight
     int64_t running_vsize_total{replacement_entry.GetTxSize()};
@@ -136,7 +135,7 @@ FUZZ_TARGET(package_rbf, .init = initialize_package_rbf)
         parent.vin[0].prevout = g_outpoints.at(iter++);
         parent.vout.emplace_back(0, CScript());
 
-        mempool_txs.emplace_back(parent);
+        mempool_txs.emplace_back(MakeTransactionRef(parent));
         const auto parent_entry = ConsumeTxMemPoolEntry(fuzzed_data_provider, mempool_txs.back());
         running_vsize_total += parent_entry.GetTxSize();
         if (running_vsize_total * WITNESS_SCALE_FACTOR > std::numeric_limits<int32_t>::max()) {
@@ -154,8 +153,8 @@ FUZZ_TARGET(package_rbf, .init = initialize_package_rbf)
             continue;
         }
 
-        child.vin[0].prevout = COutPoint{mempool_txs.back().GetHash(), 0};
-        mempool_txs.emplace_back(child);
+        child.vin[0].prevout = COutPoint{mempool_txs.back()->GetHash(), 0};
+        mempool_txs.emplace_back(MakeTransactionRef(child));
         const auto child_entry = ConsumeTxMemPoolEntry(fuzzed_data_provider, mempool_txs.back());
         running_vsize_total += child_entry.GetTxSize();
         if (running_vsize_total * WITNESS_SCALE_FACTOR > std::numeric_limits<int32_t>::max()) {
@@ -174,15 +173,15 @@ FUZZ_TARGET(package_rbf, .init = initialize_package_rbf)
         }
 
         if (fuzzed_data_provider.ConsumeBool()) {
-            pool.PrioritiseTransaction(mempool_txs.back().GetHash(), fuzzed_data_provider.ConsumeIntegralInRange<int32_t>(-100000, 100000));
+            pool.PrioritiseTransaction(mempool_txs.back()->GetHash(), fuzzed_data_provider.ConsumeIntegralInRange<int32_t>(-100000, 100000));
         }
     }
 
     // Pick some transactions at random to be the direct conflicts
     CTxMemPool::setEntries direct_conflicts;
     for (auto& tx : mempool_txs) {
-        if (fuzzed_data_provider.ConsumeBool() && pool.GetIter(tx.GetHash())) {
-            direct_conflicts.insert(*pool.GetIter(tx.GetHash()));
+        if (fuzzed_data_provider.ConsumeBool() && pool.GetIter(tx->GetHash())) {
+            direct_conflicts.insert(*pool.GetIter(tx->GetHash()));
         }
     }
 

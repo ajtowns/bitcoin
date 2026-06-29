@@ -49,8 +49,7 @@ FUZZ_TARGET(policy_estimator, .init = initialize_policy_estimator)
                     good_data = false;
                     return;
                 }
-                const CTransaction tx{*mtx};
-                const auto entry{ConsumeTxMemPoolEntry(fuzzed_data_provider, tx, current_height)};
+                const auto entry{ConsumeTxMemPoolEntry(fuzzed_data_provider, MakeTransactionRef(*mtx), current_height)};
                 const auto tx_submitted_in_package = fuzzed_data_provider.ConsumeBool();
                 const auto tx_has_mempool_parents = fuzzed_data_provider.ConsumeBool();
                 const auto tx_info = NewMempoolTransactionInfo(entry.GetSharedTx(), entry.GetFee(),
@@ -61,7 +60,7 @@ FUZZ_TARGET(policy_estimator, .init = initialize_policy_estimator)
                                                                tx_has_mempool_parents);
                 block_policy_estimator.processTransaction(tx_info);
                 if (fuzzed_data_provider.ConsumeBool()) {
-                    (void)block_policy_estimator.removeTx(tx.GetHash());
+                    (void)block_policy_estimator.removeTx(mtx->GetHash());
                 }
             },
             [&] {
@@ -73,8 +72,7 @@ FUZZ_TARGET(policy_estimator, .init = initialize_policy_estimator)
                         good_data = false;
                         break;
                     }
-                    const CTransaction tx{*mtx};
-                    mempool_entries.push_back(ConsumeTxMemPoolEntry(fuzzed_data_provider, tx, current_height));
+                    mempool_entries.push_back(ConsumeTxMemPoolEntry(fuzzed_data_provider, MakeTransactionRef(*mtx), current_height));
                 }
                 std::vector<RemovedMempoolTransactionInfo> txs;
                 txs.reserve(mempool_entries.size());
