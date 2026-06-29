@@ -119,7 +119,7 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
     tx_to_spend.vin[0].scriptSig << block_data;
     tx_spending.vin[0].prevout = COutPoint(tx_to_spend.GetHash(), 0);
 
-    return SignetTxs{tx_to_spend, tx_spending};
+    return std::optional<SignetTxs>{std::in_place, tx_to_spend, tx_spending};
 }
 
 // Signet block solution checker

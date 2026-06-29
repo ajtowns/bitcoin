@@ -28,10 +28,9 @@ bool CheckSignetBlockSolution(const CBlock& block, const Consensus::Params& cons
  * 2. It skips the nonce.
  */
 class SignetTxs {
-    template<class T1, class T2>
-    SignetTxs(const T1& to_spend, const T2& to_sign) : m_to_spend{to_spend}, m_to_sign{to_sign} { }
-
 public:
+    SignetTxs(const CMutableTransaction& to_spend, const CMutableTransaction& to_sign) : m_to_spend{to_spend}, m_to_sign{to_sign} { }
+
     static std::optional<SignetTxs> Create(const CBlock& block, const CScript& challenge);
 
     const CTransaction m_to_spend;
