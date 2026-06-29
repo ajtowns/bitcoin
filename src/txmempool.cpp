@@ -880,11 +880,11 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
 
         nTxnRemoved += worst_chunk.size();
 
-        std::vector<CTransaction> txn;
+        std::vector<CTransactionRef> txn;
         if (pvNoSpendsRemaining) {
             txn.reserve(worst_chunk.size());
             for (auto ref : worst_chunk) {
-                txn.emplace_back(static_cast<const CTxMemPoolEntry&>(*ref).GetTx());
+                txn.emplace_back(static_cast<const CTxMemPoolEntry&>(*ref).GetSharedTx());
             }
         }
 
@@ -896,8 +896,8 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
             removeUnchecked(e, MemPoolRemovalReason::SIZELIMIT);
         }
         if (pvNoSpendsRemaining) {
-            for (const CTransaction& tx : txn) {
-                for (const CTxIn& txin : tx.vin) {
+            for (const CTransactionRef& tx : txn) {
+                for (const CTxIn& txin : tx->vin) {
                     if (exists(txin.prevout.hash)) continue;
                     pvNoSpendsRemaining->push_back(txin.prevout);
                 }
