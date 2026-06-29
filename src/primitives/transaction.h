@@ -309,6 +309,10 @@ public:
     explicit CTransaction(const CMutableTransaction& tx);
     explicit CTransaction(CMutableTransaction&& tx);
 
+    // immutable class, not copy or move constructor
+    CTransaction(const CTransaction&) = delete;
+    CTransaction(CTransaction&&) = delete;
+
     template <typename Stream>
     inline void Serialize(Stream& s) const {
         SerializeTransaction(*this, s, s.template GetParams<TransactionSerParams>());
