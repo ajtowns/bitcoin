@@ -401,7 +401,13 @@ struct CMutableTransaction
 };
 
 typedef std::shared_ptr<const CTransaction> CTransactionRef;
-template <typename Tx> static inline CTransactionRef MakeTransactionRef(Tx&& txIn) { return std::make_shared<const CTransaction>(std::forward<Tx>(txIn)); }
+
+// MakeTransactionRef accepts the same args as any CTransaction constructor
+template <typename... Args>
+inline CTransactionRef MakeTransactionRef(Args&&... args)
+{
+    return std::make_shared<const CTransaction>(std::forward<Args>(args)...);
+}
 
 namespace std {
 /** Disable default std::hash for CTransactionRef to prevent accidentally
