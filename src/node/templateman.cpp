@@ -690,6 +690,7 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
         SpanReader stream{shortid_bytes};
         uint32_t n;
         stream >> n;
+        if (n > MAX_TEMPLATE_TXS) return;
         uint8_t P;
         stream >> P;
         BitStreamReader<SpanReader> bitreader{stream};
