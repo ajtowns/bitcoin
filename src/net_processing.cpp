@@ -987,7 +987,9 @@ private:
                                                 uint64_t network_key) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
     /** Mutex protecting m_templateman. */
-    mutable Mutex m_template_mutex ACQUIRED_BEFORE(cs_main, m_mempool.cs, m_most_recent_block_mutex);
+    mutable Mutex m_template_mutex
+        ACQUIRED_BEFORE(m_mempool.cs, m_most_recent_block_mutex)
+        ACQUIRED_AFTER(::cs_main);
     node::TemplateManager m_templateman GUARDED_BY(m_template_mutex);
 
     // All of the following cache a recent block, and are protected by m_most_recent_block_mutex
