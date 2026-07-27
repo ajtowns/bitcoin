@@ -1133,6 +1133,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
                         return {TmpltState::FAILED, templatehash, {}, {}};
                     }
                     const auto& ref = basis.m_txs[pos];
+                    Assume(ref != m_pool.end());
                     ++ref->num_templates;
                     shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
                     txs.values.push_back(ref);
