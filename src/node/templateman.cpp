@@ -1186,6 +1186,11 @@ TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
         return {TmpltState::FAILED, templatehash, {}, {}};
     }
 
+    // Round should match what's expected based on the sketch level
+    if (round != sketch.m_sketch_level + 1) {
+        return {TmpltState::FAILED, templatehash, {}, {}};
+    }
+
     // Validate masks: must not overlap, and must cover exactly the unresolved groups.
     if ((shortidmask & sketchmask).Any()) {
         return {TmpltState::FAILED, templatehash, {}, {}};
