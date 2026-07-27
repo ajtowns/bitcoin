@@ -1859,7 +1859,7 @@ void PeerManagerImpl::FinalizeNode(const CNode& node)
         assert(peer != nullptr);
         m_wtxid_relay_peers -= peer->m_wtxid_relay;
         assert(m_wtxid_relay_peers >= 0);
-        if (peer->m_gettmplt_active && peer->m_is_inbound) {
+        if (peer->m_is_inbound && peer->m_gettmplt_active.exchange(false)) {
             --m_active_inbound_template_peers;
         }
     }
@@ -5793,10 +5793,11 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     // Inbound activation: eligible but inactive → try to fill a slot.
     if (peer.m_is_inbound && !peer.m_gettmplt_active) {
         if (m_active_inbound_template_peers >= node::MAX_INBOUND_TEMPLATE_PEERS) return;
-        peer.m_gettmplt_active = true;
-        ++m_active_inbound_template_peers;
-        LogDebug(BCLog::GETTMPLT, "activated inbound peer=%d for templates (%d/%d)",
+        if (!peer.m_gettmplt_active.exchange(true)) {
+            ++m_active_inbound_template_peers;
+            LogDebug(BCLog::GETTMPLT, "activated inbound peer=%d for templates (%d/%d)",
                  peer.m_id, m_active_inbound_template_peers.load(), node::MAX_INBOUND_TEMPLATE_PEERS);
+        }
     }
 
     uint256 basis_hash;
@@ -5820,8 +5821,9 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     if (peer.m_is_inbound) {
         if (m_active_inbound_template_peers < node::MAX_INBOUND_TEMPLATE_PEERS) return;
         if (m_rng.randrange(node::INBOUND_TEMPLATE_ROTATION_FREQ) != 0) return;
-        peer.m_gettmplt_active = false;
-        --m_active_inbound_template_peers;
+        if (peer.m_gettmplt_active.exchange(false)) {
+            --m_active_inbound_template_peers;
+        }
         LogDebug(BCLog::GETTMPLT, "rotated out inbound peer=%d (%d/%d)",
                  peer.m_id, m_active_inbound_template_peers.load(), node::MAX_INBOUND_TEMPLATE_PEERS);
     }
