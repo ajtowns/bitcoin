@@ -5704,7 +5704,8 @@ void PeerManagerImpl::MaybeGenerateTemplate()
     assert(!vtx.empty() && vtx[0]->IsCoinBase());
     auto txs = std::span{vtx}.subspan(1); // skip coinbase
 
-    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.ActiveChain().Tip());
+    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_chainman.m_blockman.LookupBlockIndex(block_template->block.hashPrevBlock));
+    if (!Assume(tip != nullptr)) return;
 
     LOCK(m_template_mutex);
     uint256 template_hash = m_templateman.GenerateTemplate(now, tip, txs);
