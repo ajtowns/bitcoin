@@ -5961,7 +5961,7 @@ node::TemplateATMPResult PeerManagerImpl::ConsiderTemplateTx(
             // try 1p1c package
             node::PackageToValidate package_to_validate{next.package_parent, next.tx, peer.m_id, peer.m_id};
             auto package_result = ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool,
-                    package_to_validate.m_txns, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt));
+                    package_to_validate.m_txns, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt);
             LOCK(m_tx_download_mutex);
             ProcessPackageResult(package_to_validate, package_result);
             auto it = package_result.m_tx_results.find(next.tx->GetWitnessHash());
