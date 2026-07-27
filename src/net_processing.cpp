@@ -5947,29 +5947,35 @@ node::TemplateATMPResult PeerManagerImpl::ConsiderTemplateTx(
 {
     AssertLockHeld(g_msgproc_mutex);
 
-    auto process_next = [&]() -> MempoolAcceptResult {
+    MempoolAcceptResult result = ([&]() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_tx_download_mutex) -> MempoolAcceptResult {
         LOCK(::cs_main);
-        if (next.package_parent) {
-            Package package{next.package_parent, next.tx};
-            auto result = ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool,
-                package, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt);
-            auto it = result.m_tx_results.find(next.tx->GetWitnessHash());
-            if (it == result.m_tx_results.end()) {
+        if (!next.package_parent) {
+            // just try a single tx
+            auto result = m_chainman.ProcessTransaction(next.tx);
+            if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+                LOCK(m_tx_download_mutex);
+                ProcessValidTx(peer.m_id, next.tx, result.m_replaced_transactions);
+            }
+            return result;
+        } else {
+            // try 1p1c package
+            node::PackageToValidate package_to_validate{next.package_parent, next.tx, peer.m_id, peer.m_id};
+            auto package_result = ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool,
+                    package_to_validate.m_txns, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt));
+            LOCK(m_tx_download_mutex);
+            ProcessPackageResult(package_to_validate, package_result);
+            auto it = package_result.m_tx_results.find(next.tx->GetWitnessHash());
+            if (it == package_result.m_tx_results.end()) {
                 // Parent must have failed; no longer reconsiderable
                 TxValidationState state;
                 state.Invalid(TxValidationResult::TX_MISSING_INPUTS, "package-parent-failed");
                 return MempoolAcceptResult::Failure(std::move(state));
             }
             return std::move(it->second);
-        } else {
-            return m_chainman.ProcessTransaction(next.tx);
         }
-    };
-    auto result = process_next();
+    })();
 
     if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
-        LOCK(m_tx_download_mutex);
-        ProcessValidTx(peer.m_id, next.tx, result.m_replaced_transactions);
         return node::TemplateATMPResult::ACCEPTED;
     }
 
