@@ -41,6 +41,9 @@ static constexpr int TOTAL_BUCKETS = 32;
 /** Per-bucket sketch capacity. */
 static constexpr int SKETCH_CAPACITY = 64;
 
+/** Sketch serialized size. */
+static constexpr size_t SKETCH_SER_SIZE{SKETCH_CAPACITY * 46 / 8};
+
 /** A mask with one bit per bucket. */
 using BucketMask = BitSet<TOTAL_BUCKETS>;
 
@@ -180,7 +183,11 @@ public:
         uint32_t elements;              //!< number of elements in this sketch
         std::vector<unsigned char> ser; //!< serialized sketch bytes
 
-        SERIALIZE_METHODS(Sketch, obj) { READWRITE(obj.elements, obj.ser); }
+        SERIALIZE_METHODS(Sketch, obj) {
+            SER_WRITE(obj, Assume(obj.ser.size() == SKETCH_SER_SIZE));
+            READWRITE(obj.elements, LIMITED_VECTOR(obj.ser, SKETCH_SER_SIZE));
+            SER_READ(obj, if (obj.ser.size() != SKETCH_SER_SIZE) throw std::ios_base::failure("Invalid sketch size"));
+        }
     };
 
     /** Pre-computed sketches at four levels of granularity, stored flat.
@@ -405,7 +412,7 @@ public:
     /** Initialise sketch reconciliation.
      *  txs[0..basis_count) are basis txs, txs[basis_count..] are local txs.
      *  shortids is parallel to txs.
-     *  May throw on malformed sketch data. */
+     */
     ProcessResult Init(TemplateTxVec&& txs,
                        std::vector<uint64_t>&& shortids,
                        size_t basis_count,
@@ -414,7 +421,8 @@ public:
     /** Process incoming data for rounds 1-4.
      *  shortidmask_sent: the shortidmask field from the gettmplt we sent (groups we requested shortids for).
      *  sketchmask_sent: the sketchmask field from the gettmplt we sent (groups we requested sketches for).
-     *  May throw on malformed shortid/sketch data. */
+     *  May throw on invalid shortid_bytes.
+     */
     ProcessResult Process(int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
                           std::span<const uint8_t> shortid_bytes,
                           std::span<const LocalTemplate::Sketch> sketches);

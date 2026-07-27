@@ -4534,7 +4534,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             uint256 basis_hash;
             std::vector<uint8_t> basis_delta;
             std::vector<node::LocalTemplate::Sketch> sketches;
-            vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> sketches;
+            vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> LIMITED_VECTOR(sketches, 4);
 
             const CBlockIndex* tip;
             {
@@ -4570,7 +4570,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             node::GroupMask shortidmask, sketchmask;
             std::vector<uint8_t> shortid_bytes;
             std::vector<node::LocalTemplate::Sketch> sketches;
-            vRecv >> shortidmask_raw >> sketchmask_raw >> shortid_bytes >> sketches;
+            vRecv >> shortidmask_raw >> sketchmask_raw >> shortid_bytes >> LIMITED_VECTOR(sketches, 16);
             shortidmask.FromUint32(std::span{&shortidmask_raw, 1});
             sketchmask.FromUint32(std::span{&sketchmask_raw, 1});
 
