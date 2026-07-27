@@ -4445,6 +4445,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             vRecv >> hash >> raw;
             shortidmask.FromUint32(std::span{&raw, 1});
             vRecv >> raw;
+            if (round == 4 && raw != 0) {
+                LogDebug(BCLog::GETTMPLT, "Invalid non-empty sketchmask at round 4, disconnecting %s", pfrom.LogPeer());
+                pfrom.fDisconnect = true;
+                return;
+            }
             sketchmask.FromUint32(std::span{&raw, 1});
 
             LOCK(m_template_mutex);
