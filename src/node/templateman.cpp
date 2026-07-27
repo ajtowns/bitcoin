@@ -493,7 +493,7 @@ std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemp
 
 struct PeerTemplateSketch::Sketches {
     struct MSC {
-        int count{0};
+        int64_t count{0}; // `count-UINT32_MAX` should remain representable
         Minisketch sketch{MakeMinisketch46(SKETCH_CAPACITY)};
         void Add(uint64_t shortid) { sketch.Add(shortid); ++count; }
     };
@@ -556,6 +556,10 @@ struct PeerTemplateSketch::Sketches {
         // For each x in 0..n-1: XOR parent[x] with odd-child[x+n] to get even-child[x]
         int n = 4 << (round - 1);
         for (int x = 0; x < n; ++x) {
+            if (m_provider_sketches[x].count < m_provider_sketches[x + n].count) {
+                throw std::ios_base::failure("PrepareRound: inconsistent sketch counts");
+            }
+
             m_basis_sketches[x].sketch.Merge(m_basis_sketches[x + n].sketch);
             m_basis_sketches[x].count -= m_basis_sketches[x + n].count;
             m_local_sketches[x].sketch.Merge(m_local_sketches[x + n].sketch);
@@ -583,9 +587,9 @@ bool PeerTemplateSketch::TryDecodeGroups()
         }
         if (all_resolved) continue;
 
-        int basis_count    = sk.m_basis_sketches[gi].count;
-        int local_count    = sk.m_local_sketches[gi].count; // basis+local
-        int provider_count = sk.m_provider_sketches[gi].count;
+        auto basis_count{sk.m_basis_sketches[gi].count};
+        auto local_count{sk.m_local_sketches[gi].count}; // basis+local
+        auto provider_count{sk.m_provider_sketches[gi].count};
 
         // Try basis XOR provider (only when diff is small enough to decode).
         // Assumes basis is a subset of provider (guaranteed by the protocol: basis is
