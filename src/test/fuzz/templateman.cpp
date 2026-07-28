@@ -248,7 +248,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
     std::map<NodeId, PeerSketchState> peer_sketch_state;
 
     auto handle_result = [&](NodeId peer, int round, const TemplateManager::TmpltResult& result) {
-        if (result.state == TemplateManager::TmpltState::UNRESOLVED) {
+        if (result.state == TemplateManager::TmpltState::Unresolved) {
             peer_sketch_state[peer] = {result.hash, round, result.shortidmask, result.sketchmask};
         } else {
             peer_sketch_state.erase(peer);

@@ -4613,16 +4613,20 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         auto [state, ntxs] = m_templateman.FillPeerPartial(pfrom.GetId(), hash, std::move(txs), NodeClock::now());
         using enum node::TemplateManager::TmpltState;
         switch (state) {
-        case FAILED:
+        case Reset:
             LogDebug(BCLog::GETTMPLT, "Got tmplttxn for unexpected state peer=%d, ignoring", pfrom.GetId());
             break;
-        case NEEDS_TXS:
+        case ProtocolError:
+            LogDebug(BCLog::GETTMPLT, "Got malformed tmplttxn peer=%d, disabling template requests", pfrom.GetId());
+            peer.m_next_gettmplt = NodeClock::time_point::max();
             break;
-        case DONE:
+        case NeedsTxs:
+            break;
+        case Complete:
             LogDebug(BCLog::GETTMPLT, "Completed peer template %s (%d txs) peer=%d",
                      hash.ToString(), ntxs, pfrom.GetId());
             break;
-        default:
+        case Unresolved:
             break;
         }
         return;
@@ -5720,11 +5724,14 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
 
     using enum node::TemplateManager::TmpltState;
     switch (result.state) {
-    case FAILED:
-        LogDebug(BCLog::GETTMPLT, "Template reconciliation error at round %d peer=%d, disabling requests", round, node.GetId());
+    case Reset:
+        LogDebug(BCLog::GETTMPLT, "Template reconciliation recoverable error at round %d peer=%d, ignoring", round, node.GetId());
+        return;
+    case ProtocolError:
+        LogDebug(BCLog::GETTMPLT, "Template reconciliation error at round %d peer=%d, disabling template requests", round, node.GetId());
         peer.m_next_gettmplt = NodeClock::time_point::max();
         return;
-    case UNRESOLVED:
+    case Unresolved:
     {
         if (round >= 4) {
             LogDebug(BCLog::GETTMPLT, "Template reconciliation unresolved after round 4 peer=%d (bug?), ignoring", node.GetId());
@@ -5739,7 +5746,7 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
                            result.hash, shortidmask_raw, sketchmask_raw);
         return;
     }
-    case NEEDS_TXS:
+    case NeedsTxs:
     {
         // Try to fill missing positions from local sources before requesting from peer.
         VectorExtraTransactions extra{vExtraTxnForCompact};
@@ -5755,7 +5762,7 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         if (fill.still_missing == 0) {
             // Local fill found everything; finalize without requesting from peer.
             auto [state, ntxs] = m_templateman.FillPeerPartial(node.GetId(), result.hash, {}, NodeClock::now());
-            if (state == DONE) {
+            if (state == Complete) {
                 LogDebug(BCLog::GETTMPLT, "Completed peer template %s (%d txs, no remote fetch) peer=%d",
                          result.hash.ToString(), ntxs, node.GetId());
             }
@@ -5767,7 +5774,7 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         MakeAndPushMessage(node, NetMsgType::GETTMPLTTXN, result.hash, missing_gr);
         return;
     }
-    case DONE:
+    case Complete:
         LogDebug(BCLog::GETTMPLT, "Template %s reconciled with no missing txs, peer=%d", result.hash.ToString(), node.GetId());
         return;
     }
@@ -5778,11 +5785,19 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
 
+    const auto next_gettmplt = peer.m_next_gettmplt.load();
+    if (next_gettmplt == NodeClock::time_point::max()) {
+        if (peer.m_is_inbound && peer.m_gettmplt_active.exchange(false)) {
+            --m_active_inbound_template_peers;
+        }
+        return;
+    }
+
     const auto now = NodeClock::now();
-    if (now <= peer.m_next_gettmplt.load()) return;
+    if (now <= next_gettmplt) return;
 
     // Block-relay-only cleanup: the one-shot exchange window has expired.
-    if (node.IsBlockOnlyConn() && peer.m_gettmplt_active && peer.m_next_gettmplt.load() != NodeClock::time_point::min()) {
+    if (node.IsBlockOnlyConn() && peer.m_gettmplt_active && next_gettmplt != NodeClock::time_point::min()) {
         peer.m_next_gettmplt = NodeClock::time_point::max() - NodeClock::duration{1};
         peer.m_gettmplt_active = false;
         LOCK(m_template_mutex);

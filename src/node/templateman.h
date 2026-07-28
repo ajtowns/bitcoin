@@ -11,6 +11,7 @@
 #include <serialize.h>
 #include <uint256.h>
 #include <util/bitset.h>
+#include <util/expected.h>
 #include <util/hasher.h>
 #include <util/time.h>
 
@@ -416,7 +417,7 @@ public:
     ProcessResult Init(TemplateTxVec&& txs,
                        std::vector<uint64_t>&& shortids,
                        size_t basis_count,
-                       std::span<const LocalTemplate::Sketch> combined_sketches);
+                       std::span<const LocalTemplate::Sketch> combined_sketches) noexcept;
 
     /** Process incoming data for rounds 1-4.
      *  shortidmask_sent: the shortidmask field from the gettmplt we sent (groups we requested shortids for).
@@ -495,12 +496,12 @@ public:
 
     ~TemplateManager();
 
-    enum class TmpltState { FAILED, UNRESOLVED, NEEDS_TXS, DONE };
+    enum class TmpltState { Reset, Unresolved, NeedsTxs, Complete, ProtocolError };
 
     struct TmpltResult {
         TmpltState state;
         uint256 hash;                    //!< template hash
-        GroupMask shortidmask, sketchmask; //!< only meaningful when state == UNRESOLVED
+        GroupMask shortidmask, sketchmask; //!< only meaningful when state == Unresolved
     };
 
     /** Return a jittered time point uniformly distributed in [now + avg/2, now + 3*avg/2). */
@@ -547,8 +548,20 @@ private:
     template <typename T>
     PeerReconcileMap::iterator SetPeerReconcile(NodeId nodeid, T&& new_value);
 
+    template <typename T>
+    PeerReconcileMap::iterator SetPeerReconcile(PeerReconcileMap::iterator it, T&& new_value);
+
+    /** Drop a peer's reconciliation state
+     *  `keep_if_monostate` can be set to only drop the state if it was
+     *  something other than monostate. This is used when data for old GETTMPLT
+     *  requests come in after we've already requested a brand new template.
+     *  Keeping the monostate state allows us to keep that request for a new template
+     *  current.
+     */
+    void DropPeerReconcile(PeerReconcileMap::iterator it, bool keep_if_monostate);
+
     /** Handle a sketch round result: if resolved, transition to partial/complete;
-     *  if not, store masks and return UNRESOLVED.
+     *  if not, store masks and return Unresolved.
      *  Iterator must point to a PeerTemplateSketch entry. May erase it. */
     TmpltResult CompleteSketchRound(PeerReconcileMap::iterator it,
                                     const PeerTemplateSketch::ProcessResult& pr,
@@ -628,7 +641,7 @@ public:
 
     /** Start a new peer sketch from a round-0 tmplt message.
      *  Scans mempool+pool for matching txs, initialises PeerTemplateSketch.
-     *  Returns UNRESOLVED (with masks for gettmplt n=1), NEEDS_TXS, or DONE. */
+     *  Returns Unresolved (with masks for gettmplt n=1), NeedsTxs, or Complete. */
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
                                uint64_t nonce, uint256 basis_hash,
                                std::span<const uint8_t> basis_delta,
@@ -638,7 +651,7 @@ public:
     /** Feed round 1-4 data into an existing peer sketch.
      *  shortidmask/sketchmask are parsed from the peer's tmplt message; must partition
      *  unresolved groups at the current level (no overlap, full coverage).
-     *  Returns UNRESOLVED (with masks for the next round), NEEDS_TXS, DONE, or ERROR. */
+     *  Returns Unresolved (with masks for the next round), NeedsTxs, Done, or ProtocolError/Reset. */
     TmpltResult UpdatePeerSketch(NodeId nodeid, uint256 templatehash, int round,
                                  GroupMask shortidmask, GroupMask sketchmask,
                                  std::span<const uint8_t> shortid_bytes,
@@ -647,8 +660,8 @@ public:
 
     /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
      *  On completion, verifies hash and promotes to PeerTemplate.
-     *  Returns {ERROR, 0} on unexpected state or hash mismatch,
-     *  {NEEDS_TXS, 0} if more data is needed, or {DONE, ntxs} on success. */
+     *  Returns {Reset/ProtocolError, 0} on unexpected state or hash mismatch,
+     *  {NeedsTxs, 0} if more data is needed, or {Complete, ntxs} on success. */
     std::pair<TmpltState, uint32_t> FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs, NodeClock::time_point now);
 
     struct LocalFillResult {
@@ -700,8 +713,8 @@ public:
 
     /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
      *  Releases pool refs for local txs absent from the peer's template.
-     *  Returns nullopt on shortid collision. */
-    std::optional<PeerTemplatePartial> MakePeerTemplatePartial(PeerTemplateSketch&& sketch);
+     *  Returns error template state on shortid collision or overweight. */
+    util::Expected<PeerTemplatePartial, TmpltState> MakePeerTemplatePartial(PeerTemplateSketch&& sketch);
 };
 
 } // namespace node
