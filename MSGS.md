@@ -55,8 +55,11 @@ a local template exists.
     shortid_bytes: vector<uint8_t>  GR-encoded shortids for shortidmask groups
     sketches:      vector<Sketch>   sketches for sketchmask groups
 
-Provider echoes the masks so the receiver can interpret the data without
-storing what it sent. `shortid_bytes` skips the first `SKETCH_CAPACITY`
+Provider returns the masks so the receiver can interpret the data without
+storing what it sent. `shortidmask` is echoed as received; `sketchmask` is
+the request's, restricted to the round's valid group indices and with
+`shortidmask` removed (shortids take priority), so it may be a subset of
+what was asked for. `shortid_bytes` skips the first `SKETCH_CAPACITY`
 (64) shortids per group (covered by the sketch).
 
 ### `gettmplttxn` — request missing transactions
@@ -136,13 +139,13 @@ WaitingForPeerSketch(nodeid)
     — mark gettmplt n=0 sent; releases prior reconciliation state
 
 InitPeerSketch(nodeid, tip, hash, nonce, basis_hash, basis_delta, sketches)
-    → TmpltResult {UNRESOLVED|NEEDS_TXS|DONE|ERROR}
+    → TmpltResult {Reset|Unresolved|NeedsTxs|Complete|ProtocolError, masks}
 
 UpdatePeerSketch(nodeid, hash, round, shortidmask, sketchmask, shortid_bytes, sketches)
-    → TmpltResult {UNRESOLVED|NEEDS_TXS|DONE|ERROR}
+    → TmpltResult {Reset|Unresolved|NeedsTxs|Complete|ProtocolError, masks}
 
 FillPeerPartial(nodeid, hash, txs)
-    → pair<TmpltState, uint32_t>  {ERROR|NEEDS_TXS|DONE, ntxs}
+    → pair<TmpltState, uint32_t>  {Reset|NeedsTxs|Complete|ProtocolError, ntxs}
 
 GetLastPeerTemplateHash(nodeid)
     → uint256  (for basis hint in next gettmplt n=0)
@@ -152,7 +155,8 @@ ForgetPeer(nodeid)
 ```
 
 net_processing switches on `TmpltState`:
-- `ERROR` → log, disable future requests (m_next_gettmplt = max)
-- `UNRESOLVED` → send gettmplt n=round+1 with masks from result
-- `NEEDS_TXS` → send gettmplttxn with GR-encoded missing positions
-- `DONE` → log completion
+- `Reset` → log, drop the reconciliation, leave the peer in rotation
+- `ProtocolError` → log, disable future requests (m_next_gettmplt = max)
+- `Unresolved` → send gettmplt n=round+1 with masks from result
+- `NeedsTxs` → send gettmplttxn with GR-encoded missing positions
+- `Complete` → log completion
