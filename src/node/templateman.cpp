@@ -99,7 +99,7 @@ uint256 Template::ComputeHash() const
     return hash;
 }
 
-const LocalTemplate::Delta& LocalTemplate::GetDelta(const Template& basis)
+const GRVector& LocalTemplate::GetDelta(const Template& basis)
 {
     auto [it, inserted] = m_deltas.try_emplace(basis.m_hash);
     if (inserted) {
@@ -123,7 +123,36 @@ const LocalTemplate::Delta& LocalTemplate::GetDelta(const Template& basis)
     return it->second;
 }
 
-std::vector<uint8_t> LocalTemplate::GetShortIdBytes(int round, GroupMask mask) const
+template<typename Fn>
+GRVector GRVectorEncode(uint8_t P, Fn&& fn)
+{
+    GRVector result;
+    result.P = P;
+
+    VectorWriter stream{result.encoded_elements, 0};
+    BitStreamWriter bitwriter{stream};
+    std::optional<uint64_t> next;
+    while ((next = fn()) != std::nullopt) {
+        ++result.n_elements;
+        GolombRiceEncode(bitwriter, result.P, *next);
+    }
+    if (result.n_elements == 0) return {};
+    bitwriter.Flush();
+    return result;
+}
+
+template<typename Fn>
+void GRVectorDecode(const GRVector& gr, Fn&& fn)
+{
+    if (gr.n_elements == 0) return;
+    SpanReader stream{gr.encoded_elements};
+    BitStreamReader bitreader{stream};
+    for (size_t i = 0; i < gr.n_elements; ++i) {
+        fn(GolombRiceDecode(bitreader, gr.P));
+    }
+}
+
+GRVector LocalTemplate::GetShortIDBytes(int round, GroupMask mask) const
 {
     // At round R (1-4) the group index is the low (R+1) bits of the shortid (and bucket index).
     // Skip the first SKETCH_CAPACITY shortids per group (covered by sketch); encode the rest.
@@ -135,28 +164,21 @@ std::vector<uint8_t> LocalTemplate::GetShortIdBytes(int round, GroupMask mask) c
     size_t n_estimate = shortids.size() / TOTAL_BUCKETS * mask.Count();
     uint8_t P = static_cast<uint8_t>(std::max(0, 46 - (int)std::bit_width(n_estimate)));
 
-    // Single pass: reserve 4 bytes for n, write P, GR-encode qualifying shortids,
-    // then patch the actual count into the first 4 bytes.
-    std::vector<uint8_t> result;
-    VectorWriter stream{result, 0};
-    uint32_t n{0};
-    stream << n; // placeholder
-    stream << P;
-    BitStreamWriter bitwriter{stream};
+    auto it = shortids.begin();
+    uint64_t last = 1;
     std::array<int, TOTAL_BUCKETS> group_count{};
-    uint64_t last = 0;
-    for (uint64_t sid : shortids) {
-        int b = sid & ((4 << (round - 1)) - 1);
-        if (!mask[b]) continue;
-        if (++group_count[b] <= SKETCH_CAPACITY) continue;
-        GolombRiceEncode(bitwriter, P, sid - last - 1);
-        last = sid;
-        ++n;
-    }
-    if (n == 0) return {};
-    bitwriter.Flush();
-    WriteLE32(result.data(), n);
-    return result;
+    return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
+        while (it != shortids.end()) {
+            uint64_t sid{*it++};
+            int b = sid & ((4 << (round - 1)) - 1);
+            if (mask[b] && ++group_count[b] > SKETCH_CAPACITY) {
+                sid -= last;
+                last += sid + 1;
+                return sid;
+            }
+        }
+        return std::nullopt;
+    });
 }
 
 void LocalTemplate::GenerateSketches()
@@ -363,7 +385,7 @@ TemplateManager::LocalTemplateAndDelta TemplateManager::GetRequestedTemplate(con
     const LocalTemplate* basis = req.basis_hash.IsNull() ? nullptr : GetLocalTemplate(req.basis_hash);
     if (!basis) return {&best, uint256::ZERO, nullptr};
 
-    const LocalTemplate::Delta& delta = best.GetDelta(*basis);
+    const GRVector& delta = best.GetDelta(*basis);
     return {&best, req.basis_hash, &delta};
 }
 
@@ -397,46 +419,45 @@ bool TemplateTxnsSelection::empty() const
     return true;
 }
 
-std::vector<uint8_t> TemplateTxnsSelection::GREncode() const
+GRVector TemplateTxnsSelection::GREncode() const
 {
     size_t n = Count();
     if (n == 0) return {};
+
     uint8_t P = static_cast<uint8_t>(std::bit_width(m_positions.size() * CHUNK_SIZE / n) - 1);
-    std::vector<uint8_t> result;
-    VectorWriter stream{result, 0};
-    WriteCompactSize(stream, n);
-    stream << P;
-    BitStreamWriter bitwriter{stream};
-    uint64_t last = 0;
-    for (size_t chunk_idx = 0; chunk_idx < m_positions.size(); ++chunk_idx) {
-        for (unsigned bit : m_positions[chunk_idx]) {
-            uint64_t pos = chunk_idx * CHUNK_SIZE + bit;
-            GolombRiceEncode(bitwriter, P, pos - last);
-            last = pos;
+    uint64_t pos = 0;
+    size_t chunk_idx = 0;
+    auto chunk_it = m_positions[chunk_idx].begin();
+
+    return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
+        while (chunk_idx < m_positions.size() && chunk_it == m_positions[chunk_idx].end()) {
+            ++chunk_idx;
+            if (chunk_idx < m_positions.size()) chunk_it = m_positions[chunk_idx].begin();
         }
-    }
-    bitwriter.Flush();
-    return result;
+        if (chunk_idx < m_positions.size()) {
+            uint64_t old = pos;
+            pos = chunk_idx * CHUNK_SIZE + *chunk_it;
+            ++chunk_it;
+            return pos - old;
+        } else {
+            return std::nullopt;
+        }
+    });
 }
 
-void TemplateTxnsSelection::GRDecode(std::span<const uint8_t> grenc)
+void TemplateTxnsSelection::GRDecode(const GRVector& grenc)
 {
     Reset();
-    if (grenc.empty()) return;
-    SpanReader stream{grenc};
-    size_t n = ReadCompactSize(stream);
-    uint8_t P;
-    stream >> P;
-    BitStreamReader bitreader{stream};
+
     uint64_t pos = 0;
-    for (size_t i = 0; i < n; ++i) {
-        pos += GolombRiceDecode(bitreader, P);
+    GRVectorDecode(grenc, [&](uint64_t delta) {
+        pos += delta;
         if (pos > MAX_TEMPLATE_TXS) throw std::ios_base::failure("GRDecode: position out of range");
         Add(static_cast<uint32_t>(pos));
-    }
+    });
 }
 
-bool RequestedTemplateTxns::Queue(const uint256& hash, const LocalTemplate& tmpl, std::span<const uint8_t> grenc)
+bool RequestedTemplateTxns::Queue(const uint256& hash, const LocalTemplate& tmpl, const GRVector& grenc)
 {
     Reset();
     try {
@@ -682,7 +703,7 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
     return {false, {}, unresolved_groups};
 }
 
-void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid_bytes,
+void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
                                                  GroupMask shortidmask)
 {
     // At the start of round r, m_sketch_level = r-1 and sketches are at that granularity.
@@ -692,28 +713,27 @@ void PeerTemplateSketch::ProcessShortidFallback(std::span<const uint8_t> shortid
     // Parse the provider's outer shortids (positions SKETCH_CAPACITY+1 per sketch group) into per-group lists.
     std::vector<std::vector<uint64_t>> received(num_groups);
     {
-        SpanReader stream{shortid_bytes};
-        uint32_t n;
-        stream >> n;
-        if (n > MAX_TEMPLATE_TXS) return;
-        uint8_t P;
-        stream >> P;
-        BitStreamReader<SpanReader> bitreader{stream};
-        uint64_t last = 0;
-        for (uint32_t i = 0; i < n; ++i) {
-            uint64_t delta = GolombRiceDecode(bitreader, P);
-            if (delta >= (1ULL << 46)) return;
-            last += delta + 1;
-            if (last >= (1ULL << 46)) return;
-            int gi = static_cast<int>(last & (num_groups - 1));
-            // Include if the group is requested and not fully resolved
-            if (!shortidmask[gi]) continue;
+        if (shortid_bytes.n_elements > MAX_TEMPLATE_TXS) return;
+
+        GroupMask resolved; // groups with every bucket resolved
+        for (int gi = 0; gi < num_groups; ++gi) {
             bool group_resolved = true;
             for (int bx = gi; bx < TOTAL_BUCKETS; bx += num_groups) {
-                if (!m_bucket_resolved[bx]) { group_resolved = false; break; }
+                if (!m_bucket_resolved[bx]) group_resolved = false;
             }
-            if (!group_resolved) received[gi].push_back(last);
+            if (group_resolved) resolved.Set(gi);
         }
+
+        uint64_t last = 0;
+        GRVectorDecode(shortid_bytes, [&](uint64_t delta) {
+            if (delta >= (1ULL << 46)) throw std::ios_base::failure("shortid out of range");
+            last += delta + 1;
+            if (last >= (1ULL << 46)) throw std::ios_base::failure("shortid out of range");
+            int gi = static_cast<int>(last & (num_groups - 1));
+            // Include if the group is requested and not fully resolved
+            if (!shortidmask[gi]) return;
+            if (!resolved[gi]) received[gi].push_back(last);
+        });
     }
 
     // For each unresolved group, XOR provided shortids with provider sketch
@@ -782,12 +802,12 @@ void PeerTemplateSketch::FinalizeShortids()
 
 PeerTemplateSketch::ProcessResult PeerTemplateSketch::Process(
     int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
-    std::span<const uint8_t> shortid_bytes,
+    const GRVector& shortid_bytes,
     std::span<const LocalTemplate::Sketch> sketches)
 {
     // Try shortid fallback first using sketches already prepared at round m_sketch_level = (round-1).
-    // GetShortIdBytes(round, mask) groups shortids at that same granularity.
-    if (!shortid_bytes.empty()) {
+    // GetShortIDBytes(round, mask) groups shortids at that same granularity.
+    if (shortid_bytes.n_elements > 0) {
         ProcessShortidFallback(shortid_bytes, shortidmask_sent);
     }
 
@@ -1104,7 +1124,7 @@ void TemplateManager::WaitingForPeerSketch(NodeId nodeid)
 TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
     uint64_t nonce, uint256 basis_hash,
-    std::span<const uint8_t> basis_delta,
+    const GRVector& basis_delta,
     std::span<const LocalTemplate::Sketch> sketches,
     NodeClock::time_point now)
 {
@@ -1189,7 +1209,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
 TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(
     NodeId nodeid, uint256 templatehash, int round,
     GroupMask shortidmask, GroupMask sketchmask,
-    std::span<const uint8_t> shortid_bytes,
+    const GRVector& shortid_bytes,
     std::span<const LocalTemplate::Sketch> sketches,
     NodeClock::time_point now)
 {
@@ -1351,7 +1371,7 @@ TemplateManager::LocalFillResult TemplateManager::FillPeerPartialLocally(NodeId 
     return res;
 }
 
-std::vector<uint8_t> TemplateManager::GetPeerPartialMissingGR(NodeId nodeid)
+GRVector TemplateManager::GetPeerPartialMissingGR(NodeId nodeid)
 {
     auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
     if (!is_partial) return {};

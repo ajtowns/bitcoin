@@ -1,4 +1,4 @@
-# BIN25-2.2 Wire Protocol
+# BIN25-2.3 Wire Protocol
 
 Implemented wire messages for the gettmplt template sharing protocol.
 
@@ -6,7 +6,7 @@ Implemented wire messages for the gettmplt template sharing protocol.
 
 Announced via BIP-434 FEATURE message.
 
-    feature_id:   "BIN25-2.2"
+    feature_id:   "BIN25-2.3"
     feature_data: empty
 
 ## Messages
@@ -18,7 +18,7 @@ Announced via BIP-434 FEATURE message.
     round:      uint8_t = 0
     basis_hash: uint256          optional; omitted or zero if no basis
 
-Sent every ~2 min to peers that advertised BIN25-2.2. `basis_hash`
+Sent every ~2 min to peers that advertised BIN25-2.3. `basis_hash`
 is the hash of the most recent completed peer template from this peer,
 enabling delta encoding.
 
@@ -40,7 +40,7 @@ Both masks are always present on the wire (round 4 sends sketchmask=0).
     tip_hash:      uint256      chain tip (or zero)
     nonce:         uint64_t     template-level nonce for shortid computation
     basis_hash:    uint256      basis template hash (or zero)
-    basis_delta:   vector<uint8_t>  GR-encoded retained positions from basis
+    basis_delta:   GRVector     retained positions from basis
     sketches:      vector<Sketch>   4 stride-4 group sketches (round 0)
 
 Sent from `MaybeSendTemplateMessages` when a pending `Req` is ready and
@@ -52,7 +52,7 @@ a local template exists.
     round:         uint8_t      1, 2, 3, or 4
     shortidmask:   uint32_t     echoed from gettmplt request
     sketchmask:    uint32_t     echoed from gettmplt request
-    shortid_bytes: vector<uint8_t>  GR-encoded shortids for shortidmask groups
+    shortid_bytes: GRVector     shortids for shortidmask groups
     sketches:      vector<Sketch>   sketches for sketchmask groups
 
 Provider returns the masks so the receiver can interpret the data without
@@ -65,11 +65,10 @@ what was asked for. `shortid_bytes` skips the first `SKETCH_CAPACITY`
 ### `gettmplttxn` — request missing transactions
 
     hash:  uint256              template hash
-    grenc: vector<uint8_t>      GR-encoded missing positions
+    grenc: GRVector             missing positions
 
 Sent after sketch reconciliation resolves all buckets but some positions
-have no local transaction. Positions are over a 16-bit range; encoding
-is `compact_size(n) + P_byte + GR-encoded gaps`.
+have no local transaction.
 
 ### `tmplttxn` — transaction data response
 
@@ -81,7 +80,9 @@ cycle. Multiple `tmplttxn` messages may be sent for one template.
 
 ## Serialization Types
 
-    Sketch:  { uint32_t elements, vector<uint8_t> ser }
+    Sketch:   { uint32_t elements, vector<uint8_t> ser }
+    GRVector: { compact_size n_elements, uint8_t P, vector<uint8_t> encoded }
+              (P and encoded omitted when n_elements == 0)
     uint256: 32 bytes, little-endian
     uint32_t: 4 bytes, little-endian
     uint64_t: 8 bytes, little-endian
@@ -91,8 +92,8 @@ cycle. Multiple `tmplttxn` messages may be sent for one template.
 
     Receiver                          Provider
     --------                          --------
-    FEATURE "BIN25-2.2"  ---------->
-                          <----------  FEATURE "BIN25-2.2"
+    FEATURE "BIN25-2.3"  ---------->
+                          <----------  FEATURE "BIN25-2.3"
 
     gettmplt n=0 [basis]  --------->
                           <---------  tmplt hash n=0 tip nonce basis delta sketches[4]

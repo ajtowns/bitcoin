@@ -84,6 +84,23 @@ static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{10};
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 
+/** A serializable Golomb-Rice-encoded vector of uint64_t values */
+struct GRVector {
+    size_t n_elements{0};
+    uint8_t P{0}; // GR parameter
+    std::vector<uint8_t> encoded_elements;
+
+    SERIALIZE_METHODS(GRVector, obj) {
+        READWRITE(COMPACTSIZE(obj.n_elements));
+        if (obj.n_elements > 0) {
+            READWRITE(obj.P, obj.encoded_elements);
+        } else {
+            SER_READ(obj, obj.P = 0);
+            SER_READ(obj, obj.encoded_elements.clear());
+        }
+    }
+};
+
 /** Entry in the shared template tx pool. Ordered by wtxid. */
 struct TemplateTx {
     CTransactionRef tx;
@@ -219,19 +236,16 @@ public:
     /** GR-encode shortids for wire: for each group in mask, skip the first SKETCH_CAPACITY
      *  shortids (covered by sketch) and encode the rest.
      *  At round R (1-4), the group index is the low (R+1) bits of the bucket index.
-     *  Format: uint32_t(N) + P + GR-encoded gaps over sorted 46-bit shortids. */
-    std::vector<uint8_t> GetShortIdBytes(int round, GroupMask mask) const;
+     */
+    GRVector GetShortIDBytes(int round, GroupMask mask) const;
 
-    /** Retained-tx positions from a basis template to a new template, Golomb-Rice encoded.
-     *  Format: compact_size(n) + P + GR-encoded gaps between retained positions
-     *  (in basis shortid order). Empty vector means no txs retained. */
-    using Delta = std::vector<uint8_t>;
-
-    /** Lazily-computed retained-tx encodings keyed by basis hash. */
-    std::unordered_map<uint256, Delta, SaltedUint256Hasher> m_deltas;
+    /** Lazily-computed retained-tx encodings keyed by basis hash.
+     *  Retained-tx positions from a basis template to a new template, Golomb-Rice encoded.
+     */
+    std::unordered_map<uint256, GRVector, SaltedUint256Hasher> m_deltas;
 
     /** Get (or compute) the GR-encoded retained-tx positions from basis to this template. */
-    const Delta& GetDelta(const Template& basis);
+    const GRVector& GetDelta(const Template& basis);
 };
 
 /** Bitset-based tracking of template positions.
@@ -255,11 +269,11 @@ public:
     /** Clear position p. */
     void Remove(uint32_t p);
 
-    // Golomb-Rice encode positions: compact_size(n) + P + GR-encoded gaps, or empty if none.
-    std::vector<uint8_t> GREncode() const;
+    // Golomb-Rice encode positions
+    GRVector GREncode() const;
 
     // Golomb-Rice decode; opposite of GREncode
-    void GRDecode(std::span<const uint8_t> grenc);
+    void GRDecode(const GRVector& grenc);
 
     /** Release all state and free memory. */
     virtual void Reset()
@@ -273,7 +287,7 @@ public:
     template <typename Stream>
     void Deserialize(Stream& s)
     {
-        std::vector<uint8_t> v;
+        GRVector v;
         s >> v;
         GRDecode(v);
     }
@@ -294,9 +308,9 @@ public:
         m_template_hash.SetNull();
     }
 
-    /** Populate from GR-encoded positions (compact_size(n)+P+GR-gaps). Replaces any prior queue.
+    /** Populate from GR-encoded positions. Replaces any prior queue.
      *  Returns false (and resets) if the encoding is invalid or any position is out of range. */
-    [[nodiscard]] bool Queue(const uint256& hash, const LocalTemplate& tmpl, std::span<const uint8_t> grenc);
+    [[nodiscard]] bool Queue(const uint256& hash, const LocalTemplate& tmpl, const GRVector& grenc);
 
     /** Drain up to max_bytes of transactions, resolving positions via tmpl.
      *  Returns the collected transactions. Clears state when fully drained. */
@@ -425,7 +439,7 @@ public:
      *  May throw on invalid shortid_bytes.
      */
     ProcessResult Process(int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
-                          std::span<const uint8_t> shortid_bytes,
+                          const GRVector& shortid_bytes,
                           std::span<const LocalTemplate::Sketch> sketches);
 
 private:
@@ -438,7 +452,7 @@ private:
     bool TryDecodeGroups();
 
     /** Round-4 shortid fallback: parse shortid_bytes, diff against our m_shortids. */
-    void ProcessShortidFallback(std::span<const uint8_t> shortid_bytes, GroupMask shortidmask);
+    void ProcessShortidFallback(const GRVector& shortid_bytes, GroupMask shortidmask);
 
     /** Once all buckets are resolved, update m_shortids to reflect the provider's set.
      *  Local shortids absent from the provider are zeroed; provider-only shortids are appended.
@@ -606,7 +620,7 @@ public:
     {
         const LocalTemplate* tmpl; // nullptr if no local templates available
         uint256 basis_hash; // ZERO if basis not found
-        const LocalTemplate::Delta* basis_delta; // nullptr if basis not found
+        const GRVector* basis_delta; // nullptr if basis not found
     };
 
     /** Request parameters for GetRequestedTemplate. */
@@ -644,7 +658,7 @@ public:
      *  Returns Unresolved (with masks for gettmplt n=1), NeedsTxs, or Complete. */
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
                                uint64_t nonce, uint256 basis_hash,
-                               std::span<const uint8_t> basis_delta,
+                               const GRVector& basis_delta,
                                std::span<const LocalTemplate::Sketch> sketches,
                                NodeClock::time_point now);
 
@@ -654,7 +668,7 @@ public:
      *  Returns Unresolved (with masks for the next round), NeedsTxs, Done, or ProtocolError/Reset. */
     TmpltResult UpdatePeerSketch(NodeId nodeid, uint256 templatehash, int round,
                                  GroupMask shortidmask, GroupMask sketchmask,
-                                 std::span<const uint8_t> shortid_bytes,
+                                 const GRVector& shortid_bytes,
                                  std::span<const LocalTemplate::Sketch> sketches,
                                  NodeClock::time_point now);
 
@@ -677,7 +691,7 @@ public:
     LocalFillResult FillPeerPartialLocally(NodeId nodeid, const CTxMemPool& mempool, ExtraTransactions& extra_txns);
 
     /** GR-encode the current missing positions for a peer's partial template. */
-    std::vector<uint8_t> GetPeerPartialMissingGR(NodeId nodeid);
+    GRVector GetPeerPartialMissingGR(NodeId nodeid);
 
     /** Return the hash of the most recent completed template from this peer,
      *  for use as a basis hint in the next gettmplt n=0. */
