@@ -32,7 +32,7 @@ static void initialize_templateman()
 //
 // For each active bucket b, three shortid sets are derived from the provider's bucket sids:
 //   sketch_sids: bucket[j..]  — shortids that went into the sketch (honest: j=0, all sids)
-//   send_sids:   bucket[..k]  — shortids used for GetShortIdBytes  (honest: k=n, all sids)
+//   send_sids:   bucket[..k]  — shortids used for GetShortIDBytes  (honest: k=n, all sids)
 //   basis_sids:  bucket[..basis_count] — what the receiver thinks it already has
 //
 // When j=0 and k=n for every bucket, the provider is honest and reconciliation must
@@ -113,7 +113,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
         local_sids.insert(local_sids.end(), lbucket.begin(), lbucket.end());
     }
 
-    // Sort globally (required by GetShortIdBytes delta encoding).
+    // Sort globally (required by GetShortIDBytes delta encoding).
     std::sort(prov_sids.begin(), prov_sids.end());
     std::sort(sketch_sids.begin(), sketch_sids.end());
     std::sort(send_sids.begin(), send_sids.end());
@@ -123,7 +123,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     LocalTemplate provider;
     provider.shortids = sketch_sids;
     provider.GenerateSketches();
-    provider.shortids = send_sids; // replace for GetShortIdBytes
+    provider.shortids = send_sids; // replace for GetShortIDBytes
 
     TemplateTxSet pool;
     TemplateTxVec txs;
@@ -141,7 +141,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     GroupMask shortidmask = GroupMask::Fill(TOTAL_BUCKETS);
     GroupMask sketchmask  = GroupMask::Fill(TOTAL_BUCKETS);
     for (int round = 1; round <= 4 && !resolved; ++round) {
-        auto shortid_bytes = provider.GetShortIdBytes(round, shortidmask);
+        auto shortid_bytes = provider.GetShortIDBytes(round, shortidmask);
         auto [res, new_shortidmask, new_sketchmask] = sketch.Process(
             round, shortidmask, sketchmask,
             shortid_bytes, provider.GetSketches(round));
@@ -308,9 +308,9 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
 
                 // Simulate provider side: build shortid_bytes and filtered sketches
                 // matching the masks from the previous round's result.
-                std::vector<uint8_t> shortid_bytes;
+                GRVector shortid_bytes;
                 if (ps.shortidmask.Any()) {
-                    shortid_bytes = tmpl->GetShortIdBytes(round, ps.shortidmask);
+                    shortid_bytes = tmpl->GetShortIDBytes(round, ps.shortidmask);
                 }
 
                 GroupMask sketchmask = ps.sketchmask;

@@ -335,7 +335,7 @@ inline constexpr size_t MAX_FEATUREDATA_LENGTH{512};
 
 namespace NetMsgFeature {
 /** BIN-2025-0002 template sharing protocol (gettmplt) */
-inline constexpr std::string_view BIN25_2{"BIN25-2.2"};
+inline constexpr std::string_view BIN25_2{"BIN25-2.3"};
 }
 
 /** nServices flags */
