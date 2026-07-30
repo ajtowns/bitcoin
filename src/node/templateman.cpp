@@ -79,9 +79,10 @@ uint64_t ShortIDHasher::GetShortID(const Wtxid& wtxid) const
 {
     uint64_t h{m_hasher(wtxid.ToUint256())};
 
+    // This function gives a 46-bit value that's never 0:
     // (h >> 18) gives a 46-bit value;
-    //  - if it's 0 then the low-18 bits of h right shifted will be >= h
-    //  - if it's 2**46-1 then the low-18 bits of h left shifted will still be < h
+    //  - if it's 0 then the low-18 bits of h left shifted will be >= h, adding 1
+    //  - if it's 2**46-1 then the low-18 bits of h left shifted will be < h, and not add 1
     return (h >> 18) + (((h & 0x3ffff) << 46) >= h);
 }
 
