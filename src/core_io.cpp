@@ -380,22 +380,43 @@ std::string ScriptToAsmStr(const CScript& script)
     opcodetype opcode;
     std::vector<unsigned char> vch;
     CScript::const_iterator pc = script.begin();
+
     while (pc < script.end()) {
         if (!str.empty()) {
             str += " ";
         }
+        CScript::const_iterator pc_orig = pc;
         if (!script.GetOp(pc, opcode, vch)) {
-            str += "[error]";
+            str += strprintf("#%s", HexStr(std::vector<uint8_t>(pc_orig, script.end())));
             return str;
         }
         if (0 <= opcode && opcode <= OP_PUSHDATA4) {
-            if (vch.size() <= static_cast<std::vector<unsigned char>::size_type>(4)) {
-                str += strprintf("%d", CScriptNum(vch, false).getint());
+            bool minpush = CheckMinimalPush(vch, opcode);
+            if (minpush && vch.size() <= 5 && CScriptNum::CheckMinimalNumber(vch)) {
+                auto n = CScriptNum(vch, /*fRequireMinimal=*/false, /*nMaxNumSize=*/5).GetInt64();
+                if (n >= 0 && str.empty() && pc == script.end()) {
+                    // disambiguate a script that is just a small number, versus the hex encoding of a script
+                    str += strprintf("+%d", n);
+                } else {
+                    str += strprintf("%d", n);
+                }
+            } else if (minpush || opcode < OP_PUSHDATA1) {
+                str += strprintf("<%s>", HexStr(vch));
             } else {
-                str += HexStr(vch);
+                str += strprintf("PUSHDATA%d<%s>", (1 << (opcode - OP_PUSHDATA1)), HexStr(vch));
+            }
+        } else if (opcode <= MAX_DECODE_OPCODE) {
+            if (OP_1 <= opcode && opcode <= OP_16) {
+                // Small number pushes are shown as numbers. A lone push gets
+                // a '+' prefix so it cannot be mistaken for the hex encoding
+                // of a script.
+                if (str.empty() && pc == script.end()) str += "+";
+                str += strprintf("%d", opcode - OP_1 + 1);
+            } else {
+                str += GetOpName(opcode);
             }
         } else {
-            str += GetOpName(opcode);
+            str += strprintf("#%02x%s", opcode, HexStr(vch));
         }
     }
     return str;
