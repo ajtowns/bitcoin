@@ -51,16 +51,32 @@ namespace {
 class OpCodeParser
 {
 private:
-    std::map<std::string, opcodetype> mapOpNames;
+    std::map<std::string, opcodetype, std::less<>> mapOpNames;
 
 public:
     OpCodeParser()
     {
-        for (unsigned int op = 0; op <= MAX_OPCODE; ++op) {
-            // Allow OP_RESERVED to get into mapOpNames
-            if (op < OP_NOP && op != OP_RESERVED) {
-                continue;
-            }
+        // Add names for the opcodes whose GetOpName() name differs from the
+        // name used when writing scripts.
+        // * OP_1NEGATE is skipped by the loop below (it is below OP_RESERVED,
+        //   in the data-push range), and GetOpName() calls it "-1" anyway.
+        // * OP_TRUE/OP_FALSE are aliases for OP_1/OP_0, which GetOpName()
+        //   reports as "1"/"0".
+        // * OP_NOP2/OP_NOP3 are CHECKLOCKTIMEVERIFY/CHECKSEQUENCEVERIFY.
+        mapOpNames["OP_1NEGATE"] = mapOpNames["1NEGATE"] = OP_1NEGATE;
+        mapOpNames["OP_TRUE"] = mapOpNames["TRUE"] = OP_TRUE;
+        mapOpNames["OP_FALSE"] = mapOpNames["FALSE"] = OP_FALSE;
+        mapOpNames["OP_NOP2"] = mapOpNames["NOP2"] = OP_NOP2; // CHECKLOCKTIMEVERIFY
+        mapOpNames["OP_NOP3"] = mapOpNames["NOP3"] = OP_NOP3; // CHECKSEQUENCEVERIFY
+
+        // Every named opcode from OP_RESERVED (0x50) up to MAX_DECODE_OPCODE
+        // gets its GetOpName() name plus an unprefixed alias. The opcodes
+        // below OP_RESERVED are the data-push range -- direct pushes
+        // (0x01..0x4b), OP_PUSHDATA1/2/4 (0x4c..0x4e) and OP_1NEGATE (0x4f)
+        // -- which either have no opcode name or are covered above, so skip
+        // them.
+        for (unsigned int op = 0; op <= MAX_DECODE_OPCODE; ++op) {
+            if (0 < op && op < OP_RESERVED) continue;
 
             std::string strName = GetOpName(static_cast<opcodetype>(op));
             if (strName == "OP_UNKNOWN") {
@@ -70,21 +86,30 @@ public:
             // Convenience: OP_ADD and just ADD are both recognized:
             if (strName.starts_with("OP_")) {
                 mapOpNames[strName.substr(3)] = static_cast<opcodetype>(op);
+            } else {
+                mapOpNames[strprintf("OP_%s", strName)] = static_cast<opcodetype>(op);
             }
         }
     }
-    opcodetype Parse(const std::string& s) const
+    std::optional<opcodetype> Parse(std::string_view s) const
     {
         auto it = mapOpNames.find(s);
-        if (it == mapOpNames.end()) throw std::runtime_error("script parse error: unknown opcode");
+        if (it == mapOpNames.end()) return std::nullopt;
         return it->second;
     }
 };
 
-opcodetype ParseOpCode(const std::string& s)
+std::optional<opcodetype> ParseOpCodeNoThrow(const std::string_view s)
 {
     static const OpCodeParser ocp;
     return ocp.Parse(s);
+}
+
+opcodetype ParseOpCode(const std::string_view s)
+{
+    auto opcode = ParseOpCodeNoThrow(s);
+    if (!opcode) throw std::runtime_error("script parse error: unknown opcode");
+    return *opcode;
 }
 
 } // namespace

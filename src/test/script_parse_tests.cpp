@@ -38,6 +38,11 @@ BOOST_AUTO_TEST_CASE(parse_script)
         {"'17'", "023137"},
         {"ELSE", "67"},
         {"NOP10", "b9"},
+        {"CHECKSIGADD", "ba"},
+        {"OP_15", "5f"},
+        {"TRUE", "51"},
+        {"FALSE", "00"},
+        {"OP_0", "00"},
     };
     std::string all_in;
     std::string all_out;
@@ -50,6 +55,6 @@ BOOST_AUTO_TEST_CASE(parse_script)
 
     BOOST_CHECK_EXCEPTION(ParseScript("11111111111111111111"), std::runtime_error, HasReason("script parse error: decimal numeric value only allowed in the range -0xFFFFFFFF...0xFFFFFFFF"));
     BOOST_CHECK_EXCEPTION(ParseScript("11111111111"), std::runtime_error, HasReason("script parse error: decimal numeric value only allowed in the range -0xFFFFFFFF...0xFFFFFFFF"));
-    BOOST_CHECK_EXCEPTION(ParseScript("OP_CHECKSIGADD"), std::runtime_error, HasReason("script parse error: unknown opcode"));
+    BOOST_CHECK_EXCEPTION(ParseScript("OP_DOESNOTEXIST"), std::runtime_error, HasReason("script parse error: unknown opcode"));
 }
 BOOST_AUTO_TEST_SUITE_END()
