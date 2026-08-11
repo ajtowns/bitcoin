@@ -451,15 +451,17 @@ static RPCMethod decodescript()
 {
     return RPCMethod{
         "decodescript",
-        "Decode a hex-encoded script.\n",
+        "Decode a script, given in hex or asm format.\n"
+        "For more information on the asm format, see the documentation in the doc/script-asm.md file.\n",
         {
-            {"hexstring", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hex-encoded script"},
+            {"hexstring", RPCArg::Type::STR, RPCArg::Optional::NO, "the hex-encoded or asm-encoded script"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
             {
                 {RPCResult::Type::STR, "asm", "Disassembly of the script"},
                 {RPCResult::Type::STR, "desc", "Inferred descriptor for the script"},
+                {RPCResult::Type::STR_HEX, "hex", "Raw script bytes, hex-encoded"},
                 {RPCResult::Type::STR, "type", "The output type (e.g. " + GetAllOutputTypes() + ")"},
                 {RPCResult::Type::STR, "address", /*optional=*/true, "The Bitcoin address (only if a well-defined address exists)"},
                 {RPCResult::Type::STR, "p2sh", /*optional=*/true,
@@ -484,13 +486,14 @@ static RPCMethod decodescript()
 {
     UniValue r(UniValue::VOBJ);
     CScript script;
-    if (request.params[0].get_str().size() > 0){
-        std::vector<unsigned char> scriptData(ParseHexV(request.params[0], "argument"));
-        script = CScript(scriptData.begin(), scriptData.end());
-    } else {
-        // Empty scripts are valid
+    {
+        const auto parsed_script = ParseAsmStr(request.params[0].get_str());
+        if (!parsed_script) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "script is neither a valid hex-encoded script nor a valid asm string");
+        }
+        script = *parsed_script;
     }
-    ScriptToUniv(script, /*out=*/r, /*include_hex=*/false, /*include_address=*/true);
+    ScriptToUniv(script, /*out=*/r, /*include_hex=*/true, /*include_address=*/true);
 
     std::vector<std::vector<unsigned char>> solutions_data;
     const TxoutType which_type{Solver(script, solutions_data)};

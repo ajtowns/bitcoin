@@ -14,6 +14,7 @@ from test_framework.messages import (
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
+    assert_raises_rpc_error,
 )
 
 
@@ -273,6 +274,26 @@ class DecodeScriptTest(BitcoinTestFramework):
             rpc_result = self.nodes[0].decodescript(script)
             assert_equal(result, rpc_result)
 
+    def decodescript_asm_input(self):
+        """Check that decodescript accepts asm strings as well as hex."""
+        self.log.info("- asm input for a P2PKH script")
+        p2pkh = self.nodes[0].decodescript('76a9145dd1d3a048119c27b28293056724d9522f26d94588ac')
+        asm_str = p2pkh['asm']
+        rpc_result = self.nodes[0].decodescript(asm_str)
+        assert_equal(p2pkh['asm'], rpc_result['asm'])
+        assert_equal(p2pkh['desc'], rpc_result['desc'])
+        assert_equal(p2pkh['type'], rpc_result['type'])
+
+        self.log.info("- asm input for a scriptSig (nested pushes)")
+        # 0 <sig> <redeemscript>
+        script_sig = self.nodes[0].decodescript('00473044022079bd62ee09621a3be96b760c39e8ef78170101d46313923c6b07ae60a95c90670220238e51ea29fc70b04b65508450523caedbb11cb4dd5aa608c81487de798925ba014c69522103a34cd2fd1273750453fde17922ea04064292092b8530402e047cc82e60ad9ad4210275738d4b698995c5d4252353d0855d6223d1772a506fe30b3f2b10e43d8307702103fae400923e16776836a075ef27fcb2c63f79be14fd3d48d13f7f14915d87f96053ae')
+        rpc_result = self.nodes[0].decodescript(script_sig['asm'])
+        assert_equal(script_sig['asm'], rpc_result['asm'])
+
+        self.log.info("- invalid asm is rejected")
+        assert_raises_rpc_error(-8, "neither a valid hex-encoded script nor a valid asm string", self.nodes[0].decodescript, "not a script")
+        assert_raises_rpc_error(-8, "neither a valid hex-encoded script nor a valid asm string", self.nodes[0].decodescript, "0 <")
+
     def decodescript_miniscript(self):
         """Check that a Miniscript is decoded when possible under P2WSH context."""
         # Sourced from https://github.com/bitcoin/bitcoin/pull/27037#issuecomment-1416151907.
@@ -295,6 +316,8 @@ class DecodeScriptTest(BitcoinTestFramework):
         self.decoderawtransaction_asm_sighashtype()
         self.log.info("Data-driven tests")
         self.decodescript_datadriven_tests()
+        self.log.info("Asm input tests")
+        self.decodescript_asm_input()
         self.log.info("Miniscript descriptor decoding")
         self.decodescript_miniscript()
 

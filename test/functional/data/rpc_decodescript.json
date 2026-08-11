@@ -3,6 +3,7 @@
         "5120eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         {
             "asm": "1 <eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee>",
+            "hex": "5120eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "address": "bcrt1pamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhqz6nvlh",
             "desc": "rawtr(eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee)#jk7c6kys",
             "type": "witness_v1_taproot"
@@ -12,6 +13,7 @@
         "5102eeee",
         {
             "asm": "1 -28398",
+            "hex": "5102eeee",
             "address": "bcrt1pamhqk96edn",
             "desc": "addr(bcrt1pamhqk96edn)#vkh8uj5a",
             "type": "witness_unknown"
@@ -21,6 +23,7 @@
         "0020eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         {
             "asm": "0 <eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee>",
+            "hex": "0020eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "address": "bcrt1qamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhqgdn98t",
             "desc": "addr(bcrt1qamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhqgdn98t)#afaecevx",
             "type": "witness_v0_scripthash",
@@ -31,6 +34,7 @@
         "a914eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87",
         {
             "asm": "OP_HASH160 <eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee> OP_EQUAL",
+            "hex": "a914eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee87",
             "address": "2NF2b3KS8xXb9XHvbRMXdZh8s5g92rUZHtp",
             "desc": "addr(2NF2b3KS8xXb9XHvbRMXdZh8s5g92rUZHtp)#ywfcpmh9",
             "type": "scripthash"
@@ -40,6 +44,7 @@
         "6a00",
         {
             "asm": "OP_RETURN 0",
+            "hex": "6a00",
             "desc": "raw(6a00)#ncfmkl43",
             "type": "nulldata"
         }
@@ -48,6 +53,7 @@
         "6aee",
         {
             "asm": "OP_RETURN #ee",
+            "hex": "6aee",
             "desc": "raw(6aee)#vsyzgqdt",
             "type": "nonstandard"
         }
@@ -56,6 +62,7 @@
         "6a02ee",
         {
             "asm": "OP_RETURN #02ee",
+            "hex": "6a02ee",
             "desc": "raw(6a02ee)#gvdwnlzl",
             "type": "nonstandard"
         }
@@ -65,6 +72,7 @@
         {
             "asm": "-28398",
             "desc": "raw(02eeee)#5xzck7pr",
+            "hex": "02eeee",
             "type": "nonstandard",
             "p2sh": "2N34iiGoUUkVSPiaaTFpJjB1FR9TXQu3PGM",
             "segwit": {
@@ -81,6 +89,7 @@
         "ba",
         {
             "asm": "OP_CHECKSIGADD",
+            "hex": "ba",
             "desc": "raw(ba)#yy0eg44l",
             "type": "nonstandard"
         }
@@ -89,6 +98,7 @@
         "50",
         {
             "asm": "OP_RESERVED",
+            "hex": "50",
             "desc": "raw(50)#a7tu03xf",
             "type": "nonstandard"
         }
