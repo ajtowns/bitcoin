@@ -111,6 +111,7 @@ add_executable(fuzz
   script_format.cpp
   script_interpreter.cpp
   script_ops.cpp
+  script_parseasm.cpp
   script_parsing.cpp
   script_sigcache.cpp
   script_sign.cpp

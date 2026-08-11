@@ -27,7 +27,12 @@ FUZZ_TARGET(script_format, .init = initialize_script_format)
     }
 
     (void)FormatScript(script);
-    (void)ScriptToAsmStr(script);
+
+    // ScriptToAsmStr output must round-trip back to the original script
+    const std::string decode = ScriptToAsmStr(script);
+    const auto recover = ParseAsmStr(decode);
+    assert(recover.has_value());
+    assert(*recover == script);
 
     UniValue o1(UniValue::VOBJ);
     auto include_hex = fuzzed_data_provider.ConsumeBool();
