@@ -9,7 +9,9 @@
 #include <util/result.h>
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 
 class CBlock;
 class CBlockHeader;
@@ -32,6 +34,9 @@ enum class TxVerbosity {
 };
 
 CScript ParseScript(const std::string& s);
+
+/** Convert an asm string to a CScript (see doc/script-asm.md) */
+std::optional<CScript> ParseAsmStr(std::string_view asmstr);
 
 /** Convert a CScript to an asm string (see doc/script-asm.md) */
 std::string ScriptToAsmStr(const CScript& script);

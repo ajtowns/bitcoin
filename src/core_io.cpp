@@ -9,6 +9,7 @@
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
+#include <crypto/common.h>
 #include <crypto/hex_base.h>
 #include <key_io.h>
 #include <prevector.h>
@@ -33,9 +34,11 @@
 
 #include <algorithm>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -153,6 +156,209 @@ CScript ParseScript(const std::string& s)
     }
 
     return result;
+}
+
+namespace {
+/** Maximum nesting depth of <..> pushes. */
+constexpr size_t MAX_ASM_NEST_DEPTH{100};
+/** The whitespace characters that separate units in an asm string. */
+constexpr std::string_view WS_CHARS = " \f\n\r\t\v";
+/** The hex digit characters. */
+constexpr std::string_view HEX_CHARS = "0123456789abcdefABCDEF";
+/** The characters that may appear in an opcode name. */
+constexpr std::string_view OPCODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789";
+/** The maximum absolute value specifiable as a decimal */
+constexpr int64_t MAX_DECIMAL_VALUE{0x7F'FFFF'FFFF};
+/** The number of decimal digits that value has */
+constexpr size_t MAX_DECIMAL_DIGITS = 12;
+
+/**
+ * Append a push of data to a script.
+ *
+ * If pushop is OP_0, use the smallest push opcode for the data (either a
+ * direct push, or OP_PUSHDATA1/2/4 as the size requires). Otherwise use the
+ * specified OP_PUSHDATA1/2/4 opcode, failing if the data is too large for it.
+ */
+bool AppendPush(opcodetype pushop, std::span<const uint8_t> data, CScript& script)
+{
+    if (pushop == OP_0) {
+        script << data;
+        return true;
+    }
+
+    if (pushop == OP_PUSHDATA1 && data.size() <= 0xff) {
+        script.insert(script.end(), OP_PUSHDATA1);
+        script.insert(script.end(), static_cast<unsigned char>(data.size()));
+    } else if (pushop == OP_PUSHDATA2 && data.size() <= 0xffff) {
+        script.insert(script.end(), OP_PUSHDATA2);
+        unsigned char len[2];
+        WriteLE16(len, data.size());
+        script.insert(script.end(), std::begin(len), std::end(len));
+    } else if (pushop == OP_PUSHDATA4 && data.size() <= 0xffffffff) {
+        script.insert(script.end(), OP_PUSHDATA4);
+        unsigned char len[4];
+        WriteLE32(len, data.size());
+        script.insert(script.end(), std::begin(len), std::end(len));
+    } else {
+        return false;
+    }
+    script.insert(script.end(), data.begin(), data.end());
+    return true;
+}
+} // namespace
+
+std::optional<CScript> ParseAsmStr(std::string_view asmstr)
+{
+    // A script that is entirely an even-length hex string is decoded as
+    // raw bytes, matching the encoding's disambiguation rule for scripts
+    // that consist of a single number.
+    asmstr = util::TrimStringView(asmstr);
+    if (asmstr.empty()) {
+        return CScript{};
+    }
+    if (IsHex(asmstr)) {
+        auto bytes = TryParseHex<unsigned char>(asmstr);
+        if (!bytes) return std::nullopt;
+        return CScript{bytes->begin(), bytes->end()};
+    }
+
+    // Otherwise the string is parsed as whitespace-separated units:
+    // opcode names (with or without the OP_ prefix), decimal numbers,
+    // <...> / PUSHDATA1<...> pushes of recursively decoded content, and
+    // #hex raw data. Pushes may be nested arbitrarily, so an explicit
+    // stack of scripts being built is kept rather than recursing.
+    struct SubScript
+    {
+        // How this subscript's content is pushed into its parent. OP_0 is the
+        // sentinel for "use the smallest push opcode"; otherwise this is the
+        // OP_PUSHDATA1/2/4 opcode to push with. The root script never uses it.
+        opcodetype pushop{OP_FALSE};
+        CScript script{};
+    };
+    std::vector<SubScript> scripts{SubScript{}};
+
+    auto check_subscript = [&]() -> std::optional<opcodetype> {
+        // Open a push. Determine the push opcode (if any) and skip
+        // to the content.
+        if (asmstr.starts_with("<")) {
+            asmstr.remove_prefix(1);
+            return OP_0;
+        } else if (asmstr.starts_with("PUSHDATA1<")) {
+            asmstr.remove_prefix(10);
+            return OP_PUSHDATA1;
+        } else if (asmstr.starts_with("PUSHDATA2<")) {
+            asmstr.remove_prefix(10);
+            return OP_PUSHDATA2;
+        } else if (asmstr.starts_with("PUSHDATA4<")) {
+            asmstr.remove_prefix(10);
+            return OP_PUSHDATA4;
+        } else {
+            return std::nullopt;
+        }
+    };
+
+    while (true) {
+        asmstr = util::TrimStringView(asmstr);
+        if (asmstr.empty()) {
+            if (scripts.size() == 1) return scripts.back().script;
+            return std::nullopt; // unterminated push
+        }
+
+        if (asmstr.front() == '>') {
+            // Close the innermost push.
+            if (scripts.size() == 1) return std::nullopt;
+            SubScript inner = std::move(scripts.back());
+            scripts.pop_back();
+            if (!AppendPush(inner.pushop, inner.script, scripts.back().script)) return std::nullopt;
+            asmstr.remove_prefix(1);
+            continue;
+        }
+
+        if (auto pushop = check_subscript(); pushop.has_value()) {
+            if (scripts.size() >= MAX_ASM_NEST_DEPTH) return std::nullopt;
+
+            if (size_t ws = asmstr.find_first_not_of(WS_CHARS); ws != std::string_view::npos) {
+                asmstr.remove_prefix(ws);
+            }
+            std::string_view content = asmstr;
+            size_t hexlen = content.find_first_not_of(HEX_CHARS);
+            if (hexlen == std::string_view::npos) hexlen = content.size();
+            if (hexlen % 2 == 0) {
+                size_t wslen = content.substr(hexlen).find_first_not_of(WS_CHARS);
+                if (wslen == std::string_view::npos) return std::nullopt; // no closing >
+                size_t end = hexlen + wslen;
+                if (end < content.size() && content[end] == '>') {
+                    auto bytes = TryParseHex<unsigned char>(content.substr(0, hexlen));
+                    if (!bytes) return std::nullopt;
+                    if (!AppendPush(*pushop, *bytes, scripts.back().script)) return std::nullopt;
+                    asmstr.remove_prefix(end + 1);
+                    continue;
+                }
+            }
+
+            scripts.emplace_back(*pushop);
+            continue;
+        }
+
+        if (asmstr.front() == '#') {
+            // Raw hex data, inserted into the script as-is.
+            asmstr.remove_prefix(1);
+            size_t hexlen = asmstr.find_first_not_of(HEX_CHARS);
+            if (hexlen == std::string_view::npos) hexlen = asmstr.size();
+            if (hexlen < 2 || hexlen % 2 != 0) return std::nullopt;
+            auto bytes = TryParseHex<unsigned char>(asmstr.substr(0, hexlen));
+            if (!bytes) return std::nullopt;
+            scripts.back().script.insert(scripts.back().script.end(), bytes->begin(), bytes->end());
+            asmstr.remove_prefix(hexlen);
+            continue;
+        }
+
+        // An opcode name. Names are scanned before numbers so that digit-led
+        // names (eg "2DUP") parse as a single opcode rather than as the
+        // number "2" followed by "DUP".
+        {
+            size_t oplen = asmstr.find_first_not_of(OPCODE_CHARS);
+            if (oplen == std::string_view::npos) oplen = asmstr.size();
+            if (oplen > 0) {
+                auto opcode = ParseOpCodeNoThrow(asmstr.substr(0, oplen));
+                if (opcode) {
+                    scripts.back().script << *opcode;
+                    asmstr.remove_prefix(oplen);
+                    continue;
+                }
+            }
+        }
+
+        // A decimal number, optionally preceded by a sign. Numbers are
+        // pushed using their minimal encoding (OP_1NEGATE, OP_0..OP_16,
+        // or a direct push).
+        {
+            bool negate = false;
+            size_t sign_len = 0;
+            if (asmstr.front() == '-' || asmstr.front() == '+') {
+                negate = (asmstr.front() == '-');
+                sign_len = 1;
+            }
+            size_t numlen = asmstr.substr(sign_len).find_first_not_of("0123456789");
+            if (numlen == std::string_view::npos) numlen = asmstr.size() - sign_len;
+            const size_t unit_end = sign_len + numlen;
+            if (unit_end < asmstr.size() && OPCODE_CHARS.find(asmstr[unit_end]) != std::string_view::npos) {
+                // Reject a digit run continuing into an opcode name (eg "2ADD"),
+                // rather than parsing it as two units.
+                return std::nullopt;
+            }
+            if (numlen > 0 && numlen <= MAX_DECIMAL_DIGITS) {
+                const auto num = ToIntegral<int64_t>(asmstr.substr(sign_len, numlen));
+                if (!Assume(num)) return std::nullopt;
+                if (*num > MAX_DECIMAL_VALUE) return std::nullopt;
+                scripts.back().script << (negate ? -*num : *num);
+                asmstr.remove_prefix(sign_len + numlen);
+                continue;
+            }
+        }
+
+        return std::nullopt;
+    }
 }
 
 /// Check that all of the input and output scripts of a transaction contain valid opcodes
