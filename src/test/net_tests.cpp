@@ -934,6 +934,8 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     chainman.ResetIbd();
     m_node.connman->SetCaptureMessages(false);
     m_node.args->ForceSetArg("-bind", "");
+
+    m_node.peerman->FinalizeNode(peer);
 }
 
 
