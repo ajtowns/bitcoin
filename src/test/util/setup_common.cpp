@@ -336,6 +336,8 @@ ChainTestingSetup::~ChainTestingSetup()
 {
     if (m_node.scheduler) m_node.scheduler->stop();
     if (m_node.validation_signals) m_node.validation_signals->FlushBackgroundCallbacks();
+    if (m_node.connman) m_node.connman->Stop();
+    m_node.peerman.reset();
     m_node.connman.reset();
     m_node.banman.reset();
     m_node.addrman.reset();
