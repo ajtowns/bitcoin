@@ -594,7 +594,7 @@ public:
     void InitializeNode(const CNode& node, ServiceFlags our_services) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_tx_download_mutex);
     void FinalizeNode(const CNode& node) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, !m_tx_download_mutex);
     bool HasAllDesirableServiceFlags(ServiceFlags services) const override;
-    bool ProcessMessages(CNode& node, std::atomic<bool>& interrupt) override
+    bool ProcessMessages(CNode& node) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
     bool SendMessages(CNode& node) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
@@ -629,11 +629,12 @@ public:
 private:
     std::thread m_msghandler_thread;
 
+    std::atomic<bool> flagInterruptMsgProc{false};
+
     /// \anchor msghand
     void ThreadMessageHandler() EXCLUSIVE_LOCKS_REQUIRED(!NetEventsInterface::g_msgproc_mutex, !m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
 
-    void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received,
-                        const std::atomic<bool>& interruptMsgProc)
+    void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received)
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_most_recent_block_mutex, !m_headers_presync_mutex, g_msgproc_mutex, !m_tx_download_mutex, !m_inv_to_send_mutex);
 
     /** Consider evicting an outbound peer based on the amount of time they've been behind our tip */
@@ -1063,7 +1064,7 @@ private:
     CTransactionRef FindTxForGetData(const Peer::TxRelay& tx_relay, const GenTxid& gtxid)
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, !tx_relay.m_tx_inventory_mutex);
 
-    void ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic<bool>& interruptMsgProc)
+    void ProcessGetData(CNode& pfrom, Peer& peer)
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, peer.m_getdata_requests_mutex, NetEventsInterface::g_msgproc_mutex)
         LOCKS_EXCLUDED(::cs_main);
 
@@ -1192,7 +1193,7 @@ private:
      */
     bool SetupAddressRelay(const CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
 
-    void ProcessAddrs(std::string_view msg_type, CNode& pfrom, Peer& peer, std::vector<CAddress>&& vAddr, const std::atomic<bool>& interruptMsgProc)
+    void ProcessAddrs(std::string_view msg_type, CNode& pfrom, Peer& peer, std::vector<CAddress>&& vAddr)
         EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_peer_mutex);
 
     void AddAddressKnown(Peer& peer, const CAddress& addr) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex);
@@ -2772,7 +2773,7 @@ CTransactionRef PeerManagerImpl::FindTxForGetData(const Peer::TxRelay& tx_relay,
     return {};
 }
 
-void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic<bool>& interruptMsgProc)
+void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer)
 {
     AssertLockNotHeld(cs_main);
 
@@ -2785,7 +2786,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
     // possible, since they're common and it's efficient to batch process
     // them.
     while (it != peer.m_getdata_requests.end() && it->IsGenTxMsg()) {
-        if (interruptMsgProc) return;
+        if (flagInterruptMsgProc) return;
         // The send buffer provides backpressure. If there's no space in
         // the buffer, pause processing until the next call.
         if (pfrom.fPauseSend) break;
@@ -3826,8 +3827,7 @@ void PeerManagerImpl::PushPrivateBroadcastTx(CNode& node)
 }
 
 void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv,
-                                     const NodeClock::time_point time_received,
-                                     const std::atomic<bool>& interruptMsgProc)
+                                     const NodeClock::time_point time_received)
 {
     AssertLockHeld(g_msgproc_mutex);
 
@@ -4340,7 +4340,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         std::vector<CAddress> vAddr;
         vRecv >> ser_params(vAddr);
-        ProcessAddrs(msg_type, pfrom, peer, std::move(vAddr), interruptMsgProc);
+        ProcessAddrs(msg_type, pfrom, peer, std::move(vAddr));
         return;
     }
 
@@ -4363,7 +4363,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         uint256* best_block{nullptr};
 
         for (CInv& inv : vInv) {
-            if (interruptMsgProc) return;
+            if (flagInterruptMsgProc) return;
 
             // Ignore INVs that don't match wtxidrelay setting.
             // Note that orphan parent fetching always uses MSG_TX GETDATAs regardless of the wtxidrelay setting.
@@ -4485,7 +4485,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         {
             LOCK(peer.m_getdata_requests_mutex);
             peer.m_getdata_requests.insert(peer.m_getdata_requests.end(), vInv.begin(), vInv.end());
-            ProcessGetData(pfrom, peer, interruptMsgProc);
+            ProcessGetData(pfrom, peer);
         }
 
         return;
@@ -5415,7 +5415,7 @@ bool PeerManagerImpl::MaybeDisconnectForTxRelayCapacity(CNode& node, const std::
     return true;
 }
 
-bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptMsgProc)
+bool PeerManagerImpl::ProcessMessages(CNode& node)
 {
     AssertLockNotHeld(m_tx_download_mutex);
     AssertLockHeld(g_msgproc_mutex);
@@ -5431,7 +5431,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     {
         LOCK(peer.m_getdata_requests_mutex);
         if (!peer.m_getdata_requests.empty()) {
-            ProcessGetData(node, peer, interruptMsgProc);
+            ProcessGetData(node, peer);
         }
     }
 
@@ -5475,8 +5475,8 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     }
 
     try {
-        ProcessMessage(peer, node, msg.m_type, msg.m_recv, msg.m_time, interruptMsgProc);
-        if (interruptMsgProc) return false;
+        ProcessMessage(peer, node, msg.m_type, msg.m_recv, msg.m_time);
+        if (flagInterruptMsgProc) return false;
         {
             LOCK(peer.m_getdata_requests_mutex);
             if (!peer.m_getdata_requests.empty()) fMoreWork = true;
@@ -5968,7 +5968,7 @@ bool PeerManagerImpl::SetupAddressRelay(const CNode& node, Peer& peer)
     return true;
 }
 
-void PeerManagerImpl::ProcessAddrs(std::string_view msg_type, CNode& pfrom, Peer& peer, std::vector<CAddress>&& vAddr, const std::atomic<bool>& interruptMsgProc)
+void PeerManagerImpl::ProcessAddrs(std::string_view msg_type, CNode& pfrom, Peer& peer, std::vector<CAddress>&& vAddr)
 {
     AssertLockNotHeld(m_peer_mutex);
     AssertLockHeld(g_msgproc_mutex);
@@ -6003,7 +6003,7 @@ void PeerManagerImpl::ProcessAddrs(std::string_view msg_type, CNode& pfrom, Peer
     std::shuffle(vAddr.begin(), vAddr.end(), m_rng);
     for (CAddress& addr : vAddr)
     {
-        if (interruptMsgProc)
+        if (flagInterruptMsgProc)
             return;
 
         // Apply rate limiting.
@@ -6568,7 +6568,7 @@ void PeerManagerImpl::Start()
 {
     {
         LOCK(m_connman.mutexMsgProc);
-        m_connman.flagInterruptMsgProc = false;
+        flagInterruptMsgProc = false;
         m_connman.fMsgProcWake = false;
     }
     m_msghandler_thread = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
@@ -6576,7 +6576,7 @@ void PeerManagerImpl::Start()
 
 void PeerManagerImpl::Interrupt()
 {
-    WITH_LOCK(m_connman.mutexMsgProc, m_connman.flagInterruptMsgProc = true);
+    WITH_LOCK(m_connman.mutexMsgProc, flagInterruptMsgProc = true);
     m_connman.condMsgProc.notify_all();
 }
 
@@ -6624,7 +6624,7 @@ void PeerManagerImpl::ThreadMessageHandler()
 {
     LOCK(NetEventsInterface::g_msgproc_mutex);
 
-    while (!m_connman.flagInterruptMsgProc)
+    while (!flagInterruptMsgProc)
     {
         bool fMoreWork = false;
 
@@ -6640,13 +6640,13 @@ void PeerManagerImpl::ThreadMessageHandler()
                 if (!node.Available()) continue;
 
                 // Receive messages
-                bool fMoreNodeWork{ProcessMessages(*node, m_connman.flagInterruptMsgProc)};
+                bool fMoreNodeWork{ProcessMessages(*node)};
                 fMoreWork |= (fMoreNodeWork && !node.Paused());
-                if (m_connman.flagInterruptMsgProc) return;
+                if (flagInterruptMsgProc) return;
 
                 // Send messages
                 SendMessages(*node);
-                if (m_connman.flagInterruptMsgProc) return;
+                if (flagInterruptMsgProc) return;
             }
         }
 

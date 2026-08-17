@@ -1105,10 +1105,9 @@ public:
      * Process protocol messages received from a given node
      *
      * @param[in]   node            The node which we have received messages from.
-     * @param[in]   interrupt       Interrupt condition for processing threads
      * @return                      True if there is more work to be done
      */
-    virtual bool ProcessMessages(CNode& node, std::atomic<bool>& interrupt) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex) = 0;
+    virtual bool ProcessMessages(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex) = 0;
 
     /**
      * Send queued protocol messages to a given node.
@@ -1818,7 +1817,6 @@ private:
 
     std::condition_variable condMsgProc;
     Mutex mutexMsgProc;
-    std::atomic<bool> flagInterruptMsgProc{false};
 
     /**
      * This is signaled when network activity should cease.
