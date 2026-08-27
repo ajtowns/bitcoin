@@ -141,7 +141,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     GroupMask shortidmask = GroupMask::Fill(TOTAL_BUCKETS);
     GroupMask sketchmask  = GroupMask::Fill(TOTAL_BUCKETS);
     for (int round = 1; round <= 4 && !resolved; ++round) {
-        auto shortid_bytes = provider.GetShortIDBytes(round, shortidmask);
+        auto shortid_bytes = provider.GetShortIDBytes(round, 0, shortidmask);
         auto [res, new_shortidmask, new_sketchmask] = sketch.Process(
             round, shortidmask, sketchmask,
             shortid_bytes, provider.GetSketches(round));
@@ -310,7 +310,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 // matching the masks from the previous round's result.
                 GRVector shortid_bytes;
                 if (ps.shortidmask.Any()) {
-                    shortid_bytes = tmpl->GetShortIDBytes(round, ps.shortidmask);
+                    shortid_bytes = tmpl->GetShortIDBytes(round, 0, ps.shortidmask);
                 }
 
                 GroupMask sketchmask = ps.sketchmask;

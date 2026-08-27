@@ -1,4 +1,4 @@
-# BIN25-2.3 Wire Protocol
+# BIN25-2.4 Wire Protocol
 
 Implemented wire messages for the gettmplt template sharing protocol.
 
@@ -6,7 +6,7 @@ Implemented wire messages for the gettmplt template sharing protocol.
 
 Announced via BIP-434 FEATURE message.
 
-    feature_id:   "BIN25-2.3"
+    feature_id:   "BIN25-2.4"
     feature_data: empty
 
 ## Messages
@@ -18,7 +18,7 @@ Announced via BIP-434 FEATURE message.
     round:      uint8_t = 0
     basis_hash: uint256          optional; omitted or zero if no basis
 
-Sent every ~2 min to peers that advertised BIN25-2.3. `basis_hash`
+Sent every ~2 min to peers that advertised BIN25-2.4. `basis_hash`
 is the hash of the most recent completed peer template from this peer,
 enabling delta encoding.
 
@@ -26,6 +26,7 @@ enabling delta encoding.
 
     round:         uint8_t      1, 2, 3, or 4
     hash:          uint256      template hash
+    basis_id:      uint8_t      identifier for the basis, from the previous `tmplt` response
     shortidmask:   uint32_t     groups to send shortids for (resolved)
     sketchmask:    uint32_t     groups to send sketches for (unresolved)
 
@@ -35,32 +36,40 @@ Both masks are always present on the wire (round 4 sends sketchmask=0).
 
 **Round 0** (initial response, sent by provider):
 
-    hash:          uint256
     round:         uint8_t = 0
+    hash:          uint256
     tip_hash:      uint256      chain tip (or zero)
     nonce:         uint64_t     template-level nonce for shortid computation
     basis_hash:    uint256      basis template hash (or zero)
+    basis_id:      uint8_t      identifier for the basis for future messages
     basis_delta:   GRVector     retained positions from basis
     sketches:      vector<Sketch>   4 stride-4 group sketches (round 0)
 
 Sent from `MaybeSendTemplateMessages` when a pending `Req` is ready and
 a local template exists.
 
+If `basis_hash` is 0, `basis_id` is also 0; otherwise `basis_id` is an
+integer from 1-255 that can be used to identify that basis to the provider,
+and should be reused in future messages.
+
 **Rounds 1–4** (incremental response, sent by provider):
 
-    hash:          uint256
     round:         uint8_t      1, 2, 3, or 4
+    hash:          uint256
+    basis_id:      uint8_t      identifier for the basis
     shortidmask:   uint32_t     echoed from gettmplt request
     sketchmask:    uint32_t     echoed from gettmplt request
     shortid_bytes: GRVector     shortids for shortidmask groups
     sketches:      vector<Sketch>   sketches for sketchmask groups
 
 Provider returns the masks so the receiver can interpret the data without
-storing what it sent. `shortidmask` is echoed as received; `sketchmask` is
-the request's, restricted to the round's valid group indices and with
+storing what it sent. `shortidmask` is echoed as received; `sketchmask`
+is the request's, restricted to the round's valid group indices and with
 `shortidmask` removed (shortids take priority), so it may be a subset of
-what was asked for. `shortid_bytes` skips the first `SKETCH_CAPACITY`
-(64) shortids per group (covered by the sketch).
+what was asked for. `basis_id` is echoed as received.  `shortid_bytes`
+skips any transactions in the basis specified by `basis_id` (if the basis
+was recognised), and then also the first `SKETCH_CAPACITY` (64) shortids
+per group (covered by the sketch).
 
 ### `gettmplttxn` — request missing transactions
 
@@ -92,8 +101,8 @@ cycle. Multiple `tmplttxn` messages may be sent for one template.
 
     Receiver                          Provider
     --------                          --------
-    FEATURE "BIN25-2.3"  ---------->
-                          <----------  FEATURE "BIN25-2.3"
+    FEATURE "BIN25-2.4"  ---------->
+                          <----------  FEATURE "BIN25-2.4"
 
     gettmplt n=0 [basis]  --------->
                           <---------  tmplt hash n=0 tip nonce basis delta sketches[4]

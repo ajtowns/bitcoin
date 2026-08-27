@@ -233,19 +233,27 @@ public:
         return std::span{sketches}.subspan(round ? count : 0, count);
     }
 
-    /** GR-encode shortids for wire: for each group in mask, skip the first SKETCH_CAPACITY
-     *  shortids (covered by sketch) and encode the rest.
+    /** GR-encode shortids for wire: for each group in mask, skip any
+     *  shortids in the specified basis, then also skip the first
+     *  SKETCH_CAPACITY shortids (covered by sketch) and encode the rest.
      *  At round R (1-4), the group index is the low (R+1) bits of the bucket index.
      */
-    GRVector GetShortIDBytes(int round, GroupMask mask) const;
+    GRVector GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const;
 
-    /** Lazily-computed retained-tx encodings keyed by basis hash.
-     *  Retained-tx positions from a basis template to a new template, Golomb-Rice encoded.
+    /** Lazily-computed retained-tx encodings */
+    struct BasisInfo {
+        uint8_t basis_id; // 1 + position in m_basisinfo
+        uint16_t common_tx_count; // Number of txs in basis also in this template
+        uint256 basis_hash;
+        GRVector delta; // Retained-tx positions from a basis template to a new template, Golomb-Rice encoded
+        std::vector<bool> in_basis; // whether txs in this template were in the basis
+    };
+    std::vector<BasisInfo> m_basisinfo;
+
+    /** Get the basis info by index
+     *  Note: returned value is invalidated by future GetBasisInfo(*this, basis_hash) requests
      */
-    std::unordered_map<uint256, GRVector, SaltedUint256Hasher> m_deltas;
-
-    /** Get (or compute) the GR-encoded retained-tx positions from basis to this template. */
-    const GRVector& GetDelta(const Template& basis);
+    const BasisInfo* GetBasisInfo(uint8_t basis_id) const;
 };
 
 /** Bitset-based tracking of template positions.
@@ -597,6 +605,11 @@ private:
      *  Returns true if all positions are now filled. */
     bool FillPartialTxs(PeerTemplatePartial& partial, TemplateTxVec&& refs);
 
+    /** Get (or compute) the basis info for the given basis for this template.
+     *  Note: returned value is invalidated by future GetBasisInfo(best, new_hash) requests
+     */
+    const LocalTemplate::BasisInfo* GetBasisInfo(LocalTemplate& best, const uint256& basis_hash);
+
 public:
     /** Check if it's time to generate a template. Updates the timer if so.
      *  Returns nullopt if not yet time, true if first template, false otherwise. */
@@ -619,8 +632,11 @@ public:
     struct LocalTemplateAndDelta
     {
         const LocalTemplate* tmpl; // nullptr if no local templates available
-        uint256 basis_hash; // ZERO if basis not found
-        const GRVector* basis_delta; // nullptr if basis not found
+
+        // default values for if no basis matched
+        uint256 basis_hash{uint256::ZERO};
+        uint8_t basis_id{0};
+        const GRVector* basis_delta{nullptr};
     };
 
     /** Request parameters for GetRequestedTemplate. */
