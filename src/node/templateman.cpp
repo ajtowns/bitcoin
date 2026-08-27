@@ -99,28 +99,51 @@ uint256 Template::ComputeHash() const
     return hash;
 }
 
-const GRVector& LocalTemplate::GetDelta(const Template& basis)
+const LocalTemplate::BasisInfo* LocalTemplate::GetBasisInfo(uint8_t basis_id) const
 {
-    auto [it, inserted] = m_deltas.try_emplace(basis.m_hash);
-    if (inserted) {
-        // Build pointer set of txs in this template for O(1) lookup.
-        // Both templates share the same pool, so pointer identity implies same tx.
-        std::unordered_set<const CTransaction*> retained_set;
-        retained_set.reserve(m_txs.size());
-        for (const auto& ref : m_txs) {
-            retained_set.insert(ref->tx.get());
-        }
+    if (basis_id == 0 || basis_id > m_basisinfo.size()) return nullptr;
+    return &m_basisinfo[basis_id - 1];
+}
 
-        // Collect retained positions (in basis order) into a TemplateTxnsSelection
-        TemplateTxnsSelection sel;
-        for (size_t i = 0; i < basis.m_txs.size(); ++i) {
-            if (retained_set.contains(basis.m_txs[i]->tx.get())) {
-                sel.Add(i);
-            }
-        }
-        it->second = sel.GREncode();
+const LocalTemplate::BasisInfo* TemplateManager::GetBasisInfo(LocalTemplate& best, const uint256& basis_hash)
+{
+    if (basis_hash.IsNull()) return nullptr;
+
+    auto it = std::ranges::find(best.m_basisinfo, basis_hash, &LocalTemplate::BasisInfo::basis_hash);
+    if (it != best.m_basisinfo.end()) {
+        return &*it;
     }
-    return it->second;
+
+    // No room to add more than 255 basis entries (though should never come close to that many)
+    if (best.m_basisinfo.size() >= 255) return nullptr;
+
+    const LocalTemplate* basis = GetLocalTemplate(basis_hash);
+    if (!basis) return nullptr;
+
+    std::vector<bool> in_basis;
+    in_basis.resize(best.m_txs.size());
+
+    // Build pointer set of txs in this template for O(1) lookup.
+    // Both templates share the same pool, so pointer identity implies same tx.
+    std::unordered_map<const CTransaction*, size_t> retained_map;
+    retained_map.reserve(best.m_txs.size());
+    size_t pos = 0;
+    for (const auto& ref : best.m_txs) {
+        retained_map.emplace(ref->tx.get(), pos++);
+    }
+
+    // Collect retained positions (in basis order) into a TemplateTxnsSelection
+    TemplateTxnsSelection sel;
+    uint16_t in_common{0};
+    for (size_t i = 0; i < basis->m_txs.size(); ++i) {
+        if (auto b_it = retained_map.find(basis->m_txs[i]->tx.get()); b_it != retained_map.end()) {
+            sel.Add(i);
+            in_basis[b_it->second] = true;
+            ++in_common;
+        }
+    }
+    best.m_basisinfo.emplace_back(1 + best.m_basisinfo.size(), in_common, basis_hash, sel.GREncode(), std::move(in_basis));
+    return &best.m_basisinfo.back();
 }
 
 template<typename Fn>
@@ -152,7 +175,7 @@ void GRVectorDecode(const GRVector& gr, Fn&& fn)
     }
 }
 
-GRVector LocalTemplate::GetShortIDBytes(int round, GroupMask mask) const
+GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const
 {
     // At round R (1-4) the group index is the low (R+1) bits of the shortid (and bucket index).
     // Skip the first SKETCH_CAPACITY shortids per group (covered by sketch); encode the rest.
@@ -160,16 +183,29 @@ GRVector LocalTemplate::GetShortIDBytes(int round, GroupMask mask) const
     mask.LimitToRound(round);
     if (mask.None()) return {};
 
-    // Estimate n to compute GR parameter P (shortids are roughly evenly distributed).
-    size_t n_estimate = shortids.size() / TOTAL_BUCKETS * mask.Count();
+    const BasisInfo* basisinfo = GetBasisInfo(basis_id);
+
+    // Estimate n to compute GR parameter P.
+    //  * Shortids should be evenly distributed based on total number
+    //    of txs to be sent
+    //  * This is reduced (uniformly) by the number of groups excluded
+    //  * This is reduced (still uniformly) by the number of txs in
+    //    common with the basis
+    //  * It's not meaningfully affected by skipping the first 64 txs
+    //    per group, because that's not a uniform difference.
+    const size_t n_needed = shortids.size() - (basisinfo ? basisinfo->common_tx_count : 0);
+    const size_t total_groups_at_round = 4 << (round - 1);
+    const size_t n_estimate = n_needed / total_groups_at_round * mask.Count();
     uint8_t P = static_cast<uint8_t>(std::max(0, 46 - (int)std::bit_width(n_estimate)));
 
     auto it = shortids.begin();
     uint64_t last = 1;
+    size_t cnt = 0;
     std::array<int, TOTAL_BUCKETS> group_count{};
     return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
         while (it != shortids.end()) {
             uint64_t sid{*it++};
+            if (basisinfo && basisinfo->in_basis[cnt++]) continue;
             int b = sid & ((4 << (round - 1)) - 1);
             if (mask[b] && ++group_count[b] > SKETCH_CAPACITY) {
                 sid -= last;
@@ -377,16 +413,17 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
 
 TemplateManager::LocalTemplateAndDelta TemplateManager::GetRequestedTemplate(const Req& req)
 {
-    if (m_templates.empty()) return {nullptr, uint256::ZERO, nullptr};
+    if (m_templates.empty()) return {nullptr};
 
     LocalTemplate& best = m_templates.back();
-    if (best.m_time <= req.request_time) return {nullptr, uint256::ZERO, nullptr};
+    if (best.m_time <= req.request_time) return {nullptr};
 
-    const LocalTemplate* basis = req.basis_hash.IsNull() ? nullptr : GetLocalTemplate(req.basis_hash);
-    if (!basis) return {&best, uint256::ZERO, nullptr};
-
-    const GRVector& delta = best.GetDelta(*basis);
-    return {&best, req.basis_hash, &delta};
+    const LocalTemplate::BasisInfo* basisinfo = GetBasisInfo(best, req.basis_hash);
+    if (basisinfo) {
+        return {&best, req.basis_hash, basisinfo->basis_id, &basisinfo->delta};
+    } else {
+        return {&best};
+    }
 }
 
 void TemplateTxnsSelection::Add(uint32_t p)
@@ -704,7 +741,7 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
 }
 
 void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
-                                                 GroupMask shortidmask)
+                                                GroupMask shortidmask)
 {
     // At the start of round r, m_sketch_level = r-1 and sketches are at that granularity.
     // num_groups = 4 << m_sketch_level; group index = low bits of bucket index.
@@ -712,10 +749,10 @@ void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
 
     // Parse the provider's outer shortids (positions SKETCH_CAPACITY+1 per sketch group) into per-group lists.
     std::vector<std::vector<uint64_t>> received(num_groups);
+    GroupMask resolved; // groups with every bucket resolved
     {
         if (shortid_bytes.n_elements > MAX_TEMPLATE_TXS) return;
 
-        GroupMask resolved; // groups with every bucket resolved
         for (int gi = 0; gi < num_groups; ++gi) {
             bool group_resolved = true;
             for (int bx = gi; bx < TOTAL_BUCKETS; bx += num_groups) {
@@ -736,25 +773,28 @@ void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
         });
     }
 
-    // For each unresolved group, XOR provided shortids with provider sketch
-    // to recover the inner shortids (≤SKETCH_CAPACITY). Full provider set for
-    // this group = provided + decoded inner.
+    // For each unresolved group, XOR provided shortids and
+    // basis with provider sketch to recover the inner shortids
+    // (≤SKETCH_CAPACITY). Full provider set for this group = provided +
+    // basis + decoded inner.
     auto& sk = *m_sketches;
     for (int gi = 0; gi < num_groups; ++gi) {
-        // Check if group is already fully resolved
-        bool group_resolved = true;
-        for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
-            if (!m_bucket_resolved[b]) { group_resolved = false; break; }
-        }
-        if (group_resolved) continue;
+        if (!shortidmask[gi] || resolved[gi]) continue;
 
         auto& recv = received[gi];
-        if (recv.empty()) continue;
 
-        // recv XOR provider = inner shortids (outer cancels)
+        // recv XOR provider XOR basis => inner shortids. Only attempt the
+        // decode when the counts say the inner set fits: Decode() on an
+        // overfull sketch can "succeed" with garbage rather than fail.
+        // Note: recv may be empty (everything beyond the basis fits in
+        // the sketch), which is fine given the count check.
+        const int64_t inner_count = sk.m_provider_sketches[gi].count - sk.m_basis_sketches[gi].count - static_cast<int64_t>(recv.size());
+        if (inner_count < 0 || inner_count > SKETCH_CAPACITY) continue;
+
         Minisketch recv_sketch = MakeMinisketch46(SKETCH_CAPACITY);
         for (uint64_t sid : recv) recv_sketch.Add(sid);
         recv_sketch.Merge(sk.m_provider_sketches[gi].sketch);
+        recv_sketch.Merge(sk.m_basis_sketches[gi].sketch);
 
         if (auto decoded = recv_sketch.Decode(SKETCH_CAPACITY)) {
             for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
@@ -806,8 +846,8 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Process(
     std::span<const LocalTemplate::Sketch> sketches)
 {
     // Try shortid fallback first using sketches already prepared at round m_sketch_level = (round-1).
-    // GetShortIDBytes(round, mask) groups shortids at that same granularity.
-    if (shortid_bytes.n_elements > 0) {
+    // GetShortIDBytes(round, basis_id, mask) groups shortids at that same granularity.
+    if (shortidmask_sent.Any()) {
         ProcessShortidFallback(shortid_bytes, shortidmask_sent);
     }
 

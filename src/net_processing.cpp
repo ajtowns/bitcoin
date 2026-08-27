@@ -1236,7 +1236,7 @@ private:
 
     /** Act on the result of InitPeerSketch/UpdatePeerSketch: send the next
      *  gettmplt round, gettmplttxn, or disconnect on error. */
-    void ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, const node::TemplateManager::TmpltResult& result)
+    void ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, uint8_t basis_id, const node::TemplateManager::TmpltResult& result)
         EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, m_template_mutex);
 
     /** Send pending tmplt round=0 response and drain any queued tmplttxn chunks. */
@@ -4442,9 +4442,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         } else if (round <= 4) {
             // round=1..4: request for more reconstruction data for previously sketched template
             uint256 hash;
+            uint8_t basis_id;
             node::GroupMask shortidmask, sketchmask;
             uint32_t raw{0};
-            vRecv >> hash >> raw;
+            vRecv >> hash >> basis_id >> raw;
             shortidmask.FromUint32(std::span{&raw, 1});
             vRecv >> raw;
             if (round == 4 && raw != 0) {
@@ -4463,7 +4464,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             }
 
             node::GRVector shortid_bytes;
-            if (shortidmask.Any()) shortid_bytes = tmpl->GetShortIDBytes(round, shortidmask);
+            if (shortidmask.Any()) shortid_bytes = tmpl->GetShortIDBytes(round, basis_id, shortidmask);
 
             sketchmask.LimitToRound(round);
             sketchmask -= shortidmask; // shortids take priority over sketches
@@ -4478,9 +4479,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             uint32_t shortidmask_raw{0}, sketchmask_raw{0};
             shortidmask.ToUint32(std::span{&shortidmask_raw, 1});
             sketchmask.ToUint32(std::span{&sketchmask_raw, 1});
-            LogDebug(BCLog::GETTMPLT, "Sending tmplt round=%d template=%s shortidmask=0x%08x sketchmask=0x%08x peer=%d",
-                     round, hash.ToString(), shortidmask_raw, sketchmask_raw, pfrom.GetId());
-            MakeAndPushMessage(pfrom, NetMsgType::TMPLT, hash, round, shortidmask_raw, sketchmask_raw, shortid_bytes, sketches_to_send);
+            LogDebug(BCLog::GETTMPLT, "Sending tmplt round=%d template=%s basis_id=%d shortidmask=0x%08x sketchmask=0x%08x peer=%d",
+                     round, hash.ToString(), basis_id, shortidmask_raw, sketchmask_raw, pfrom.GetId());
+            MakeAndPushMessage(pfrom, NetMsgType::TMPLT, round, hash, basis_id, shortidmask_raw, sketchmask_raw, shortid_bytes, sketches_to_send);
         } else {
             LogDebug(BCLog::GETTMPLT, "Got gettmplt invalid round=%d, disconnecting %s",
                      round, pfrom.LogPeer());
@@ -4526,9 +4527,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             LogDebug(BCLog::GETTMPLT, "Ignoring tmplt from inactive peer=%d", pfrom.GetId());
             return;
         }
-        uint256 hash;
         uint8_t round;
-        vRecv >> hash >> round;
+        uint8_t basis_id;
+        uint256 hash;
+        vRecv >> round >> hash;
 
         if (round == 0) {
             uint256 tip_hash;
@@ -4536,7 +4538,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             uint256 basis_hash;
             node::GRVector basis_delta;
             std::vector<node::LocalTemplate::Sketch> sketches;
-            vRecv >> tip_hash >> nonce >> basis_hash >> basis_delta >> LIMITED_VECTOR(sketches, 4);
+            vRecv >> tip_hash >> nonce >> basis_hash >> basis_id >> basis_delta >> LIMITED_VECTOR(sketches, 4);
 
             const CBlockIndex* tip;
             {
@@ -4566,13 +4568,13 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
                                                        basis_hash, basis_delta, sketches,
                                                        NodeClock::now());
-            ProcessTemplateSketchUpdate(pfrom, peer, 0, result);
+            ProcessTemplateSketchUpdate(pfrom, peer, 0, basis_id, result);
         } else if (round <= 4) {
             uint32_t shortidmask_raw{0}, sketchmask_raw{0};
             node::GroupMask shortidmask, sketchmask;
             node::GRVector shortid_bytes;
             std::vector<node::LocalTemplate::Sketch> sketches;
-            vRecv >> shortidmask_raw >> sketchmask_raw >> shortid_bytes >> LIMITED_VECTOR(sketches, 16);
+            vRecv >> basis_id >> shortidmask_raw >> sketchmask_raw >> shortid_bytes >> LIMITED_VECTOR(sketches, 16);
             shortidmask.FromUint32(std::span{&shortidmask_raw, 1});
             sketchmask.FromUint32(std::span{&sketchmask_raw, 1});
 
@@ -4584,7 +4586,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                                                          shortidmask, sketchmask,
                                                          shortid_bytes, sketches,
                                                          NodeClock::now());
-            ProcessTemplateSketchUpdate(pfrom, peer, round, result);
+            ProcessTemplateSketchUpdate(pfrom, peer, round, basis_id, result);
         } else {
             LogDebug(BCLog::GETTMPLT, "Got tmplt invalid round=%d peer=%d, ignoring", round, pfrom.GetId());
         }
@@ -5718,7 +5720,7 @@ void PeerManagerImpl::MaybeGenerateTemplate()
     LogDebug(BCLog::GETTMPLT, "Generated template %s (tip=%s, %d txs)", template_hash.ToString(), tip->GetBlockHash().ToString(), txs.size());
 }
 
-void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, const node::TemplateManager::TmpltResult& result)
+void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int round, uint8_t basis_id, const node::TemplateManager::TmpltResult& result)
 {
     AssertLockHeld(g_msgproc_mutex);
 
@@ -5740,10 +5742,10 @@ void PeerManagerImpl::ProcessTemplateSketchUpdate(CNode& node, Peer& peer, int r
         uint32_t shortidmask_raw{0}, sketchmask_raw{0};
         result.shortidmask.ToUint32(std::span{&shortidmask_raw, 1});
         result.sketchmask.ToUint32(std::span{&sketchmask_raw, 1});
-        LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=%d template=%s shortidmask=0x%08x sketchmask=0x%08x peer=%d",
-                 round + 1, result.hash.ToString(), shortidmask_raw, sketchmask_raw, node.GetId());
+        LogDebug(BCLog::GETTMPLT, "Sending gettmplt round=%d template=%s basis_id=%d shortidmask=0x%08x sketchmask=0x%08x peer=%d",
+                 round + 1, result.hash.ToString(), basis_id, shortidmask_raw, sketchmask_raw, node.GetId());
         MakeAndPushMessage(node, NetMsgType::GETTMPLT, static_cast<uint8_t>(round + 1),
-                           result.hash, shortidmask_raw, sketchmask_raw);
+                           result.hash, basis_id, shortidmask_raw, sketchmask_raw);
         return;
     }
     case NeedsTxs:
@@ -5877,13 +5879,13 @@ void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
         auto round0_sketches = ltd.tmpl->GetSketches(0);
         std::vector<node::LocalTemplate::Sketch> sketches_to_send(round0_sketches.begin(), round0_sketches.end());
 
-        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s delta=%d bytes sketches=%d peer=%d",
-                 ltd.tmpl->m_hash.ToString(), ltd.basis_hash.ToString(), delta.encoded_elements.size(), sketches_to_send.size(), node.GetId());
+        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes sketches=%d peer=%d",
+                 ltd.tmpl->m_hash.ToString(), ltd.basis_hash.ToString(), ltd.basis_id, delta.encoded_elements.size(), sketches_to_send.size(), node.GetId());
 
         MakeAndPushMessage(node, NetMsgType::TMPLT,
-                           ltd.tmpl->m_hash, uint8_t{0},
+                           uint8_t{0}, ltd.tmpl->m_hash,
                            tip_hash, ltd.tmpl->m_nonce,
-                           ltd.basis_hash, delta,
+                           ltd.basis_hash, ltd.basis_id, delta,
                            sketches_to_send);
     }
 }

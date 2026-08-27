@@ -75,7 +75,7 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
     for (int round = 1; round <= 4; ++round) {
         GRVector shortid_bytes;
         if (round == 4) {
-            shortid_bytes = provider.GetShortIDBytes(4, GroupMask::Fill(TOTAL_BUCKETS));
+            shortid_bytes = provider.GetShortIDBytes(4, 0, GroupMask::Fill(TOTAL_BUCKETS));
         }
         auto [res, shortidmask, sketchmask] = sketch.Process(
             round, GroupMask::Fill(TOTAL_BUCKETS), GroupMask::Fill(TOTAL_BUCKETS), shortid_bytes, provider.GetSketches(round));
@@ -121,7 +121,7 @@ BOOST_AUTO_TEST_CASE(sketch_shortid_early_round1)
     BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
 
     // Send shortid bytes at round 1 (combined-level outer shortids) before any PrepareRound.
-    auto shortid_bytes = provider.GetShortIDBytes(1, GroupMask::Fill(TOTAL_BUCKETS));
+    auto shortid_bytes = provider.GetShortIDBytes(1, 0, GroupMask::Fill(TOTAL_BUCKETS));
     auto [res, shortidmask, sketchmask] = sketch.Process(1, GroupMask::Fill(TOTAL_BUCKETS), GroupMask::Fill(TOTAL_BUCKETS), shortid_bytes, provider.GetSketches(1));
     BOOST_REQUIRE(res);
 
@@ -315,7 +315,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_shortid_and_sketch)
     GroupMask shortidmask;
     shortidmask.Set(0);
     shortidmask.Set(1);
-    auto shortid_bytes = provider.GetShortIDBytes(1, shortidmask);
+    auto shortid_bytes = provider.GetShortIDBytes(1, 0, shortidmask);
 
     // Process(1): groups 0,1 resolve via ProcessShortidFallback;
     // groups 2,3 resolve via sketch decode after PrepareRound(1).
