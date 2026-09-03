@@ -63,13 +63,13 @@ const char* TemplateATMPResultString(TemplateATMPResult result)
     assert(false);
 }
 
-static PresaltedSipHasher MakeShortIDHasher(const uint256& template_hash, uint64_t nonce)
+static SipHasher13UJ MakeShortIDHasher(const uint256& tip_hash, uint64_t nonce)
 {
     DataStream ds{};
-    ds << template_hash << nonce;
+    ds << tip_hash << nonce;
     uint256 key;
     CSHA256{}.Write(MakeUCharSpan(ds)).Finalize(key.begin());
-    return PresaltedSipHasher{key.GetUint64(0), key.GetUint64(1)};
+    return SipHasher13UJ{key.GetUint64(0), key.GetUint64(1)};
 }
 
 ShortIDHasher::ShortIDHasher(const uint256& tip_hash, uint64_t nonce)
@@ -77,7 +77,7 @@ ShortIDHasher::ShortIDHasher(const uint256& tip_hash, uint64_t nonce)
 
 uint64_t ShortIDHasher::GetShortID(const Wtxid& wtxid) const
 {
-    uint64_t h{m_hasher(wtxid.ToUint256())};
+    uint64_t h{m_hasher.Hash(wtxid.ToUint256())};
 
     // This function gives a 46-bit value that's never 0:
     // (h >> 18) gives a 46-bit value;
