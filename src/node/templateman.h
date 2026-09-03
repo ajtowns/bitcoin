@@ -179,7 +179,7 @@ public:
  *  Initialized from (tip_hash, nonce), reused across all lookups. */
 class ShortIDHasher
 {
-    PresaltedSipHasher m_hasher;
+    SipHasher13UJ m_hasher;
 
 public:
     ShortIDHasher(const uint256& tip_hash, uint64_t nonce);

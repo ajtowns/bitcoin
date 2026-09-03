@@ -142,9 +142,16 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     GroupMask sketchmask  = GroupMask::Fill(TOTAL_BUCKETS);
     for (int round = 1; round <= 4 && !resolved; ++round) {
         auto shortid_bytes = provider.GetShortIDBytes(round, 0, shortidmask);
+        std::vector<LocalTemplate::Sketch> filtered_sketches;
+        if (round < 4) {
+            auto all_sketches = provider.GetSketches(round);
+            for (int i : sketchmask) {
+                if (static_cast<size_t>(i) < all_sketches.size()) filtered_sketches.push_back(all_sketches[i]);
+            }
+        }
         auto [res, new_shortidmask, new_sketchmask] = sketch.Process(
             round, shortidmask, sketchmask,
-            shortid_bytes, provider.GetSketches(round));
+            shortid_bytes, filtered_sketches);
         resolved = res;
         shortidmask = new_shortidmask;
         sketchmask  = new_sketchmask;
