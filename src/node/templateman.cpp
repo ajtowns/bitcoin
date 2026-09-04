@@ -461,7 +461,7 @@ GRVector TemplateTxnsSelection::GREncode() const
     size_t n = Count();
     if (n == 0) return {};
 
-    uint8_t P = static_cast<uint8_t>(std::bit_width(m_positions.size() * CHUNK_SIZE / n) - 1);
+    uint8_t P = static_cast<uint8_t>(std::bit_width(std::max<size_t>(1, m_positions.size() * CHUNK_SIZE / n - 1)) - 1);
     uint64_t pos = 0;
     size_t chunk_idx = 0;
     auto chunk_it = m_positions[chunk_idx].begin();
@@ -472,8 +472,8 @@ GRVector TemplateTxnsSelection::GREncode() const
             if (chunk_idx < m_positions.size()) chunk_it = m_positions[chunk_idx].begin();
         }
         if (chunk_idx < m_positions.size()) {
-            uint64_t old = pos;
-            pos = chunk_idx * CHUNK_SIZE + *chunk_it;
+            uint64_t old = pos + 1;
+            pos = chunk_idx * CHUNK_SIZE + *chunk_it + 1;
             ++chunk_it;
             return pos - old;
         } else {
@@ -489,8 +489,9 @@ void TemplateTxnsSelection::GRDecode(const GRVector& grenc)
     uint64_t pos = 0;
     GRVectorDecode(grenc, [&](uint64_t delta) {
         pos += delta;
-        if (pos > MAX_TEMPLATE_TXS) throw std::ios_base::failure("GRDecode: position out of range");
+        if (std::max(pos, delta) >= MAX_TEMPLATE_TXS) throw std::ios_base::failure("GRDecode: position out of range");
         Add(static_cast<uint32_t>(pos));
+        ++pos;
     });
 }
 
