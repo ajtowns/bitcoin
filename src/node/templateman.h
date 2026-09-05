@@ -199,12 +199,10 @@ public:
     /** A serialized sketch in wire format. */
     struct Sketch {
         uint32_t elements;              //!< number of elements in this sketch
-        std::vector<unsigned char> ser; //!< serialized sketch bytes
+        std::array<unsigned char, SKETCH_SER_SIZE> ser; //!< serialized sketch bytes
 
         SERIALIZE_METHODS(Sketch, obj) {
-            SER_WRITE(obj, Assume(obj.ser.size() == SKETCH_SER_SIZE));
-            READWRITE(obj.elements, LIMITED_VECTOR(obj.ser, SKETCH_SER_SIZE));
-            SER_READ(obj, if (obj.ser.size() != SKETCH_SER_SIZE) throw std::ios_base::failure("Invalid sketch size"));
+            READWRITE(obj.elements, obj.ser);
         }
     };
 
