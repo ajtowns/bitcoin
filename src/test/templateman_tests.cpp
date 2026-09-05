@@ -27,6 +27,9 @@ static LocalTemplate MakeProvider(std::vector<uint64_t> sids)
     LocalTemplate tmpl;
     std::sort(sids.begin(), sids.end());
     tmpl.shortids = std::move(sids);
+    for (auto sid : tmpl.shortids) {
+        ++tmpl.bucket_count[sid % 32];
+    }
     tmpl.GenerateSketches();
     return tmpl;
 }

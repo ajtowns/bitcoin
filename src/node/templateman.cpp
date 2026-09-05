@@ -121,6 +121,7 @@ const LocalTemplate::BasisInfo* TemplateManager::GetBasisInfo(LocalTemplate& bes
     if (!basis) return nullptr;
 
     std::vector<bool> in_basis;
+    std::array<size_t, TOTAL_BUCKETS> bucket_count = best.bucket_count;
     in_basis.resize(best.m_txs.size());
 
     // Build pointer set of txs in this template for O(1) lookup.
@@ -139,10 +140,11 @@ const LocalTemplate::BasisInfo* TemplateManager::GetBasisInfo(LocalTemplate& bes
         if (auto b_it = retained_map.find(basis->m_txs[i]->tx.get()); b_it != retained_map.end()) {
             sel.Add(i);
             in_basis[b_it->second] = true;
+            --bucket_count[best.shortids[b_it->second] % TOTAL_BUCKETS];
             ++in_common;
         }
     }
-    best.m_basisinfo.emplace_back(1 + best.m_basisinfo.size(), in_common, basis_hash, sel.GREncode(), std::move(in_basis));
+    best.m_basisinfo.emplace_back(1 + best.m_basisinfo.size(), in_common, basis_hash, sel.GREncode(), std::move(in_basis), std::move(bucket_count));
     return &best.m_basisinfo.back();
 }
 
@@ -175,6 +177,16 @@ void GRVectorDecode(const GRVector& gr, Fn&& fn)
     }
 }
 
+static std::array<int, TOTAL_BUCKETS> GetGroupCounts(const LocalTemplate& tmpl, const LocalTemplate::BasisInfo* basisinfo, int groups)
+{
+    auto& bucket_count = (basisinfo != nullptr ? basisinfo->bucket_count : tmpl.bucket_count);
+    std::array<int, TOTAL_BUCKETS> res{0};
+    for (int i = 0; i < TOTAL_BUCKETS; ++i) {
+        res[i & (groups - 1)] += bucket_count[i];
+    }
+    return res;
+}
+
 GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const
 {
     // At round R (1-4) the group index is the low (R+1) bits of the shortid (and bucket index).
@@ -191,23 +203,24 @@ GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask m
     //  * This is reduced (uniformly) by the number of groups excluded
     //  * This is reduced (still uniformly) by the number of txs in
     //    common with the basis
-    //  * It's not meaningfully affected by skipping the first 64 txs
-    //    per group, because that's not a uniform difference.
+    //  * It's not affected by skipping the last 64 txs per group.
     const size_t n_needed = shortids.size() - (basisinfo ? basisinfo->common_tx_count : 0);
-    const size_t total_groups_at_round = 4 << (round - 1);
-    const size_t n_estimate = n_needed / total_groups_at_round * mask.Count();
+    const size_t total_groups = 4 << (round - 1);
+    const size_t n_estimate = n_needed / total_groups * mask.Count();
+
     uint8_t P = static_cast<uint8_t>(std::max(0, 46 - (int)std::bit_width(n_estimate)));
 
     auto it = shortids.begin();
     uint64_t last = 1;
     size_t cnt = 0;
-    std::array<int, TOTAL_BUCKETS> group_count{};
+    std::array<int, TOTAL_BUCKETS> group_count = GetGroupCounts(*this, basisinfo, total_groups);
     return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
         while (it != shortids.end()) {
             uint64_t sid{*it++};
             if (basisinfo && basisinfo->in_basis[cnt++]) continue;
-            int b = sid & ((4 << (round - 1)) - 1);
-            if (mask[b] && ++group_count[b] > SKETCH_CAPACITY) {
+            int b = sid & (total_groups - 1);
+            if (mask[b] && group_count[b] > SKETCH_CAPACITY) {
+                --group_count[b];
                 sid -= last;
                 last += sid + 1;
                 return sid;
@@ -395,6 +408,7 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
         }
         dup_check = sid;
         tmpl.shortids.push_back(sid);
+        ++tmpl.bucket_count[sid % TOTAL_BUCKETS];
         tmpl.m_txs.values.push_back(ref);
     }
     pairs.clear(); // references have been taken over by `m_txs` or dropped
