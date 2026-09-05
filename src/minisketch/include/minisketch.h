@@ -32,6 +32,9 @@
 #    include <cassert>
 #    if __cplusplus >= 201703L
 #      include <optional>
+#      if __cplusplus >= 202002L
+#        include <span>
+#      endif // __cplusplus >= 202002L
 #    endif // __cplusplus >= 201703L
 #  endif // __cplusplus >= 201103L
 extern "C" {
@@ -327,6 +330,15 @@ public:
         minisketch_serialize(m_minisketch.get(), result.data());
         return result;
     }
+
+#if __cplusplus >= 202002L
+    /** Serialize this (valid) Minisketch object to a provided byte span. */
+    void SerializeTo(std::span<unsigned char> result) const
+    {
+        assert(GetSerializedSize() == result.size());
+        minisketch_serialize(m_minisketch.get(), result.data());
+    }
+#endif // __cplusplus >= 202002L
 
     /** Deserialize into this (valid) Minisketch from an object containing its bytes (which has data()
      *  and size() members). */
