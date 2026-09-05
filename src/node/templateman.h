@@ -218,6 +218,9 @@ public:
     /** All short IDs; in parallel order to m_txs */
     std::vector<uint64_t> shortids;
 
+    /** How many txs in each bucket are in the template */
+    std::array<size_t, TOTAL_BUCKETS> bucket_count{};
+
     /** Compute and store all sketch levels from shortids. Call after shortids is populated. */
     void GenerateSketches();
 
@@ -232,8 +235,8 @@ public:
     }
 
     /** GR-encode shortids for wire: for each group in mask, skip any
-     *  shortids in the specified basis, then also skip the first
-     *  SKETCH_CAPACITY shortids (covered by sketch) and encode the rest.
+     *  shortids in the specified basis, then also skip the last
+     *  SKETCH_CAPACITY shortids per group (covered by sketch) after encoding the rest.
      *  At round R (1-4), the group index is the low (R+1) bits of the bucket index.
      */
     GRVector GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const;
@@ -245,6 +248,7 @@ public:
         uint256 basis_hash;
         GRVector delta; // Retained-tx positions from a basis template to a new template, Golomb-Rice encoded
         std::vector<bool> in_basis; // whether txs in this template were in the basis
+        std::array<size_t, TOTAL_BUCKETS> bucket_count; // How many txs in each bucket are in the template but not the basis
     };
     std::vector<BasisInfo> m_basisinfo;
 
