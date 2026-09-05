@@ -252,7 +252,7 @@ void LocalTemplate::GenerateSketches()
     // slots 0..3 = stride-4 groups (round 0)
 
     for (int i = 0; i < TOTAL_BUCKETS; ++i) {
-        sketches[i].ser = ms[i].Serialize();
+        ms[i].SerializeTo(sketches[i].ser);
         sketches[i].elements = count[i];
     }
 }
