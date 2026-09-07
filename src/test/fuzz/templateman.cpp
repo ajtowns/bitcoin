@@ -134,7 +134,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
 
     TestPeerTemplateSketch sketch{pool};
     auto [resolved, _sid, _sk] = sketch.Init(std::move(txs), std::move(sids), basis_count,
-                                             provider.GetSketches(0));
+                                             provider.GetSketches(0), {}, {});
 
     // Use the masks returned by each Process() call for the next round's requests,
     // matching the real protocol flow and exercising the mask-filtering code paths.
@@ -299,7 +299,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 const LocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx]);
                 if (!tmpl) return;
                 auto result = mgr.InitPeerSketch(peer, nullptr, tmpl->m_hash,
-                                   tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), now());
+                                   tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), {}, {}, now());
                 handle_result(peer, 0, result);
             },
             [&]() {
