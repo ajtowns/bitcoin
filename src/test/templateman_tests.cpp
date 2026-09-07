@@ -70,7 +70,7 @@ static void sketch_range(uint64_t prov_lo, uint64_t prov_hi,
         BOOST_TEST_CHECKPOINT( "Inside reconstruct(round=" << round << ")");
     };
 
-    if (sketch.Init(std::move(txs), std::move(sids), basis_count, provider.GetSketches(0)).resolved) {
+    if (sketch.Init(std::move(txs), std::move(sids), basis_count, provider.GetSketches(0), {}, {}).resolved) {
         reconstruct(0);
         return;
     }
@@ -121,7 +121,7 @@ BOOST_AUTO_TEST_CASE(sketch_shortid_early_round1)
     TemplateTxSet pool;
     TestPeerTemplateSketch sketch{pool};
 
-    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0), {}, {}).resolved);
 
     // Send shortid bytes at round 1 (combined-level outer shortids) before any PrepareRound.
     auto shortid_bytes = provider.GetShortIDBytes(1, 0, GroupMask::Fill(TOTAL_BUCKETS));
@@ -204,7 +204,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_decode_mask)
     // Round 0 should fail: per stride-4 group diff = 72 > 64 (SKETCH_CAPACITY).
     // Each stride-4 group has 4 even buckets (diff 9 each = 36) + 4 odd buckets (diff 9 each = 36) = 72.
     auto init_result = sketch.Init(std::move(txs), std::move(sids), basis_count,
-                                    provider.GetSketches(0));
+                                    provider.GetSketches(0), {}, {});
     BOOST_REQUIRE(!init_result.resolved);
 
     // Round 1 should resolve: each stride-8 group has diff 36 ≤ 64.
@@ -260,7 +260,7 @@ BOOST_AUTO_TEST_CASE(sketch_selective_masks)
 
     TemplateTxSet pool;
     TestPeerTemplateSketch sketch{pool};
-    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0), {}, {}).resolved);
 
     // Round 1: stride-8 even groups resolve, odd don't.
     auto [res1, shortidmask1, sketchmask1] = sketch.Process(
@@ -312,7 +312,7 @@ BOOST_AUTO_TEST_CASE(sketch_mixed_shortid_and_sketch)
 
     TemplateTxSet pool;
     TestPeerTemplateSketch sketch{pool};
-    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0)).resolved);
+    BOOST_REQUIRE(!sketch.Init({}, {}, 0, provider.GetSketches(0), {}, {}).resolved);
 
     // Request outer shortids only for the large groups (0,1); sketches for all.
     GroupMask shortidmask;

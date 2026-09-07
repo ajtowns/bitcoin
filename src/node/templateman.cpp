@@ -189,10 +189,11 @@ static std::array<int, TOTAL_BUCKETS> GetGroupCounts(const LocalTemplate& tmpl, 
 
 GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const
 {
-    // At round R (1-4) the group index is the low (R+1) bits of the shortid (and bucket index).
-    // Skip the first SKETCH_CAPACITY shortids per group (covered by sketch); encode the rest.
-    // Shortids are globally sorted, so the filtered list is also sorted.
-    mask.LimitToRound(round);
+    if (round == 0) {
+        mask.LimitToRound(1);
+    } else {
+        mask.LimitToRound(round);
+    }
     if (mask.None()) return {};
 
     const BasisInfo* basisinfo = GetBasisInfo(basis_id);
@@ -205,7 +206,7 @@ GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask m
     //    common with the basis
     //  * It's not affected by skipping the last 64 txs per group.
     const size_t n_needed = shortids.size() - (basisinfo ? basisinfo->common_tx_count : 0);
-    const size_t total_groups = 4 << (round - 1);
+    const size_t total_groups = (round == 0 ? 4 : 2 << round);
     const size_t n_estimate = n_needed / total_groups * mask.Count();
 
     uint8_t P = static_cast<uint8_t>(std::max(0, 46 - (int)std::bit_width(n_estimate)));
@@ -214,12 +215,18 @@ GRVector LocalTemplate::GetShortIDBytes(int round, uint8_t basis_id, GroupMask m
     uint64_t last = 1;
     size_t cnt = 0;
     std::array<int, TOTAL_BUCKETS> group_count = GetGroupCounts(*this, basisinfo, total_groups);
+    if (round > 0) {
+        // skip SKETCH_CAPACITY entries
+        for (auto& gc : group_count) {
+            gc = std::max(gc, SKETCH_CAPACITY) - SKETCH_CAPACITY;
+        }
+    }
     return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
         while (it != shortids.end()) {
             uint64_t sid{*it++};
             if (basisinfo && basisinfo->in_basis[cnt++]) continue;
             int b = sid & (total_groups - 1);
-            if (mask[b] && group_count[b] > SKETCH_CAPACITY) {
+            if (mask[b] && group_count[b] > 0) {
                 --group_count[b];
                 sid -= last;
                 last += sid + 1;
@@ -427,17 +434,13 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
 
 TemplateManager::LocalTemplateAndDelta TemplateManager::GetRequestedTemplate(const Req& req)
 {
-    if (m_templates.empty()) return {nullptr};
+    if (m_templates.empty()) return {};
 
     LocalTemplate& best = m_templates.back();
-    if (best.m_time <= req.request_time) return {nullptr};
+    if (best.m_time <= req.request_time) return {};
 
     const LocalTemplate::BasisInfo* basisinfo = GetBasisInfo(best, req.basis_hash);
-    if (basisinfo) {
-        return {&best, req.basis_hash, basisinfo->basis_id, &basisinfo->delta};
-    } else {
-        return {&best};
-    }
+    return {&best, basisinfo};
 }
 
 void TemplateTxnsSelection::Add(uint32_t p)
@@ -604,23 +607,13 @@ struct PeerTemplateSketch::Sketches {
     void ProviderDeser(int round, GroupMask mask, std::span<const LocalTemplate::Sketch> sketches)
     {
         size_t sketch_idx = 0;
-        if (round == 0) {
-            // Round 0: store 4 sketches into slots 0..3 (mask unused)
-            for (int gi = 0; gi < TOTAL_BUCKETS / 8 && sketch_idx < sketches.size(); ++gi) {
-                const auto& s = sketches[sketch_idx++];
-                m_provider_sketches[gi].sketch.Deserialize(s.ser);
-                m_provider_sketches[gi].count = s.elements;
-            }
-        } else {
-            // Round 1..3: for each set bit gi in mask, store into slot n+gi
-            // where n = 4 << (round-1) (the new "odd child" slots for this round)
-            int n = 4 << (round - 1);
-            for (int gi = 0; gi < n && sketch_idx < sketches.size(); ++gi) {
-                if (!mask[gi]) continue;
-                const auto& s = sketches[sketch_idx++];
-                m_provider_sketches[n + gi].sketch.Deserialize(s.ser);
-                m_provider_sketches[n + gi].count = s.elements;
-            }
+        int n = (round == 0 ? 4 : (2 << round));
+        int offset = (round == 0 ? 0 : n);
+        for (int gi = 0; gi < n && sketch_idx < sketches.size(); ++gi) {
+            if (!mask[gi]) continue;
+            const auto& s = sketches[sketch_idx++];
+            m_provider_sketches[offset + gi].sketch.Deserialize(s.ser);
+            m_provider_sketches[offset + gi].count = s.elements;
         }
     }
 
@@ -707,7 +700,8 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
     TemplateTxVec&& txs,
     std::vector<uint64_t>&& shortids,
     size_t basis_count,
-    std::span<const LocalTemplate::Sketch> combined_sketches) noexcept
+    std::span<const LocalTemplate::Sketch> combined_sketches,
+    GroupMask shortidmask, const GRVector& shortid_bytes)
 {
     m_txs = std::move(txs);
     m_shortids = std::move(shortids);
@@ -717,24 +711,34 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
     m_sketches = std::make_unique<Sketches>();
     auto& sk = *m_sketches;
     for (size_t i = 0; i < m_basis_count; ++i) {
-        sk.m_basis_sketches[m_shortids[i] & (TOTAL_BUCKETS - 1)].Add(m_shortids[i]);
+        int bucket = m_shortids[i] & (TOTAL_BUCKETS - 1);
+        if (shortidmask[bucket % 4]) continue;
+        sk.m_basis_sketches[bucket].Add(m_shortids[i]);
     }
     for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
-        sk.m_local_sketches[m_shortids[i] & (TOTAL_BUCKETS - 1)].Add(m_shortids[i]);
+        int bucket = m_shortids[i] & (TOTAL_BUCKETS - 1);
+        if (shortidmask[bucket % 4]) continue;
+        sk.m_local_sketches[bucket].Add(m_shortids[i]);
     }
     if (m_basis_count > 0) {
         // Pre-merge basis into local so m_local_sketches holds basis+local;
         // TryDecodeGroups can then use it directly without an extra Merge().
         for (int b = 0; b < TOTAL_BUCKETS; ++b) {
+            if (shortidmask[b % 4]) continue;
             sk.m_local_sketches[b].sketch.Merge(sk.m_basis_sketches[b].sketch);
             sk.m_local_sketches[b].count += sk.m_basis_sketches[b].count;
         }
     }
     sk.InitialMerge();
 
+    const GroupMask sketchmask{GroupMask::Fill(4) ^ shortidmask};
     // Store provider's 4 combined sketches (round 0) into slots 0..3
-    sk.ProviderDeser(0, GroupMask{}, combined_sketches);
+    sk.ProviderDeser(0, sketchmask, combined_sketches);
     m_sketch_level = 0;
+
+    if (shortidmask.Any()) {
+        ProcessShortidFallback(shortid_bytes, shortidmask); // can throw
+    }
 
     bool resolved = TryDecodeGroups();
     if (resolved) {
@@ -758,8 +762,8 @@ PeerTemplateSketch::ProcessResult PeerTemplateSketch::Init(
 void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
                                                 GroupMask shortidmask)
 {
-    // At the start of round r, m_sketch_level = r-1 and sketches are at that granularity.
-    // num_groups = 4 << m_sketch_level; group index = low bits of bucket index.
+    // For round 0, we call this with m_sketch_level = 0; for round 1..4,
+    // m_sketch_level = r-1 and sketches are at that granularity.
     const int num_groups = 4 << m_sketch_level;
 
     // Parse the provider's outer shortids (positions SKETCH_CAPACITY+1 per sketch group) into per-group lists.
@@ -797,6 +801,15 @@ void PeerTemplateSketch::ProcessShortidFallback(const GRVector& shortid_bytes,
         if (!shortidmask[gi] || resolved[gi]) continue;
 
         auto& recv = received[gi];
+        if (sk.m_provider_sketches[gi].count == 0) {
+            // shortids instead of sketch in round 0
+            for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
+            for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+                m_bucket_resolved.Set(b);
+                m_has_provided.Set(b);
+            }
+            continue;
+        }
 
         // recv XOR provider XOR basis => inner shortids. Only attempt the
         // decode when the counts say the inner set fits: Decode() on an
@@ -1181,6 +1194,7 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     uint64_t nonce, uint256 basis_hash,
     const GRVector& basis_delta,
     std::span<const LocalTemplate::Sketch> sketches,
+    GroupMask shortidmask, const GRVector& shortid_bytes,
     NodeClock::time_point now)
 {
     // Must be in monostate (awaiting round-0 response).
@@ -1192,6 +1206,9 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     };
 
     if (!is_mono) return failure(TmpltState::Reset);
+
+    shortidmask.LimitToRound(1);
+    if (shortidmask.Count() + sketches.size() != 4) return failure(TmpltState::ProtocolError);
 
     const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
     ShortIDHasher hasher(tip_hash, nonce);
@@ -1255,10 +1272,14 @@ TemplateManager::TmpltResult TemplateManager::InitPeerSketch(
     sketch.m_tip = tip;
     sketch.m_nonce = nonce;
 
-    PeerTemplateSketch::ProcessResult pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches);
-
-    auto rec_it = SetPeerReconcile(it, std::move(sketch));
-    return CompleteSketchRound(rec_it, pr, now);
+    try {
+        PeerTemplateSketch::ProcessResult pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches, shortidmask, shortid_bytes);
+        auto rec_it = SetPeerReconcile(it, std::move(sketch));
+        return CompleteSketchRound(rec_it, pr, now);
+    } catch (...) {
+        RemoveTxs(std::move(sketch.m_txs)); // cleanup any leftover txs before destruction
+        return failure(TmpltState::ProtocolError); // shortid_bytes decode failure
+    }
 }
 
 TemplateManager::TmpltResult TemplateManager::UpdatePeerSketch(

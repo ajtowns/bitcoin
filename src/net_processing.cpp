@@ -4580,9 +4580,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
             LOCK(m_template_mutex);
 
-            // XXX should be handling shortid_mask and shortids.
             auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
                                                        basis_hash, basis_delta, sketches,
+                                                       shortidmask, shortid_bytes,
                                                        NodeClock::now());
             ProcessTemplateSketchUpdate(pfrom, peer, 0, basis_id, result);
         } else if (round <= 4) {
@@ -5897,19 +5897,39 @@ void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
         peer.m_tmplt_request = std::monostate{};
 
         const uint256& tip_hash = ltd.tmpl->m_tip ? ltd.tmpl->m_tip->GetBlockHash() : uint256::ZERO;
-        const node::GRVector& delta = ltd.basis_delta ? *ltd.basis_delta : node::GRVector{};
+        const uint256& basis_hash = ltd.basisinfo ? ltd.basisinfo->basis_hash : uint256::ZERO;
+        const node::GRVector& delta = ltd.basisinfo ? ltd.basisinfo->delta : node::GRVector{};
+        const uint8_t basis_id = ltd.basisinfo ? ltd.basisinfo->basis_id : 0;
         auto round0_sketches = ltd.tmpl->GetSketches(0);
-        std::vector<node::LocalTemplate::Sketch> sketches_to_send(round0_sketches.begin(), round0_sketches.end());
+        std::vector<node::LocalTemplate::Sketch> sketches_to_send;
+        node::GroupMask shortidmask;
+        for (int i = 0; i < 4; ++i) {
+            size_t n{round0_sketches[i].elements};
+            if (ltd.basisinfo) {
+                n = 0;
+                for (int j = i; j < node::TOTAL_BUCKETS; j += 4) {
+                    n += ltd.basisinfo->bucket_count[j];
+                }
+            }
+            if (n <= 75) {
+                shortidmask.Set(i);
+            } else {
+                sketches_to_send.emplace_back(round0_sketches[i]);
+            }
+        }
+        uint8_t shortidmask_raw{0};
+        shortidmask.ToUints(std::span(&shortidmask_raw, 1));
+
+        auto shortids = ltd.tmpl->GetShortIDBytes(0, basis_id, shortidmask);
 
         LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes sketches=%d peer=%d",
-                 ltd.tmpl->m_hash.ToString(), ltd.basis_hash.ToString(), ltd.basis_id, delta.encoded_elements.size(), sketches_to_send.size(), node.GetId());
+                 ltd.tmpl->m_hash.ToString(), basis_hash.ToString(), basis_id, delta.encoded_elements.size(), sketches_to_send.size(), node.GetId());
 
-        // XXX shortid_mask, shortids at end
         MakeAndPushMessage(node, NetMsgType::TMPLT,
                            uint8_t{0}, ltd.tmpl->m_hash,
                            tip_hash, ltd.tmpl->m_nonce,
-                           ltd.basis_hash, ltd.basis_id, delta,
-                           sketches_to_send);
+                           basis_hash, basis_id, delta,
+                           sketches_to_send, shortidmask_raw, shortids);
     }
 }
 

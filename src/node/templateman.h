@@ -56,8 +56,8 @@ public:
     GroupMask() = default;
     GroupMask(const BitSet<TOTAL_BUCKETS>& bs) : BitSet<TOTAL_BUCKETS>{bs} { }
 
-    /** Restrict to the valid group indices for wire rounds 1-4 (bits 0..4<<(round-1)-1). */
-    void LimitToRound(int round) { *this &= BitSet<TOTAL_BUCKETS>::Fill(4 << (round - 1)); }
+    /** Restrict to the valid group indices for wire rounds 1-4 (bits 0..((2<<round)-1)). */
+    void LimitToRound(int round) { *this &= BitSet<TOTAL_BUCKETS>::Fill(2 << round); }
 };
 
 /** How long to keep local templates before expiry. */
@@ -230,14 +230,16 @@ public:
     std::span<const Sketch> GetSketches(int round) const
     {
         if (round < 0 || round > 3) return {};
-        int count = 4 << (round ? round - 1 : 0);
+        int count = (round > 0 ? 2 << round : 4);
         return std::span{sketches}.subspan(round ? count : 0, count);
     }
 
-    /** GR-encode shortids for wire: for each group in mask, skip any
-     *  shortids in the specified basis, then also skip the last
-     *  SKETCH_CAPACITY shortids per group (covered by sketch) after encoding the rest.
-     *  At round R (1-4), the group index is the low (R+1) bits of the bucket index.
+    /** GR-encode shortids for wire. For each group in mask, skip any
+     *  shortids in the specified basis. At round 0, the group index
+     *  is the low 2 bits of the bucket index; at round R (1-4), the
+     *  group index is the low (R+1) bits of the bucket index, and we
+     *  also skip the last SKETCH_CAPACITY shortids per group (covered
+     *  by previous sketches) after encoding the rest.
      */
     GRVector GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const;
 
@@ -441,7 +443,8 @@ public:
     ProcessResult Init(TemplateTxVec&& txs,
                        std::vector<uint64_t>&& shortids,
                        size_t basis_count,
-                       std::span<const LocalTemplate::Sketch> combined_sketches) noexcept;
+                       std::span<const LocalTemplate::Sketch> combined_sketches,
+                       GroupMask shortidmask, const GRVector& shortid_bytes);
 
     /** Process incoming data for rounds 1-4.
      *  shortidmask_sent: the shortidmask field from the gettmplt we sent (groups we requested shortids for).
@@ -633,12 +636,8 @@ public:
 
     struct LocalTemplateAndDelta
     {
-        const LocalTemplate* tmpl; // nullptr if no local templates available
-
-        // default values for if no basis matched
-        uint256 basis_hash{uint256::ZERO};
-        uint8_t basis_id{0};
-        const GRVector* basis_delta{nullptr};
+        const LocalTemplate* tmpl{nullptr}; // nullptr if no local templates available
+        const LocalTemplate::BasisInfo* basisinfo{nullptr}; // nullptr if no basis available
     };
 
     /** Request parameters for GetRequestedTemplate. */
@@ -678,6 +677,7 @@ public:
                                uint64_t nonce, uint256 basis_hash,
                                const GRVector& basis_delta,
                                std::span<const LocalTemplate::Sketch> sketches,
+                               GroupMask shortidmask, const GRVector& shortid_bytes,
                                NodeClock::time_point now);
 
     /** Feed round 1-4 data into an existing peer sketch.
