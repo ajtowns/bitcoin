@@ -273,7 +273,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 auto txs = pick_txs();
                 if (txs.empty()) return;
                 std::span<CTransactionRef> txspan{txs};
-                uint256 hash = mgr.GenerateTemplate(now(), nullptr, txspan);
+                uint256 hash = mgr.GenerateTemplate(now(), 0, nullptr, txspan);
                 generated_hashes.push_back(hash);
                 if (generated_hashes.size() > 20) {
                     generated_hashes.erase(generated_hashes.begin());
@@ -296,7 +296,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 mgr.WaitingForPeerSketch(peer);
                 peer_sketch_state.erase(peer);
                 size_t idx = fdp.ConsumeIntegralInRange<size_t>(0, generated_hashes.size() - 1);
-                const LocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx]);
+                const LocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx], 0);
                 if (!tmpl) return;
                 auto result = mgr.InitPeerSketch(peer, nullptr, tmpl->m_hash,
                                    tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), {}, {}, now());
@@ -309,7 +309,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 if (ps_it == peer_sketch_state.end()) return;
                 auto& ps = ps_it->second;
                 if (ps.round >= 4) return;
-                const LocalTemplate* tmpl = mgr.GetLocalTemplate(ps.hash);
+                const LocalTemplate* tmpl = mgr.GetLocalTemplate(ps.hash, 0);
                 if (!tmpl) { peer_sketch_state.erase(ps_it); return; }
                 int round = ps.round + 1;
 

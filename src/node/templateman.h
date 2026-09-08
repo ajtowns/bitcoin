@@ -60,6 +60,9 @@ public:
     void LimitToRound(int round) { *this &= BitSet<TOTAL_BUCKETS>::Fill(2 << round); }
 };
 
+/** Network identifier type */
+using NetworkId = uint32_t;
+
 /** How long to keep local templates before expiry. */
 static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
@@ -195,6 +198,7 @@ public:
 
     NodeClock::time_point m_time; //!< generation time
     uint64_t m_nonce;             //!< template-level nonce
+    NetworkId m_network_id;        //!< network id for this template
 
     /** A serialized sketch in wire format. */
     struct Sketch {
@@ -505,7 +509,6 @@ struct TemplateInfo {
     size_t latest_tx_count{0};
     int64_t latest_weight{0};
     std::chrono::seconds generate_interval{};
-    NodeClock::time_point next_update{};
     size_t peer_templates{0};
     std::map<int, std::vector<NodeId>> pending_peer_templates; //!< round (0=waiting, 1-4=sketch, 5=partial) -> nodeids
 };
@@ -556,7 +559,7 @@ private:
     std::deque<LocalTemplate> m_templates;
 
     /** Next time to attempt template generation; min() triggers immediately. */
-    NodeClock::time_point m_next_gen{NodeClock::time_point::min()};
+    std::unordered_map<NetworkId, NodeClock::time_point> m_next_gen;
 
     /** Per-peer reconciliation state.
      *  monostate = gettmplt n=0 sent, awaiting tmplt n=0.
@@ -618,21 +621,21 @@ private:
 public:
     /** Check if it's time to generate a template. Updates the timer if so.
      *  Returns nullopt if not yet time, true if first template, false otherwise. */
-    std::optional<bool> ShouldGenerate(NodeClock::time_point now);
+    std::optional<bool> ShouldGenerate(NodeClock::time_point now, NetworkId network_id);
 
     /**
      * Generate a new template from block transactions (sans coinbase).
      * Assigns a random nonce, computes template hash, sorts m_txs by shortid,
      * and adds txs to the shared pool. Returns template hash.
      */
-    uint256 GenerateTemplate(NodeClock::time_point now,
+    uint256 GenerateTemplate(NodeClock::time_point now, NetworkId network_id,
                              const CBlockIndex* tip, std::span<CTransactionRef> txs);
 
     /** Trim expired local and peer templates. */
     void TrimTemplates(NodeClock::time_point now);
 
     /** Look up a template by its hash. */
-    const LocalTemplate* GetLocalTemplate(const uint256& hash) const;
+    const LocalTemplate* GetLocalTemplate(const uint256& hash, NetworkId network_id) const;
 
     struct LocalTemplateAndDelta
     {
@@ -643,6 +646,7 @@ public:
     /** Request parameters for GetRequestedTemplate. */
     struct Req {
         NodeClock::time_point request_time;
+        NetworkId network_id;
         uint256 basis_hash;
     };
 
@@ -657,7 +661,7 @@ public:
     size_t PoolSize() const { return m_pool.size(); }
 
     /** Whether we have generated at least one local template (needed before requesting peer templates). */
-    bool HaveLocalTemplate() const { return !m_templates.empty(); }
+    bool HaveAnyLocalTemplate() const { return !m_templates.empty(); }
 
     TemplateInfo GetInfo() const;
 

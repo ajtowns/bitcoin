@@ -1229,7 +1229,7 @@ private:
     void LogBlockHeader(const CBlockIndex& index, const CNode& peer, bool via_compact_block);
 
     /** Generate a new template if the timer has fired; cleanup old ones. */
-    void MaybeGenerateTemplate() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
+    void MaybeGenerateTemplate(Network net) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
 
     /** Send gettmplt n=0 to this peer if the timer has fired. */
     void MaybeRequestTemplate(CNode& node, Peer& peer) EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_template_mutex);
@@ -4446,7 +4446,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             // Deferred response: record request time and optional basis hash.
             uint256 basis_hash;
             if (!vRecv.empty()) vRecv >> basis_hash;
-            peer.m_tmplt_request = node::TemplateManager::Req{NodeClock::now(), basis_hash};
+            peer.m_tmplt_request = node::TemplateManager::Req{NodeClock::now(), pfrom.ConnectedThroughNetwork(), basis_hash};
             LogDebug(BCLog::GETTMPLT, "Got gettmplt round=0 basis=%s %s",
                      basis_hash.ToString(), pfrom.LogPeer());
         } else if (round <= 4) {
@@ -4466,7 +4466,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             shortidmask.FromUints<uint32_t>(std::span{&raw_shortidmask, 1});
 
             LOCK(m_template_mutex);
-            const node::LocalTemplate* tmpl = m_templateman.GetLocalTemplate(hash);
+            const node::LocalTemplate* tmpl = m_templateman.GetLocalTemplate(hash, pfrom.ConnectedThroughNetwork());
             if (!tmpl) {
                 LogDebug(BCLog::GETTMPLT, "Got gettmplt round=%d for unknown template %s peer=%d",
                          round, hash.ToString(), pfrom.GetId());
@@ -4514,7 +4514,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         vRecv >> hash >> grenc;
 
         LOCK(m_template_mutex);
-        const auto* tmpl = m_templateman.GetLocalTemplate(hash);
+        const auto* tmpl = m_templateman.GetLocalTemplate(hash, pfrom.ConnectedThroughNetwork());
         if (!tmpl) {
             LogDebug(BCLog::GETTMPLT, "Got gettmplttxn for unknown template %s peer=%d",
                      hash.ToString(), pfrom.GetId());
@@ -5694,17 +5694,17 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
     return;
 }
 
-void PeerManagerImpl::MaybeGenerateTemplate()
+void PeerManagerImpl::MaybeGenerateTemplate(Network net)
 {
     AssertLockHeld(g_msgproc_mutex);
     AssertLockNotHeld(m_template_mutex);
 
     auto now = NodeClock::now();
-    auto first_template = WITH_LOCK(m_template_mutex, return m_templateman.ShouldGenerate(now));
-    if (!first_template) return;
+    std::optional<bool> opt_is_first = WITH_LOCK(m_template_mutex, return m_templateman.ShouldGenerate(now, net));
+    if (!opt_is_first.has_value()) return;
 
     // Before the first template, check that we're ready to generate.
-    if (*first_template) {
+    if (opt_is_first.value()) {
         if (m_chainman.IsInitialBlockDownload()) {
             LogDebug(BCLog::GETTMPLT, "Skipping template generation (initial block download)");
             return;
@@ -5737,7 +5737,7 @@ void PeerManagerImpl::MaybeGenerateTemplate()
     if (!Assume(tip != nullptr)) return;
 
     LOCK(m_template_mutex);
-    uint256 template_hash = m_templateman.GenerateTemplate(now, tip, txs);
+    uint256 template_hash = m_templateman.GenerateTemplate(now, net, tip, txs);
     m_templateman.TrimTemplates(now);
 
     LogDebug(BCLog::GETTMPLT, "Generated template %s (tip=%s, %d txs)", template_hash.ToString(), tip->GetBlockHash().ToString(), txs.size());
@@ -5845,7 +5845,7 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
     uint256 basis_hash;
     {
         LOCK(m_template_mutex);
-        if (!m_templateman.HaveLocalTemplate()) {
+        if (!m_templateman.HaveAnyLocalTemplate()) {
             // Don't request until we've generated a local template — without one,
             // the sketch has no "local" side and reconciliation is all differences.
             peer.m_next_gettmplt = m_templateman.Jitter(now, node::TEMPLATE_GENERATE_INTERVAL);
@@ -5883,7 +5883,7 @@ void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
     if (auto* txns = std::get_if<node::RequestedTemplateTxns>(&peer.m_tmplt_request); txns) {
         // Drain any queued tmplttxn chunks.
         LOCK(m_template_mutex);
-        const node::LocalTemplate* tmpl = m_templateman.GetLocalTemplate(txns->template_hash());
+        const node::LocalTemplate* tmpl = m_templateman.GetLocalTemplate(txns->template_hash(), node.ConnectedThroughNetwork());
         if (tmpl) {
             auto txs = txns->GetNextChunk(*tmpl, /*max_bytes=*/100'000);
             if (!txs.empty()) {
@@ -6144,7 +6144,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
         }
     }
 
-    MaybeGenerateTemplate();
+    MaybeGenerateTemplate(node.ConnectedThroughNetwork());
 
     const bool processed_orphan = ProcessOrphanTx(peer);
 
