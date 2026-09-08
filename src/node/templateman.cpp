@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <bit>
 #include <iostream>
+#include <ranges>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
@@ -117,7 +118,7 @@ const LocalTemplate::BasisInfo* TemplateManager::GetBasisInfo(LocalTemplate& bes
     // No room to add more than 255 basis entries (though should never come close to that many)
     if (best.m_basisinfo.size() >= 255) return nullptr;
 
-    const LocalTemplate* basis = GetLocalTemplate(basis_hash);
+    const LocalTemplate* basis = GetLocalTemplate(basis_hash, best.m_network_id);
     if (!basis) return nullptr;
 
     std::vector<bool> in_basis;
@@ -341,18 +342,19 @@ void TemplateManager::RemoveTxs(TemplateTxVec&& vec)
     vec.values.clear();
 }
 
-const LocalTemplate* TemplateManager::GetLocalTemplate(const uint256& hash) const
+const LocalTemplate* TemplateManager::GetLocalTemplate(const uint256& hash, NetworkId network_id) const
 {
     for (const auto& tmpl : m_templates) {
-        if (tmpl.m_hash == hash) return &tmpl;
+        if (tmpl.m_hash == hash && tmpl.m_network_id == network_id) return &tmpl;
     }
     return nullptr;
 }
 
-std::optional<bool> TemplateManager::ShouldGenerate(NodeClock::time_point now)
+std::optional<bool> TemplateManager::ShouldGenerate(NodeClock::time_point now, NetworkId network_id)
 {
-    if (now < m_next_gen) return std::nullopt;
-    m_next_gen = Jitter(now, TEMPLATE_GENERATE_INTERVAL);
+    auto next_gen = m_next_gen.try_emplace(network_id, NodeClock::time_point::min()).first;
+    if (now < next_gen->second) return std::nullopt;
+    next_gen->second = Jitter(now, TEMPLATE_GENERATE_INTERVAL);
     return m_templates.empty();
 }
 
@@ -377,13 +379,14 @@ void TemplateManager::TrimTemplates(NodeClock::time_point now)
     Check();
 }
 
-uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
+uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now, NetworkId network_id,
                                         const CBlockIndex* tip, std::span<CTransactionRef> txs)
 {
     LocalTemplate tmpl;
     tmpl.m_time = now;
     tmpl.m_tip = tip;
     tmpl.m_nonce = m_rng.rand64();
+    tmpl.m_network_id = network_id;
 
     // Add txs in fee/priority order from BlockAssembler
     tmpl.m_txs = AddTxs(txs);
@@ -434,13 +437,14 @@ uint256 TemplateManager::GenerateTemplate(NodeClock::time_point now,
 
 TemplateManager::LocalTemplateAndDelta TemplateManager::GetRequestedTemplate(const Req& req)
 {
-    if (m_templates.empty()) return {};
-
-    LocalTemplate& best = m_templates.back();
-    if (best.m_time <= req.request_time) return {};
-
-    const LocalTemplate::BasisInfo* basisinfo = GetBasisInfo(best, req.basis_hash);
-    return {&best, basisinfo};
+    for (auto& best : m_templates | std::ranges::views::reverse) {
+        if (best.m_time <= req.request_time) break;
+        if (best.m_network_id == req.network_id) {
+            const LocalTemplate::BasisInfo* basisinfo = GetBasisInfo(best, req.basis_hash);
+            return {&best, basisinfo};
+        }
+    }
+    return {};
 }
 
 void TemplateTxnsSelection::Add(uint32_t p)
@@ -1011,7 +1015,6 @@ TemplateInfo TemplateManager::GetInfo() const
         info.latest_weight = m_templates.back().m_weight;
     }
     info.generate_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_GENERATE_INTERVAL);
-    info.next_update = m_next_gen;
     info.peer_templates = m_peer_templates.size();
     for (const auto& [nodeid, state] : m_peer_reconcile) {
         int round;
