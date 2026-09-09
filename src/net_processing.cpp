@@ -5998,7 +5998,7 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     auto result = ConsiderTemplateTx(peer, next);
 
     WITH_LOCK(m_template_mutex,
-              m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, next.nchildren));
+              m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, /*needed_parent=*/bool{next.package_parent}, next.nchildren));
 
     LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d 1p1c=%d children=%d wtxid=%s peer=%d",
              node::TemplateATMPResultString(result), next.pos, next.total,

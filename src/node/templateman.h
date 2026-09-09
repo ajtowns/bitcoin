@@ -352,10 +352,11 @@ struct TxPendingATMP {
     uint32_t nchildren;
 };
 
-/** A parent tx that failed as RECONSIDERABLE, stashed for 1p1c attempts with its children. */
-struct PackageCandidate {
+/** A pending parent tx, not already accepted into the mempool. */
+struct PendingParent {
     CTransactionRef tx;
-    uint32_t remaining_children;
+    uint32_t remaining_children{0};
+    bool package_candidate{false}; // true if no parents of its own, and worth reconsidering
 };
 
 /** A completed, hash-verified template received from a peer. */
@@ -369,20 +370,20 @@ public:
     /** Reverse-topo-ordered work queue; pop_back() yields next tx to validate. */
     mutable std::vector<TxPendingATMP> m_pending;
 
-    /** Parent txs that failed as RECONSIDERABLE, keyed by txid for 1p1c lookup. */
-    mutable std::unordered_map<Txid, PackageCandidate, SaltedTxidHasher> m_package_candidates;
+    /** Parent txs, keyed by txid for 1p1c lookup. */
+    mutable std::unordered_map<Txid, PendingParent, SaltedTxidHasher> m_pending_parents;
 
     /** Build m_pending via reverse Kahn's algorithm. Called once on template completion. */
     void TopoSort();
 
     /** Find a 1p1c package parent for this tx, then decrement remaining_children
      *  for all parent candidates (erasing when zero).
-     *  Returns {true, parent} if usable (parent may be nullptr if no candidate),
-     *  or {false, nullptr} if multiple candidates found (1p1c doesn't apply). */
-    std::pair<bool, CTransactionRef> ConsumeParentCandidates(const CTransaction& tx) const;
+     *  Returns {true, parent} if tx is usable (parent may be nullptr if no parent needed),
+     *  or {false, nullptr} if 1p1c doesn't apply. */
+    std::pair<bool, CTransactionRef> ConsumePendingParents(const CTransaction& tx) const;
 
-    /** Stash a tx as a 1p1c package candidate for its children. */
-    void StashPackageCandidate(CTransactionRef tx, uint32_t nchildren) const;
+    /** Stash a tx that has children in the template. */
+    void StashPendingParent(CTransactionRef tx, uint32_t nchildren, bool package_candidate) const;
 };
 
 /** Receiver-side sketch reconciliation state for a peer template request.
@@ -742,10 +743,11 @@ public:
                                      const std::map<GenTxid, CTransactionRef>* recent_block_txs);
 
     /** Report ATMP result for a peer-template tx. Updates retry timing and
-     *  stashes RECONSIDERABLE parents for 1p1c attempts with their children. */
+     *  stashes parents for 1p1c attempts with their children. */
     void ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
                           NodeClock::time_point now,
-                          TemplateATMPResult result, uint32_t nchildren);
+                          TemplateATMPResult result,
+                          bool needed_parent, uint32_t nchildren);
 
     /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
      *  Releases pool refs for local txs absent from the peer's template.
