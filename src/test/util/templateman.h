@@ -7,21 +7,25 @@
 
 #include <node/templateman.h>
 
-/** A PeerTemplateSketch that drops its placeholder refs when it goes away.
+/** A PeerTemplateSketchT that drops its placeholder refs when it goes away.
  *
- * Tests fill m_txs with pool.end() placeholders, which carry no refcount, so
- * nothing releases them the way TemplateManager does in production. Without
- * this, ~TemplateTxVec's Assume(empty()) fires on every exit path. */
-class TestPeerTemplateSketch : public node::PeerTemplateSketch
+ *  Tests fill m_txs with pool.end() placeholders, which carry no refcount, so
+ *  nothing releases them the way TemplateManagerT does in production. Without
+ *  this, ~TemplateTxVec's Assume(empty()) fires on every exit path. */
+template <int SketchCapacity>
+class TestPeerTemplateSketchT : public node::PeerTemplateSketchT<SketchCapacity>
 {
     const node::TemplateTxSet& m_pool;
 
 public:
-    TestPeerTemplateSketch(const node::TemplateTxSet& pool) : m_pool{pool} { }
+    TestPeerTemplateSketchT(const node::TemplateTxSet& pool) : m_pool{pool} { }
 
-    ~TestPeerTemplateSketch() {
-        m_txs.clear_placeholders(m_pool);
+    ~TestPeerTemplateSketchT() {
+        this->m_txs.clear_placeholders(m_pool);
     }
 };
+
+/** Production-capacity version, for tests that don't templatize capacity. */
+using TestPeerTemplateSketch = TestPeerTemplateSketchT<node::SKETCH_CAPACITY>;
 
 #endif // BITCOIN_TEST_UTIL_TEMPLATEMAN_H
