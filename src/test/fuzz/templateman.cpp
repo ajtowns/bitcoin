@@ -4,6 +4,7 @@
 
 #include <node/minisketchwrapper.h>
 #include <node/templateman.h>
+#include <node/templateman_impl.h>
 #include <random.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
@@ -20,6 +21,12 @@
 
 using namespace node;
 
+/** Sketch capacity for the fuzz targets: small enough that typical fuzz inputs
+ *  reach the deeper reconciliation rounds and shortid fallback. */
+static constexpr int FUZZ_SC = 8;
+using FuzzLocalTemplate = LocalTemplateT<FUZZ_SC>;
+using FuzzTemplateManager = TemplateManagerT<FUZZ_SC>;
+
 static void initialize_templateman()
 {
     // MakeMinisketch46 selects the best implementation on first call using timing
@@ -28,7 +35,8 @@ static void initialize_templateman()
     MakeMinisketch46(1);
 }
 
-// Core fuzzing logic, shared between the fast (few buckets) and full (all buckets) targets.
+// Sketch reconciliation over all 32 buckets at small capacity (FUZZ_SC), so that
+// typical inputs reach the deeper rounds and the shortid fallback.
 //
 // For each active bucket b, three shortid sets are derived from the provider's bucket sids:
 //   sketch_sids: bucket[j..]  — shortids that went into the sketch (honest: j=0, all sids)
@@ -38,13 +46,13 @@ static void initialize_templateman()
 // When j=0 and k=n for every bucket, the provider is honest and reconciliation must
 // produce exactly prov_sids.  Any deviation (j>0 or k<n) marks the run as dishonest;
 // we then only verify there is no crash.
-static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
+static void run_templateman(FuzzedDataProvider& fdp)
 {
     // Some code paths (e.g. Minisketch decode) may use the global PRNG.
     // Seed it deterministically so CheckGlobals doesn't abort.
     SeedRandomStateForTest(SeedRand::ZEROS);
 
-    int num_active = fdp.ConsumeIntegralInRange<int>(0, max_buckets);
+    int num_active = fdp.ConsumeIntegralInRange<int>(0, TOTAL_BUCKETS);
 
     bool is_honest = true;
 
@@ -120,7 +128,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     std::sort(basis_sids.begin(), basis_sids.end());
 
     // Build provider: sketch from sketch_sids, outer shortids from send_sids.
-    LocalTemplate provider;
+    FuzzLocalTemplate provider;
     provider.shortids = sketch_sids;
     provider.GenerateSketches();
     provider.shortids = send_sids; // replace for GetShortIDBytes
@@ -132,7 +140,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     size_t basis_count = txs.size();
     for (auto s : local_sids) { txs.push_back_placeholder(pool); sids.push_back(s); }
 
-    TestPeerTemplateSketch sketch{pool};
+    TestPeerTemplateSketchT<FUZZ_SC> sketch{pool};
     auto [resolved, _sid, _sk] = sketch.Init(std::move(txs), std::move(sids), basis_count,
                                              provider.GetSketches(0), {}, {});
 
@@ -142,7 +150,7 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     GroupMask sketchmask  = GroupMask::Fill(TOTAL_BUCKETS);
     for (int round = 1; round <= 4 && !resolved; ++round) {
         auto shortid_bytes = provider.GetShortIDBytes(round, 0, shortidmask);
-        std::vector<LocalTemplate::Sketch> filtered_sketches;
+        std::vector<FuzzLocalTemplate::Sketch> filtered_sketches;
         if (round < 4) {
             auto all_sketches = provider.GetSketches(round);
             for (int i : sketchmask) {
@@ -185,18 +193,10 @@ static void run_templateman(FuzzedDataProvider& fdp, int max_buckets)
     assert(result == prov_sids);
 }
 
-// Fast target: at most 4 active buckets — high iteration rate for quick exploration.
 FUZZ_TARGET(templateman, .init = initialize_templateman)
 {
     FuzzedDataProvider fdp{buffer.data(), buffer.size()};
-    run_templateman(fdp, 4);
-}
-
-// Slow target: up to all 32 buckets — lower iteration rate, broader coverage.
-FUZZ_TARGET(templateman_slow, .init = initialize_templateman)
-{
-    FuzzedDataProvider fdp{buffer.data(), buffer.size()};
-    run_templateman(fdp, TOTAL_BUCKETS);
+    run_templateman(fdp);
 }
 
 // TemplateManager lifecycle target: exercises full TemplateManager API including
@@ -207,11 +207,11 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fdp{buffer.data(), buffer.size()};
 
-    TemplateManager mgr{/*deterministic=*/true};
+    FuzzTemplateManager mgr{/*deterministic=*/true};
 
     // Pre-generate a pool of lightweight transactions with unique wtxids.
-    // 3000 txs allows templates of ~2500 to overflow sketch buckets at round 0.
-    static constexpr size_t TX_POOL_SIZE = 3000;
+    // 600 txs allows templates of ~500 to overflow capacity-8 sketches many rounds deep.
+    static constexpr size_t TX_POOL_SIZE = 600;
     std::vector<CTransactionRef> all_txs;
     all_txs.reserve(TX_POOL_SIZE);
     for (uint32_t i = 0; i < TX_POOL_SIZE; ++i) {
@@ -232,7 +232,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
     // Select a subset of txs; duplicates allowed to trigger shortid collisions.
     auto pick_txs = [&]() -> std::vector<CTransactionRef> {
         std::vector<CTransactionRef> txs;
-        uint16_t count = fdp.ConsumeIntegralInRange<uint16_t>(0, 2500);
+        uint16_t count = fdp.ConsumeIntegralInRange<uint16_t>(0, 500);
         txs.reserve(count);
         for (uint16_t i = 0; i < count; ++i) {
             txs.push_back(all_txs[fdp.ConsumeIntegralInRange<size_t>(0, TX_POOL_SIZE - 1)]);
@@ -254,8 +254,8 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
     };
     std::map<NodeId, PeerSketchState> peer_sketch_state;
 
-    auto handle_result = [&](NodeId peer, int round, const TemplateManager::TmpltResult& result) {
-        if (result.state == TemplateManager::TmpltState::Unresolved) {
+    auto handle_result = [&](NodeId peer, int round, const FuzzTemplateManager::TmpltResult& result) {
+        if (result.state == FuzzTemplateManager::TmpltState::Unresolved) {
             peer_sketch_state[peer] = {result.hash, round, result.shortidmask, result.sketchmask};
         } else {
             peer_sketch_state.erase(peer);
@@ -296,7 +296,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 mgr.WaitingForPeerSketch(peer);
                 peer_sketch_state.erase(peer);
                 size_t idx = fdp.ConsumeIntegralInRange<size_t>(0, generated_hashes.size() - 1);
-                const LocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx], 0);
+                const FuzzLocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx], 0);
                 if (!tmpl) return;
                 auto result = mgr.InitPeerSketch(peer, nullptr, tmpl->m_hash,
                                    tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), {}, {}, now());
@@ -309,7 +309,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 if (ps_it == peer_sketch_state.end()) return;
                 auto& ps = ps_it->second;
                 if (ps.round >= 4) return;
-                const LocalTemplate* tmpl = mgr.GetLocalTemplate(ps.hash, 0);
+                const FuzzLocalTemplate* tmpl = mgr.GetLocalTemplate(ps.hash, 0);
                 if (!tmpl) { peer_sketch_state.erase(ps_it); return; }
                 int round = ps.round + 1;
 
@@ -323,7 +323,7 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 GroupMask sketchmask = ps.sketchmask;
                 sketchmask.LimitToRound(round);
                 sketchmask -= ps.shortidmask;
-                std::vector<LocalTemplate::Sketch> filtered_sketches;
+                std::vector<FuzzLocalTemplate::Sketch> filtered_sketches;
                 if (sketchmask.Any()) {
                     auto all_sketches = tmpl->GetSketches(round);
                     for (int i : sketchmask) {
