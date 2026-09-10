@@ -6031,9 +6031,9 @@ node::TemplateATMPResult PeerManagerImpl::ConsiderTemplateTx(
             ProcessPackageResult(package_to_validate, package_result);
             auto it = package_result.m_tx_results.find(next.tx->GetWitnessHash());
             if (it == package_result.m_tx_results.end()) {
-                // Parent must have failed; no longer reconsiderable
+                // Package failure due to fees will be reported as parent failure, so just mark as reconsiderable
                 TxValidationState state;
-                state.Invalid(TxValidationResult::TX_MISSING_INPUTS, "package-parent-failed");
+                state.Invalid(TxValidationResult::TX_RECONSIDERABLE, "package-failed");
                 return MempoolAcceptResult::Failure(std::move(state));
             }
             return std::move(it->second);
