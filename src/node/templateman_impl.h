@@ -1,0 +1,1529 @@
+// Copyright (c) 2025-present The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#ifndef BITCOIN_NODE_TEMPLATEMAN_IMPL_H
+#define BITCOIN_NODE_TEMPLATEMAN_IMPL_H
+
+/** Implementation of the class templates declared in templateman.h.
+ *  Included by templateman.cpp (for the production instantiation) and by
+ *  test/fuzz modules (for small-capacity instantiations); never include
+ *  this file directly elsewhere. */
+
+#include <node/minisketchwrapper.h>
+
+#include <blockencodings.h>
+#include <chain.h>
+#include <consensus/validation.h>
+#include <crypto/sha256.h>
+#include <policy/policy.h>
+#include <streams.h>
+#include <txmempool.h>
+#include <util/golombrice.h>
+#include <util/overloaded.h>
+
+#include <algorithm>
+#include <bit>
+#include <ranges>
+#include <unordered_set>
+
+namespace { // ATMP retry intervals
+/** Average recheck interval for txs already accepted into the mempool or confirmed in a block. */
+static constexpr auto ATMP_RECHECK_INTERVAL{std::chrono::seconds{60}};
+
+/** Average retry interval for transient ATMP failures (missing inputs, conflict, reconsiderable). */
+static constexpr auto ATMP_RETRY_INTERVAL{std::chrono::seconds{120}};
+
+/** Average retry interval for premature-spend ATMP failures. */
+static constexpr auto ATMP_RETRY_SLOW_INTERVAL{std::chrono::seconds{1200}};
+} // namespace
+
+namespace node {
+
+/** Minimum transaction weight (60 bytes * 4 = 240 wu). */
+static constexpr int64_t MIN_TRANSACTION_WEIGHT{240};
+
+/** Maximum number of transactions in a template. */
+static constexpr unsigned int MAX_TEMPLATE_TXS{MAX_TEMPLATE_WEIGHT / MIN_TRANSACTION_WEIGHT};
+
+/** Run Check() once every CHECK_RATIO calls on average. */
+static constexpr int CHECK_RATIO{100};
+
+template<typename Fn>
+GRVector GRVectorEncode(uint8_t P, Fn&& fn)
+{
+    GRVector result;
+    result.P = P;
+
+    VectorWriter stream{result.encoded_elements, 0};
+    BitStreamWriter bitwriter{stream};
+    std::optional<uint64_t> next;
+    while ((next = fn()) != std::nullopt) {
+        ++result.n_elements;
+        GolombRiceEncode(bitwriter, result.P, *next);
+    }
+    if (result.n_elements == 0) return {};
+    bitwriter.Flush();
+    return result;
+}
+
+template<typename Fn>
+void GRVectorDecode(const GRVector& gr, Fn&& fn)
+{
+    if (gr.n_elements == 0) return;
+    SpanReader stream{gr.encoded_elements};
+    BitStreamReader bitreader{stream};
+    for (size_t i = 0; i < gr.n_elements; ++i) {
+        fn(GolombRiceDecode(bitreader, gr.P));
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+static std::array<int, TOTAL_BUCKETS> GetGroupCounts(const LocalTemplateT<SketchCapacity>& tmpl, const typename LocalTemplateT<SketchCapacity>::BasisInfo* basisinfo, int groups)
+{
+    auto& bucket_count = (basisinfo != nullptr ? basisinfo->bucket_count : tmpl.bucket_count);
+    std::array<int, TOTAL_BUCKETS> res{0};
+    for (int i = 0; i < TOTAL_BUCKETS; ++i) {
+        res[i & (groups - 1)] += bucket_count[i];
+    }
+    return res;
+}
+
+/** Look up a peer's reconciliation state.
+ *  Returns {true, it} if the entry exists and holds type T;
+ *  {false, it} if it exists but holds a different type;
+ *  {false, end} if no entry. */
+template <typename T, typename Map>
+static std::pair<bool, typename Map::iterator> GetPeerRecState(Map& map, NodeId nodeid)
+{
+    auto it = map.find(nodeid);
+    if (it == map.end()) return {false, it};
+    return {std::holds_alternative<T>(it->second), it};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+const typename LocalTemplateT<SketchCapacity>::BasisInfo* LocalTemplateT<SketchCapacity>::GetBasisInfo(uint8_t basis_id) const
+{
+    if (basis_id == 0 || basis_id > m_basisinfo.size()) return nullptr;
+    return &m_basisinfo[basis_id - 1];
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+const typename LocalTemplateT<SketchCapacity>::BasisInfo* TemplateManagerT<SketchCapacity>::GetBasisInfo(LocalTemplate& best, const uint256& basis_hash)
+{
+    if (basis_hash.IsNull()) return nullptr;
+
+    auto it = std::ranges::find(best.m_basisinfo, basis_hash, &LocalTemplateT<SketchCapacity>::BasisInfo::basis_hash);
+    if (it != best.m_basisinfo.end()) {
+        return &*it;
+    }
+
+    // No room to add more than 255 basis entries (though should never come close to that many)
+    if (best.m_basisinfo.size() >= 255) return nullptr;
+
+    const LocalTemplate* basis = GetLocalTemplate(basis_hash, best.m_network_id);
+    if (!basis) return nullptr;
+
+    std::vector<bool> in_basis;
+    std::array<size_t, TOTAL_BUCKETS> bucket_count = best.bucket_count;
+    in_basis.resize(best.m_txs.size());
+
+    // Build pointer set of txs in this template for O(1) lookup.
+    // Both templates share the same pool, so pointer identity implies same tx.
+    std::unordered_map<const CTransaction*, size_t> retained_map;
+    retained_map.reserve(best.m_txs.size());
+    size_t pos = 0;
+    for (const auto& ref : best.m_txs) {
+        retained_map.emplace(ref->tx.get(), pos++);
+    }
+
+    // Collect retained positions (in basis order) into a TemplateTxnsSelection
+    TemplateTxnsSelection sel;
+    uint16_t in_common{0};
+    for (size_t i = 0; i < basis->m_txs.size(); ++i) {
+        if (auto b_it = retained_map.find(basis->m_txs[i]->tx.get()); b_it != retained_map.end()) {
+            sel.Add(i);
+            in_basis[b_it->second] = true;
+            --bucket_count[best.shortids[b_it->second] % TOTAL_BUCKETS];
+            ++in_common;
+        }
+    }
+    best.m_basisinfo.emplace_back(1 + best.m_basisinfo.size(), in_common, basis_hash, sel.GREncode(), std::move(in_basis), std::move(bucket_count));
+    return &best.m_basisinfo.back();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+GRVector LocalTemplateT<SketchCapacity>::GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const
+{
+    if (round == 0) {
+        mask.LimitToRound(1);
+    } else {
+        mask.LimitToRound(round);
+    }
+    if (mask.None()) return {};
+
+    const BasisInfo* basisinfo = GetBasisInfo(basis_id);
+
+    // Estimate n to compute GR parameter P.
+    //  * Shortids should be evenly distributed based on total number
+    //    of txs to be sent
+    //  * This is reduced (uniformly) by the number of groups excluded
+    //  * This is reduced (still uniformly) by the number of txs in
+    //    common with the basis
+    //  * It's not affected by skipping the last 64 txs per group.
+    const size_t n_needed = shortids.size() - (basisinfo ? basisinfo->common_tx_count : 0);
+    const size_t total_groups = (round == 0 ? 4 : 2 << round);
+    const size_t n_estimate = n_needed / total_groups * mask.Count();
+
+    uint8_t P = static_cast<uint8_t>(std::max(0, 46 - (int)std::bit_width(n_estimate)));
+
+    auto it = shortids.begin();
+    uint64_t last = 1;
+    size_t cnt = 0;
+    std::array<int, TOTAL_BUCKETS> group_count = GetGroupCounts(*this, basisinfo, total_groups);
+    if (round > 0) {
+        // skip SketchCapacity entries
+        for (auto& gc : group_count) {
+            gc = std::max(gc, SketchCapacity) - SketchCapacity;
+        }
+    }
+    return GRVectorEncode(P, [&]() -> std::optional<uint64_t> {
+        while (it != shortids.end()) {
+            uint64_t sid{*it++};
+            if (basisinfo && basisinfo->in_basis[cnt++]) continue;
+            int b = sid & (total_groups - 1);
+            if (mask[b] && group_count[b] > 0) {
+                --group_count[b];
+                sid -= last;
+                last += sid + 1;
+                return sid;
+            }
+        }
+        return std::nullopt;
+    });
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void LocalTemplateT<SketchCapacity>::GenerateSketches()
+{
+    // Build 32 per-bucket sketches directly into slots 0..31.
+    class MS : public Minisketch
+    {
+    public:
+        // Minisketch, but with a default initializer
+        MS() : Minisketch{MakeMinisketch46(SketchCapacity)} { }
+    };
+    std::array<MS, TOTAL_BUCKETS> ms;
+    std::array<uint32_t, TOTAL_BUCKETS> count{};
+    for (uint64_t sid : shortids) {
+        int b = sid & (TOTAL_BUCKETS - 1);
+        ms[b].Add(sid);
+        ++count[b];
+    }
+
+    // Merge the sketch tree bottom-up in-place.
+    // At each step, merge into the lower half, leaving the upper half unchanged.
+    auto merge_level = [&](int n) {
+        for (int i = 0; i < n; ++i) {
+            ms[i].Merge(ms[i+n]);
+            count[i] += count[i + n];
+        }
+    };
+
+    // slots 16..31 = individual buckets (round 3); merge into 0..15
+    merge_level(16);
+    // slots 8..15 = stride-16 groups (round 2); merge into 0..7
+    merge_level(8);
+    // slots 4..7 = stride-8 groups (round 1); merge into 0..3
+    merge_level(4);
+    // slots 0..3 = stride-4 groups (round 0)
+
+    for (int i = 0; i < TOTAL_BUCKETS; ++i) {
+        ms[i].SerializeTo(sketches[i].ser);
+        sketches[i].elements = count[i];
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+TemplateManagerT<SketchCapacity>::~TemplateManagerT()
+{
+    // Cleanup data, so that reference counts are cleared and
+    // TemplateTxVec destructor assertion is okay
+    for (auto& tmpl : m_templates) RemoveTxs(std::move(tmpl.m_txs));
+    for (auto& pt : m_peer_templates) RemoveTxs(std::move(pt.m_txs));
+    for (auto& [nodeid, state] : m_peer_reconcile) {
+        std::visit([&](auto& s) {
+            if constexpr (!std::is_same_v<std::decay_t<decltype(s)>, std::monostate>) {
+                RemoveTxs(std::move(s.m_txs));
+            }
+        }, state);
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+TemplateTxRef TemplateManagerT<SketchCapacity>::AddTx(CTransactionRef tx)
+{
+    const int32_t w = GetTransactionWeight(*tx);
+    auto [it, inserted] = m_pool.insert(TemplateTx{.tx = std::move(tx), .weight = w});
+    if (inserted) {
+        m_pool_weight += it->weight;
+        it->scannable_idx = m_scannable_txns.size();
+        m_scannable_txns.emplace_back(it->tx->GetWitnessHash(), it);
+    }
+    ++it->num_templates;
+    return it;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+TemplateTxVec TemplateManagerT<SketchCapacity>::AddTxs(std::span<CTransactionRef> txs)
+{
+    TemplateTxVec refs;
+    refs.values.reserve(txs.size());
+    for (auto& tx : txs) {
+        refs.values.push_back(AddTx(std::move(tx)));
+    }
+    return refs;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::RemoveTx(TemplateTxRef ref)
+{
+    if (ref == m_pool.end()) return;
+    if (--ref->num_templates > 0) return;
+
+    m_pool_weight -= ref->weight;
+
+    // Swap-to-back removal from m_scannable_txns
+    size_t idx = ref->scannable_idx;
+    if (idx != m_scannable_txns.size() - 1) {
+        m_scannable_txns[idx] = std::move(m_scannable_txns.back());
+        m_scannable_txns[idx].second->scannable_idx = idx;
+    }
+    m_scannable_txns.pop_back();
+
+    m_pool.erase(ref);
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::RemoveTxs(TemplateTxVec&& vec)
+{
+    for (auto& ref : vec.values) {
+        RemoveTx(ref);
+    }
+    vec.values.clear();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+const typename TemplateManagerT<SketchCapacity>::LocalTemplate* TemplateManagerT<SketchCapacity>::GetLocalTemplate(const uint256& hash, NetworkId network_id) const
+{
+    for (const auto& tmpl : m_templates) {
+        if (tmpl.m_hash == hash && tmpl.m_network_id == network_id) return &tmpl;
+    }
+    return nullptr;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+std::optional<bool> TemplateManagerT<SketchCapacity>::ShouldGenerate(NodeClock::time_point now, NetworkId network_id)
+{
+    auto next_gen = m_next_gen.try_emplace(network_id, NodeClock::time_point::min()).first;
+    if (now < next_gen->second) return std::nullopt;
+    next_gen->second = Jitter(now, TEMPLATE_GENERATE_INTERVAL);
+    return m_templates.empty();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::TrimTemplates(NodeClock::time_point now)
+{
+    auto cutoff = now - LOCAL_TEMPLATE_EXPIRY;
+    while (!m_templates.empty() && m_templates.front().m_time < cutoff) {
+        RemoveTxs(std::move(m_templates.front().m_txs));
+        m_templates.pop_front();
+    }
+    auto peer_cutoff = now - PEER_TEMPLATE_EXPIRY;
+    while (!m_peer_templates.empty() && m_peer_templates.front().m_time < peer_cutoff) {
+        auto& front = m_peer_templates.front();
+        // Only erase cache if it points to this entry (peer may have a newer one).
+        auto it = m_peer_template_cache.find(front.m_nodeid);
+        if (it != m_peer_template_cache.end() && it->second == &front) {
+            m_peer_template_cache.erase(it);
+        }
+        RemoveTxs(std::move(front.m_txs));
+        m_peer_templates.pop_front();
+    }
+    Check();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+uint256 TemplateManagerT<SketchCapacity>::GenerateTemplate(NodeClock::time_point now, NetworkId network_id,
+                                        const CBlockIndex* tip, std::span<CTransactionRef> txs)
+{
+    LocalTemplate tmpl;
+    tmpl.m_time = now;
+    tmpl.m_tip = tip;
+    tmpl.m_nonce = m_rng.rand64();
+    tmpl.m_network_id = network_id;
+
+    // Add txs in fee/priority order from BlockAssembler
+    tmpl.m_txs = AddTxs(txs);
+    for (const auto& ref : tmpl.m_txs) {
+        tmpl.m_weight += ref->weight;
+    }
+
+    // Compute shortids and sort m_txs by shortid.
+    // Uses (tip_hash, nonce) so the hash can be computed afterwards over the sorted order.
+    const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
+    ShortIDHasher hasher(tip_hash, tmpl.m_nonce);
+
+    std::vector<std::pair<uint64_t, TemplateTxRef>> pairs;
+    pairs.reserve(tmpl.m_txs.size());
+    for (const auto& ref : tmpl.m_txs) {
+        pairs.emplace_back(hasher.GetShortID(ref->tx->GetWitnessHash()), ref);
+    }
+    std::stable_sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+    tmpl.m_txs.values.clear(); // references have been taken over by `pairs` at this point
+
+    uint64_t dup_check = std::numeric_limits<uint64_t>::max();
+    for (auto& [sid, ref] : pairs) {
+        if (sid == dup_check) {
+            // duplicates can't by expressed by sketches, so drop them
+            RemoveTx(ref);
+            continue;
+        }
+        dup_check = sid;
+        tmpl.shortids.push_back(sid);
+        ++tmpl.bucket_count[sid % TOTAL_BUCKETS];
+        tmpl.m_txs.values.push_back(ref);
+    }
+    pairs.clear(); // references have been taken over by `m_txs` or dropped
+
+    // Hash over tip_hash then wtxids in shortid order; receiver can verify independently.
+    tmpl.m_hash = tmpl.ComputeHash();
+
+    tmpl.GenerateSketches();
+
+    uint256 template_hash = tmpl.m_hash;
+
+    m_templates.push_back(std::move(tmpl));
+
+    return template_hash;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::LocalTemplateAndDelta TemplateManagerT<SketchCapacity>::GetRequestedTemplate(const Req& req)
+{
+    for (auto& best : m_templates | std::ranges::views::reverse) {
+        if (best.m_time <= req.request_time) break;
+        if (best.m_network_id == req.network_id) {
+            const typename LocalTemplate::BasisInfo* basisinfo = GetBasisInfo(best, req.basis_hash);
+            return {&best, basisinfo};
+        }
+    }
+    return {};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+struct PeerTemplateSketchT<SketchCapacity>::Sketches {
+    struct MSC {
+        int64_t count{0}; // `count-UINT32_MAX` should remain representable
+        Minisketch sketch{MakeMinisketch46(SketchCapacity)};
+        void Add(uint64_t shortid) { sketch.Add(shortid); ++count; }
+    };
+    using MSCArr = std::array<MSC, TOTAL_BUCKETS>;
+
+    // Slot invariant for all three MSCArr arrays:
+    // - After InitialMerge (level=0): slots 0..3 hold the 4 stride-4 combined groups;
+    //   slots 4..31 hold stale intermediate merged values used by PrepareRound.
+    // - After PrepareRound(r): there are 4<<r active groups in slots 0..(4<<r)-1.
+    //   Slot gi = group gi. Slots >= 4<<r hold stale data and must not be read.
+    // - All three arrays follow the same slot structure at all times.
+    MSCArr m_basis_sketches;   //!< basis shortids only
+    MSCArr m_local_sketches;   //!< basis+local shortids (pre-merged so TryDecodeGroups needs one fewer Merge())
+    MSCArr m_provider_sketches;
+
+    void InitialMerge()
+    {
+        auto merge = [&](int i, int j) {
+            m_basis_sketches[i].sketch.Merge(m_basis_sketches[j].sketch);
+            m_basis_sketches[i].count += m_basis_sketches[j].count;
+            m_local_sketches[i].sketch.Merge(m_local_sketches[j].sketch);
+            m_local_sketches[i].count += m_local_sketches[j].count;
+        };
+
+        // 32 → 16: merge x += x+16 for x in 0..15
+        for (int x = 0; x < 16; ++x) merge(x, x + 16);
+        // 16 → 8: merge x += x+8 for x in 0..7
+        for (int x = 0; x < 8; ++x) merge(x, x + 8);
+        // 8 → 4: merge x += x+4 for x in 0..3
+        for (int x = 0; x < 4; ++x) merge(x, x + 4);
+        // slots 0..3 now hold the 4 stride-4 combined groups
+    }
+
+    void ProviderDeser(int round, GroupMask mask, std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches)
+    {
+        size_t sketch_idx = 0;
+        int n = (round == 0 ? 4 : (2 << round));
+        int offset = (round == 0 ? 0 : n);
+        for (int gi = 0; gi < n && sketch_idx < sketches.size(); ++gi) {
+            if (!mask[gi]) continue;
+            const auto& s = sketches[sketch_idx++];
+            m_provider_sketches[offset + gi].sketch.Deserialize(s.ser);
+            m_provider_sketches[offset + gi].count = s.elements;
+        }
+    }
+
+    void PrepareRound(int round)
+    {
+        // n = current number of groups (before splitting)
+        // For each x in 0..n-1: XOR parent[x] with odd-child[x+n] to get even-child[x]
+        int n = 4 << (round - 1);
+        for (int x = 0; x < n; ++x) {
+            if (m_provider_sketches[x].count < m_provider_sketches[x + n].count) {
+                throw std::ios_base::failure("PrepareRound: inconsistent sketch counts");
+            }
+
+            m_basis_sketches[x].sketch.Merge(m_basis_sketches[x + n].sketch);
+            m_basis_sketches[x].count -= m_basis_sketches[x + n].count;
+            m_local_sketches[x].sketch.Merge(m_local_sketches[x + n].sketch);
+            m_local_sketches[x].count -= m_local_sketches[x + n].count;
+            m_provider_sketches[x].sketch.Merge(m_provider_sketches[x + n].sketch);
+            m_provider_sketches[x].count -= m_provider_sketches[x + n].count;
+        }
+    }
+};
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+PeerTemplateSketchT<SketchCapacity>::PeerTemplateSketchT() = default;
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+PeerTemplateSketchT<SketchCapacity>::~PeerTemplateSketchT() = default;
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+bool PeerTemplateSketchT<SketchCapacity>::TryDecodeGroups()
+{
+    auto& sk = *m_sketches;
+    // n = number of active groups at current sketch level
+    const int n = 4 << m_sketch_level;
+    // stride = n (buckets in group gi are: gi, gi+n, gi+2n, ...)
+    for (int gi = 0; gi < n; ++gi) {
+        // Check if all buckets in group gi are already resolved
+        bool all_resolved = true;
+        for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+            if (!m_bucket_resolved[b]) { all_resolved = false; break; }
+        }
+        if (all_resolved) continue;
+
+        auto basis_count{sk.m_basis_sketches[gi].count};
+        auto local_count{sk.m_local_sketches[gi].count}; // basis+local
+        auto provider_count{sk.m_provider_sketches[gi].count};
+
+        // Try basis XOR provider (only when diff is small enough to decode).
+        // Assumes basis is a subset of provider (guaranteed by the protocol: basis is
+        // a previously-sent template that the provider retains). Under this assumption,
+        // basis^provider == provider\basis and the feasibility check
+        // provider_count - basis_count <= SketchCapacity is tight. If the assumption is
+        // violated by a misbehaving peer, the sketch may fail to decode or produce wrong
+        // diff elements; correctness is recovered by template-hash verification at the
+        // PeerTemplatePartial stage.
+        if (basis_count + SketchCapacity >= provider_count) {
+            Minisketch diff = sk.m_basis_sketches[gi].sketch;
+            diff.Merge(sk.m_provider_sketches[gi].sketch);
+            if (auto decoded = diff.Decode(SketchCapacity)) {
+                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
+                for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                    m_bucket_resolved.Set(b);
+                    m_decoded_by_basis.Set(b);
+                }
+                continue;
+            }
+        }
+
+        // Try (basis + local) XOR provider (only when diff is small enough to decode).
+        // m_local_sketches holds basis+local pre-merged, so only one Merge() needed here.
+        if (std::abs(provider_count - local_count) <= SketchCapacity) {
+            Minisketch diff = sk.m_local_sketches[gi].sketch;
+            diff.Merge(sk.m_provider_sketches[gi].sketch);
+            if (auto decoded = diff.Decode(SketchCapacity)) {
+                for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
+                for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                    m_bucket_resolved.Set(b);
+                }
+                continue;
+            }
+        }
+    }
+    return m_bucket_resolved.Count() == TOTAL_BUCKETS;
+}
+
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+PeerTemplateSketchT<SketchCapacity>::ProcessResult PeerTemplateSketchT<SketchCapacity>::Init(
+    TemplateTxVec&& txs,
+    std::vector<uint64_t>&& shortids,
+    size_t basis_count,
+    std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> combined_sketches,
+    GroupMask shortidmask, const GRVector& shortid_bytes)
+{
+    m_txs = std::move(txs);
+    m_shortids = std::move(shortids);
+    m_basis_count = basis_count;
+
+    // Build per-bucket sketches
+    m_sketches = std::make_unique<Sketches>();
+    auto& sk = *m_sketches;
+    for (size_t i = 0; i < m_basis_count; ++i) {
+        int bucket = m_shortids[i] & (TOTAL_BUCKETS - 1);
+        if (shortidmask[bucket % 4]) continue;
+        sk.m_basis_sketches[bucket].Add(m_shortids[i]);
+    }
+    for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
+        int bucket = m_shortids[i] & (TOTAL_BUCKETS - 1);
+        if (shortidmask[bucket % 4]) continue;
+        sk.m_local_sketches[bucket].Add(m_shortids[i]);
+    }
+    if (m_basis_count > 0) {
+        // Pre-merge basis into local so m_local_sketches holds basis+local;
+        // TryDecodeGroups can then use it directly without an extra Merge().
+        for (int b = 0; b < TOTAL_BUCKETS; ++b) {
+            if (shortidmask[b % 4]) continue;
+            sk.m_local_sketches[b].sketch.Merge(sk.m_basis_sketches[b].sketch);
+            sk.m_local_sketches[b].count += sk.m_basis_sketches[b].count;
+        }
+    }
+    sk.InitialMerge();
+
+    const GroupMask sketchmask{GroupMask::Fill(4) ^ shortidmask};
+    // Store provider's 4 combined sketches (round 0) into slots 0..3
+    sk.ProviderDeser(0, sketchmask, combined_sketches);
+    m_sketch_level = 0;
+
+    if (shortidmask.Any()) {
+        ProcessShortidFallback(shortid_bytes, shortidmask); // can throw
+    }
+
+    bool resolved = TryDecodeGroups();
+    if (resolved) {
+        FinalizeShortids();
+        return {true, {}, {}};
+    }
+
+    // Request sketches for unresolved groups only
+    GroupMask unresolved_groups;
+    for (int gi = 0; gi < 4; ++gi) {
+        for (int b = gi; b < TOTAL_BUCKETS; b += 4) {
+            if (!m_bucket_resolved[b]) {
+                unresolved_groups.Set(gi);
+                break;
+            }
+        }
+    }
+    return {false, {}, unresolved_groups};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void PeerTemplateSketchT<SketchCapacity>::ProcessShortidFallback(const GRVector& shortid_bytes,
+                                                GroupMask shortidmask)
+{
+    // For round 0, we call this with m_sketch_level = 0; for round 1..4,
+    // m_sketch_level = r-1 and sketches are at that granularity.
+    const int num_groups = 4 << m_sketch_level;
+
+    // Parse the provider's outer shortids (positions SketchCapacity+1 per sketch group) into per-group lists.
+    std::vector<std::vector<uint64_t>> received(num_groups);
+    GroupMask resolved; // groups with every bucket resolved
+    {
+        if (shortid_bytes.n_elements > MAX_TEMPLATE_TXS) return;
+
+        for (int gi = 0; gi < num_groups; ++gi) {
+            bool group_resolved = true;
+            for (int bx = gi; bx < TOTAL_BUCKETS; bx += num_groups) {
+                if (!m_bucket_resolved[bx]) group_resolved = false;
+            }
+            if (group_resolved) resolved.Set(gi);
+        }
+
+        uint64_t last = 0;
+        GRVectorDecode(shortid_bytes, [&](uint64_t delta) {
+            if (delta >= (1ULL << 46)) throw std::ios_base::failure("shortid out of range");
+            last += delta + 1;
+            if (last >= (1ULL << 46)) throw std::ios_base::failure("shortid out of range");
+            int gi = static_cast<int>(last & (num_groups - 1));
+            // Include if the group is requested and not fully resolved
+            if (!shortidmask[gi]) return;
+            if (!resolved[gi]) received[gi].push_back(last);
+        });
+    }
+
+    // For each unresolved group, XOR provided shortids and
+    // basis with provider sketch to recover the inner shortids
+    // (≤SketchCapacity). Full provider set for this group = provided +
+    // basis + decoded inner.
+    auto& sk = *m_sketches;
+    for (int gi = 0; gi < num_groups; ++gi) {
+        if (!shortidmask[gi] || resolved[gi]) continue;
+
+        auto& recv = received[gi];
+        if (sk.m_provider_sketches[gi].count == 0) {
+            // shortids instead of sketch in round 0
+            for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
+            for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+                m_bucket_resolved.Set(b);
+                m_has_provided.Set(b);
+            }
+            continue;
+        }
+
+        // recv XOR provider XOR basis => inner shortids. Only attempt the
+        // decode when the counts say the inner set fits: Decode() on an
+        // overfull sketch can "succeed" with garbage rather than fail.
+        // Note: recv may be empty (everything beyond the basis fits in
+        // the sketch), which is fine given the count check.
+        const int64_t inner_count = sk.m_provider_sketches[gi].count - sk.m_basis_sketches[gi].count - static_cast<int64_t>(recv.size());
+        if (inner_count < 0 || inner_count > SketchCapacity) continue;
+
+        Minisketch recv_sketch = MakeMinisketch46(SketchCapacity);
+        for (uint64_t sid : recv) recv_sketch.Add(sid);
+        recv_sketch.Merge(sk.m_provider_sketches[gi].sketch);
+        recv_sketch.Merge(sk.m_basis_sketches[gi].sketch);
+
+        if (auto decoded = recv_sketch.Decode(SketchCapacity)) {
+            for (uint64_t sid : *decoded) m_decoded_shortids.push_back(sid);
+            for (uint64_t sid : recv) m_provided_shortids.push_back(sid);
+            for (int b = gi; b < TOTAL_BUCKETS; b += num_groups) {
+                m_bucket_resolved.Set(b);
+                m_has_provided.Set(b);
+            }
+        }
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void PeerTemplateSketchT<SketchCapacity>::FinalizeShortids()
+{
+    std::unordered_set<uint64_t> decoded_set(m_decoded_shortids.begin(), m_decoded_shortids.end());
+    std::unordered_set<uint64_t> provided_set(m_provided_shortids.begin(), m_provided_shortids.end());
+    std::unordered_set<uint64_t> our_set(m_shortids.begin(), m_shortids.end());
+
+    // Discard shortids from local set that didn't turn out to be in the template:
+    //  - has_provided: provider = provided ∪ decoded
+    //  - decoded_by_basis: provider = basis ∪ decoded
+    //  - else (basis+local): provider = basis ∪ (local XOR decoded)
+    for (size_t i = m_basis_count; i < m_shortids.size(); ++i) {
+        uint64_t sid = m_shortids[i];
+        int b = sid & (TOTAL_BUCKETS - 1);
+        bool keep_in_template;
+        if (m_has_provided[b]) {
+            keep_in_template = provided_set.contains(sid) || decoded_set.contains(sid);
+        } else if (m_decoded_by_basis[b]) {
+            keep_in_template = decoded_set.contains(sid);
+        } else {
+            keep_in_template = !decoded_set.contains(sid);
+        }
+        if (!keep_in_template) m_shortids[i] = 0;
+    }
+
+    // Append provider shortids we didn't have in our original basis/local set
+    for (uint64_t sid : m_decoded_shortids) {
+        if (our_set.insert(sid).second) m_shortids.push_back(sid);
+    }
+    for (uint64_t sid : m_provided_shortids) {
+        if (our_set.insert(sid).second) m_shortids.push_back(sid);
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+PeerTemplateSketchT<SketchCapacity>::ProcessResult PeerTemplateSketchT<SketchCapacity>::Process(
+    int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
+    const GRVector& shortid_bytes,
+    std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches)
+{
+    // Try shortid fallback first using sketches already prepared at round m_sketch_level = (round-1).
+    // GetShortIDBytes(round, basis_id, mask) groups shortids at that same granularity.
+    if (shortidmask_sent.Any()) {
+        ProcessShortidFallback(shortid_bytes, shortidmask_sent);
+    }
+
+    if (m_bucket_resolved.Count() != TOTAL_BUCKETS && round >= 1 && round <= 3) {
+        // Write provider sketches into their slots, then split all three arrays.
+        m_sketches->ProviderDeser(round, sketchmask_sent, sketches);
+        m_sketches->PrepareRound(round);
+        m_sketch_level = round;
+        TryDecodeGroups();
+    }
+
+    bool all_resolved = (m_bucket_resolved.Count() == TOTAL_BUCKETS);
+    if (all_resolved) FinalizeShortids();
+
+    // Compute unresolved groups at current sketch level
+    const int n = 4 << m_sketch_level;
+    GroupMask unresolved_groups;
+    if (!all_resolved) {
+        for (int gi = 0; gi < n; ++gi) {
+            for (int b = gi; b < TOTAL_BUCKETS; b += n) {
+                if (!m_bucket_resolved[b]) {
+                    unresolved_groups.Set(gi);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Partition unresolved groups: request shortids (fallback) or sketches (continue).
+    GroupMask shortidmask;
+    if (round >= 3) shortidmask = unresolved_groups;
+    GroupMask sketchmask = unresolved_groups - shortidmask;
+
+    return {all_resolved, shortidmask, sketchmask};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+bool TemplateManagerT<SketchCapacity>::FillPartialTxs(PeerTemplatePartial& partial, TemplateTxVec&& refs)
+{
+    auto ref_it = refs.begin();
+    for (size_t chunk_idx = 0; chunk_idx < partial.m_missing.m_positions.size() && ref_it != refs.end(); ++chunk_idx) {
+        for (unsigned bit : partial.m_missing.m_positions[chunk_idx]) {
+            if (ref_it == refs.end()) break;
+            uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
+            if (!Assume(pos < partial.m_txs.size())) continue;
+            if (!Assume(partial.m_txs[pos] == m_pool.end())) continue;
+            partial.m_weight += (*ref_it)->weight;
+            partial.m_txs.values[pos] = *ref_it++;
+            partial.m_missing.m_positions[chunk_idx].Reset(bit);
+            ++partial.m_filled;
+        }
+    }
+    // Append any excess refs so they're tracked (hash check will catch mismatches).
+    while (ref_it != refs.end()) {
+        partial.m_txs.values.push_back(*ref_it++);
+    }
+    refs.values.clear();
+    return partial.m_missing.empty();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+util::Expected<PeerTemplatePartial, typename TemplateManagerT<SketchCapacity>::TmpltState> TemplateManagerT<SketchCapacity>::MakePeerTemplatePartial(PeerTemplateSketch&& sketch)
+{
+    const TemplateTxRef pool_end = m_pool.end();
+    const size_t orig_size = sketch.m_txs.size();
+
+    // Pair up provider shortids with local refs; collect local-only refs to release.
+    std::vector<std::pair<uint64_t, TemplateTxRef>> pairs;
+    for (size_t i = 0; i < orig_size; ++i) {
+        if (sketch.m_shortids[i] != 0) {
+            pairs.emplace_back(sketch.m_shortids[i], sketch.m_txs[i]);
+        } else {
+            RemoveTx(sketch.m_txs[i]);
+        }
+    }
+    // Provider-only shortids (appended beyond m_txs, no local ref).
+    for (size_t i = orig_size; i < sketch.m_shortids.size(); ++i) {
+        pairs.emplace_back(sketch.m_shortids[i], pool_end);
+    }
+    // Clear sketch's refs, ownership is now held by `pairs`
+    sketch.m_txs.values.clear();
+
+    std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    // On shortid collision, just reject the entire template
+    for (size_t i = 1; i < pairs.size(); ++i) {
+        if (pairs[i].first == pairs[i - 1].first) {
+            for (auto& [sid, ref] : pairs) {
+                RemoveTx(ref);
+            }
+            pairs.clear();
+            // Be forgiving: peer might have just not checked for collisions and been unlucky
+            return util::Unexpected{TmpltState::Reset};
+        }
+    }
+
+    PeerTemplatePartial partial;
+    partial.m_tip = sketch.m_tip;
+    partial.m_hash = sketch.m_hash;
+    auto shortid_info = std::make_unique<PeerTemplatePartial::ShortIDInfo>();
+    shortid_info->nonce = sketch.m_nonce;
+    int64_t min_missing_weight{0};
+    partial.m_txs.reserve(pairs.size());
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        partial.m_txs.values.push_back(pairs[i].second);
+        if (pairs[i].second == pool_end) {
+            partial.m_missing.Add(i);
+            shortid_info->missing_shortids.push_back(pairs[i].first);
+            min_missing_weight += MIN_TRANSACTION_WEIGHT;
+        } else {
+            partial.m_weight += pairs[i].second->weight;
+        }
+    }
+    if (partial.m_weight + min_missing_weight > MAX_TEMPLATE_WEIGHT) {
+        RemoveTxs(std::move(partial.m_txs));
+        return util::Unexpected{TmpltState::ProtocolError};
+    }
+    partial.m_shortid_info = std::move(shortid_info);
+    return partial;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+TemplateInfo TemplateManagerT<SketchCapacity>::GetInfo() const
+{
+    TemplateInfo info;
+    info.num_templates = m_templates.size();
+    info.pool_size = m_pool.size();
+    info.pool_weight = m_pool_weight;
+    if (!m_templates.empty()) {
+        info.latest_tx_count = m_templates.back().m_txs.size();
+        info.latest_weight = m_templates.back().m_weight;
+    }
+    info.generate_interval = std::chrono::duration_cast<std::chrono::seconds>(TEMPLATE_GENERATE_INTERVAL);
+    info.peer_templates = m_peer_templates.size();
+    for (const auto& [nodeid, state] : m_peer_reconcile) {
+        int round;
+        if (std::holds_alternative<std::monostate>(state)) {
+            round = 0;
+        } else if (auto* sketch = std::get_if<PeerTemplateSketch>(&state)) {
+            round = std::max(1, sketch->m_sketch_level + 1);
+        } else {
+            round = 5;
+        }
+        info.pending_peer_templates[round].push_back(nodeid);
+    }
+    return info;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::Check()
+{
+    if (m_rng.randrange(CHECK_RATIO) >= 1) return;
+
+    const auto pool_end = m_pool.end();
+
+    // 1. m_scannable_txns <-> m_pool consistency
+    assert(m_scannable_txns.size() == m_pool.size());
+    for (auto ref = m_pool.begin(); ref != pool_end; ++ref) {
+        assert(ref->tx != nullptr);
+        assert(ref->scannable_idx < m_scannable_txns.size());
+        assert(m_scannable_txns[ref->scannable_idx].second == ref);
+    }
+    for (size_t i = 0; i < m_scannable_txns.size(); ++i) {
+        const auto& [wtxid, ref] = m_scannable_txns[i];
+        assert(ref != pool_end);
+        assert(ref->tx != nullptr);
+        assert(ref->tx->GetWitnessHash() == wtxid);
+        assert(ref->scannable_idx == i);
+    }
+
+    // 2. m_pool_weight consistency
+    int64_t total_weight = 0;
+    for (const auto& entry : m_pool) {
+        total_weight += entry.weight;
+        assert(entry.num_templates > 0);
+    }
+    assert(total_weight == m_pool_weight);
+
+    // 3. Count actual references to each pool entry
+    std::vector<uint32_t> refcounts;
+    refcounts.resize(m_pool.size());
+    auto count_refs = [&](const TemplateTxVec& txs) {
+        for (const auto& ref : txs) {
+            if (ref != pool_end) ++refcounts[ref->scannable_idx];
+        }
+    };
+
+    for (const auto& tmpl : m_templates) count_refs(tmpl.m_txs);
+    for (const auto& pt : m_peer_templates) count_refs(pt.m_txs);
+    for (const auto& [nodeid, state] : m_peer_reconcile) {
+        std::visit([&](const auto& s) {
+            if constexpr (!std::is_same_v<std::decay_t<decltype(s)>, std::monostate>) {
+                count_refs(s.m_txs);
+            }
+        }, state);
+    }
+
+    for (const auto& entry : m_pool) {
+        uint32_t expected = refcounts[entry.scannable_idx];
+        if (entry.num_templates != expected) {
+            std::cerr << "CHECK FAILED: wtxid=" << entry.tx->GetWitnessHash().ToString()
+                      << " num_templates=" << entry.num_templates << " expected=" << expected << "\n";
+            assert(false);
+        }
+    }
+
+    // 4. m_peer_template_cache validity
+    for (const auto& [nodeid, ptr] : m_peer_template_cache) {
+        bool found = false;
+        for (const auto& pt : m_peer_templates) {
+            if (&pt == ptr) { found = true; break; }
+        }
+        assert(found);
+        assert(ptr->m_nodeid == nodeid);
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+template <typename T>
+typename TemplateManagerT<SketchCapacity>::PeerReconcileMap::iterator TemplateManagerT<SketchCapacity>::SetPeerReconcile(PeerReconcileMap::iterator it, T&& new_value)
+{
+    std::visit([this](auto& old) {
+        if constexpr (!std::is_same_v<std::decay_t<decltype(old)>, std::monostate>) {
+            RemoveTxs(std::move(old.m_txs));
+        }
+    }, it->second);
+    it->second = std::forward<T>(new_value);
+    return it;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+template <typename T>
+typename TemplateManagerT<SketchCapacity>::PeerReconcileMap::iterator TemplateManagerT<SketchCapacity>::SetPeerReconcile(NodeId nodeid, T&& new_value)
+{
+    auto [it, _] = m_peer_reconcile.try_emplace(nodeid);
+    return SetPeerReconcile(it, std::forward<T>(new_value));
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::DropPeerReconcile(PeerReconcileMap::iterator it, bool keep_if_monostate)
+{
+    if (it != m_peer_reconcile.end()) {
+        if (keep_if_monostate && std::holds_alternative<std::monostate>(it->second)) return;
+        m_peer_reconcile.erase(SetPeerReconcile(it, std::monostate{}));
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCapacity>::CompleteSketchRound(
+    PeerReconcileMap::iterator it,
+    const PeerTemplateSketchT<SketchCapacity>::ProcessResult& pr,
+    NodeClock::time_point now)
+{
+    NodeId nodeid = it->first;
+    auto& sketch = std::get<PeerTemplateSketch>(it->second);
+    const uint256 templatehash = sketch.m_hash;
+
+    auto failure = [&](TmpltState ts) -> TemplateManagerT<SketchCapacity>::TmpltResult {
+        DropPeerReconcile(it, /*keep_if_monostate=*/false);
+        return {ts, templatehash, {}, {}};
+    };
+
+    if (sketch.m_shortids.size() > MAX_TEMPLATE_TXS) {
+        return failure(TmpltState::ProtocolError);
+    }
+
+    if (!pr.resolved) {
+        // XXX store pr.shortidmask/pr.sketchmask on sketch for next round
+        return {TmpltState::Unresolved, templatehash, pr.shortidmask, pr.sketchmask};
+    }
+
+    auto partial = MakePeerTemplatePartial(std::move(sketch));
+    if (!partial) {
+        return failure(partial.error());
+    }
+    if (partial->CompletedSuccessfully()) {
+        if (partial->m_weight > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial->m_txs));
+            return failure(TmpltState::ProtocolError);
+        }
+        // All txs matched locally; promote directly.
+        PeerTemplate pt;
+        pt.m_txs = std::move(partial->m_txs);
+        pt.m_weight = partial->m_weight;
+        pt.m_tip = partial->m_tip;
+        pt.m_hash = partial->m_hash;
+        pt.m_nodeid = nodeid;
+        pt.m_time = now;
+        pt.TopoSort();
+        m_peer_reconcile.erase(it);
+        m_peer_templates.push_back(std::move(pt));
+        m_peer_template_cache[nodeid] = &m_peer_templates.back();
+        return {TmpltState::Complete, templatehash, {}, {}};
+    }
+    SetPeerReconcile(it, std::move(*partial));
+    return {TmpltState::NeedsTxs, templatehash, {}, {}};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::WaitingForPeerSketch(NodeId nodeid)
+{
+    SetPeerReconcile(nodeid, std::monostate{});
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCapacity>::InitPeerSketch(
+    NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
+    uint64_t nonce, uint256 basis_hash,
+    const GRVector& basis_delta,
+    std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches,
+    GroupMask shortidmask, const GRVector& shortid_bytes,
+    NodeClock::time_point now)
+{
+    // Must be in monostate (awaiting round-0 response).
+    auto [is_mono, it] = GetPeerRecState<std::monostate>(m_peer_reconcile, nodeid);
+
+    auto failure = [&](TmpltState ts) -> TemplateManagerT<SketchCapacity>::TmpltResult {
+        DropPeerReconcile(it, /*keep_if_monostate=*/false);
+        return {ts, templatehash, {}, {}};
+    };
+
+    if (!is_mono) return failure(TmpltState::Reset);
+
+    shortidmask.LimitToRound(1);
+    if (shortidmask.Count() + sketches.size() != 4) return failure(TmpltState::ProtocolError);
+
+    const uint256& tip_hash = tip ? tip->GetBlockHash() : uint256::ZERO;
+    ShortIDHasher hasher(tip_hash, nonce);
+
+    // Build txs and shortids arrays: basis segment then local.
+    std::unordered_set<const CTransaction*> basis_tx_set;
+    TemplateTxVec txs;
+    std::vector<uint64_t> shortids;
+    size_t basis_count = 0;
+
+    if (!basis_hash.IsNull()) {
+        auto cache_it = m_peer_template_cache.find(nodeid);
+        if (cache_it != m_peer_template_cache.end() && cache_it->second->m_hash == basis_hash) {
+            // null basis_hash, missing basis hash and incorrect basis hash are all treated the same
+            const PeerTemplate& basis = *cache_it->second;
+            TemplateTxnsSelection sel;
+            try {
+                sel.GRDecode(basis_delta);
+            } catch (...) {
+                // sending corrupt shortid data suggests sketches might be corrupt too,
+                // so don't try to recover automatically
+                return failure(TmpltState::ProtocolError);
+            }
+            txs.reserve(sel.Count());
+            shortids.reserve(sel.Count());
+            for (size_t chunk_idx = 0; chunk_idx < sel.m_positions.size(); ++chunk_idx) {
+                for (unsigned bit : sel.m_positions[chunk_idx]) {
+                    uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
+                    if (pos >= basis.m_txs.size()) {
+                        RemoveTxs(std::move(txs));
+                        return failure(TmpltState::ProtocolError);
+                    }
+                    const auto& ref = basis.m_txs[pos];
+                    Assume(ref != m_pool.end());
+                    ++ref->num_templates;
+                    shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
+                    txs.values.push_back(ref);
+                    basis_tx_set.insert(ref->tx.get());
+                }
+            }
+        }
+    }
+    basis_count = txs.size();
+
+    // Append local txs from our most recent local template, excluding basis txs.
+    if (!m_templates.empty()) {
+        const auto& local_tmpl = m_templates.back();
+        txs.reserve(basis_count + local_tmpl.m_txs.size());
+        shortids.reserve(basis_count + local_tmpl.m_txs.size());
+        for (const auto& ref : local_tmpl.m_txs) {
+            if (basis_tx_set.contains(ref->tx.get())) continue;
+            ++ref->num_templates;
+            shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
+            txs.values.push_back(ref);
+        }
+    }
+
+    // Initialise the sketch and store it in m_peer_reconcile.
+    PeerTemplateSketch sketch;
+    sketch.m_hash = templatehash;
+    sketch.m_tip = tip;
+    sketch.m_nonce = nonce;
+
+    try {
+        typename PeerTemplateSketchT<SketchCapacity>::ProcessResult pr = sketch.Init(std::move(txs), std::move(shortids), basis_count, sketches, shortidmask, shortid_bytes);
+        auto rec_it = SetPeerReconcile(it, std::move(sketch));
+        return CompleteSketchRound(rec_it, pr, now);
+    } catch (...) {
+        RemoveTxs(std::move(sketch.m_txs)); // cleanup any leftover txs before destruction
+        return failure(TmpltState::ProtocolError); // shortid_bytes decode failure
+    }
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCapacity>::UpdatePeerSketch(
+    NodeId nodeid, uint256 templatehash, int round,
+    GroupMask shortidmask, GroupMask sketchmask,
+    const GRVector& shortid_bytes,
+    std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches,
+    NodeClock::time_point now)
+{
+    // Must be a PeerTemplateSketch with matching hash.
+    auto [is_sketch, it] = GetPeerRecState<PeerTemplateSketch>(m_peer_reconcile, nodeid);
+
+    auto failure = [&](TmpltState ts) -> TemplateManagerT<SketchCapacity>::TmpltResult {
+        DropPeerReconcile(it, /*keep_if_monostate=*/true);
+        return {ts, templatehash, {}, {}};
+    };
+
+    if (!is_sketch) {
+        return failure(TmpltState::Reset);
+    }
+
+    auto& sketch = std::get<PeerTemplateSketch>(it->second);
+    if (sketch.m_hash != templatehash) return failure(TmpltState::Reset);
+
+    // Round should match what's expected based on the sketch level
+    if (round != sketch.m_sketch_level + 1) return failure(TmpltState::ProtocolError);
+
+    // Validate masks: must not overlap, and must cover exactly the unresolved groups.
+    if ((shortidmask & sketchmask).Any()) return failure(TmpltState::ProtocolError);
+
+    // Compute resolved groups at current level: a group is resolved if all its buckets are.
+    const int num_groups = 4 << sketch.m_sketch_level;
+    GroupMask resolved_groups = GroupMask::Fill(num_groups) & sketch.m_bucket_resolved;
+    if (((shortidmask | sketchmask) ^ resolved_groups) != GroupMask::Fill(num_groups)) {
+        return failure(TmpltState::ProtocolError);
+    }
+
+    typename PeerTemplateSketchT<SketchCapacity>::ProcessResult pr;
+    try {
+        pr = sketch.Process(round, shortidmask, sketchmask, shortid_bytes, sketches);
+    } catch (...) {
+        return failure(TmpltState::ProtocolError); // badly constructed message
+    }
+
+    return CompleteSketchRound(it, pr, now);
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::LocalFillResult TemplateManagerT<SketchCapacity>::FillPeerPartialLocally(NodeId nodeid, const CTxMemPool& mempool, ExtraTransactions& extra_txns)
+{
+    LocalFillResult res{};
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+    if (!is_partial) return res;
+    auto& partial = std::get<PeerTemplatePartial>(it->second);
+    if (!partial.m_shortid_info) { res.still_missing = partial.m_missing.Count(); return res; }
+
+    auto info = std::move(partial.m_shortid_info);
+    partial.m_shortid_info.reset();
+
+    const auto& missing_sids = info->missing_shortids;
+    if (missing_sids.empty()) { res.still_missing = partial.m_missing.Count(); return res; }
+
+    // Build shortid → position-in-m_txs map.
+    std::unordered_map<uint64_t, uint32_t> sid_to_pos(missing_sids.size());
+    {
+        size_t i = 0;
+        for (size_t chunk_idx = 0; chunk_idx < partial.m_missing.m_positions.size(); ++chunk_idx) {
+            for (unsigned bit : partial.m_missing.m_positions[chunk_idx]) {
+                if (i >= missing_sids.size()) break;
+                uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
+                auto [sit, inserted] = sid_to_pos.emplace(missing_sids[i], pos);
+                Assume(inserted); // already guaranteed by MakePeerTemplatePartial
+                ++i;
+            }
+        }
+    }
+
+    const uint256& tip_hash = partial.m_tip ? partial.m_tip->GetBlockHash() : uint256::ZERO;
+    ShortIDHasher hasher(tip_hash, info->nonce);
+
+    // Candidates keyed by position in m_txs: false = no match,
+    // CTransactionRef = mempool/extra hit, TemplateTxRef = pool hit, true = collision.
+    using Hit = std::variant<bool, CTransactionRef, TemplateTxRef>;
+    std::unordered_map<uint32_t, Hit> candidates;
+    size_t match_count = 0;
+
+    auto try_match = [&](const Wtxid& wtxid, const auto& tx) {
+        uint64_t sid = hasher.GetShortID(wtxid);
+        auto find_it = sid_to_pos.find(sid);
+        if (find_it == sid_to_pos.end()) return;
+        uint32_t pos = find_it->second;
+        auto [cit, inserted] = candidates.try_emplace(pos, tx);
+        if (inserted) {
+            ++match_count;
+        } else if (!std::holds_alternative<bool>(cit->second)) {
+            // Already have a candidate — check if it's the same tx.
+            const Wtxid* existing_wtxid = nullptr;
+            if (auto* ref = std::get_if<CTransactionRef>(&cit->second)) {
+                existing_wtxid = &(*ref)->GetWitnessHash();
+            } else if (auto* ref = std::get_if<TemplateTxRef>(&cit->second)) {
+                existing_wtxid = &(*ref)->tx->GetWitnessHash();
+            }
+            if (existing_wtxid && *existing_wtxid != wtxid) {
+                cit->second = true; // collision
+                --match_count;
+            }
+        }
+    };
+
+    // Scan template pool.
+    for (const auto& [wtxid, ref] : m_scannable_txns) {
+        try_match(wtxid, ref);
+        if (match_count == sid_to_pos.size()) break;
+    }
+
+    // Scan mempool.
+    if (match_count < sid_to_pos.size()) {
+        LOCK(mempool.cs);
+        for (const auto& [wtxid, txit] : mempool.txns_randomized) {
+            try_match(wtxid, txit->GetSharedTx());
+            if (match_count == sid_to_pos.size()) break;
+        }
+    }
+
+    // Scan extra transactions.
+    while (match_count < sid_to_pos.size()) {
+        auto [wtxid, tx] = extra_txns.next();
+        if (!tx) break;
+        try_match(*wtxid, *tx);
+    }
+
+    // Fill matched positions, counting by source type.
+    auto n_missing = partial.m_missing.Count();
+    for (auto& [pos, hit] : candidates) {
+        std::visit(util::Overloaded(
+            [&](bool&& collision) { if (collision) ++res.collisions; },
+            [&](CTransactionRef&& tx) {
+                auto ref = AddTx(std::move(tx));
+                partial.m_weight += ref->weight;
+                --n_missing;
+                partial.m_txs.values[pos] = std::move(ref);
+                partial.m_missing.Remove(pos);
+                ++partial.m_filled;
+                ++res.from_txns;
+            },
+            [&](TemplateTxRef&& ref) {
+                ++ref->num_templates;
+                partial.m_weight += ref->weight;
+                --n_missing;
+                partial.m_txs.values[pos] = std::move(ref);
+                partial.m_missing.Remove(pos);
+                ++partial.m_filled;
+                ++res.from_templates;
+            }
+        ), std::move(hit));
+        if (partial.m_weight + n_missing * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
+            RemoveTxs(std::move(partial.m_txs));
+            m_peer_reconcile.erase(it);
+            res.oversize = true;
+            res.still_missing = 0;
+            return res;
+        }
+    }
+
+    res.still_missing = n_missing;
+    return res;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+GRVector TemplateManagerT<SketchCapacity>::GetPeerPartialMissingGR(NodeId nodeid)
+{
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+    if (!is_partial) return {};
+    return std::get<PeerTemplatePartial>(it->second).m_missing.GREncode();
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+std::pair<typename TemplateManagerT<SketchCapacity>::TmpltState, uint32_t> TemplateManagerT<SketchCapacity>::FillPeerPartial(NodeId nodeid, const uint256& hash, std::vector<CTransactionRef> txs, NodeClock::time_point now)
+{
+    auto [is_partial, it] = GetPeerRecState<PeerTemplatePartial>(m_peer_reconcile, nodeid);
+
+    auto failure = [&](TmpltState ts) -> std::pair<TmpltState, uint32_t> {
+        DropPeerReconcile(it, /*keep_if_monostate=*/true);
+        return {ts, 0};
+    };
+
+    if (!is_partial) return failure(TmpltState::Reset);
+
+    auto& partial = std::get<PeerTemplatePartial>(it->second);
+    if (partial.m_hash != hash) return failure(TmpltState::Reset);
+
+    auto refs = AddTxs(txs);
+    if (!FillPartialTxs(partial, std::move(refs))) {
+        if (partial.m_weight + int64_t(partial.m_missing.Count()) * MIN_TRANSACTION_WEIGHT > MAX_TEMPLATE_WEIGHT) {
+            return failure(TmpltState::ProtocolError);
+        }
+        return {TmpltState::NeedsTxs, 0};
+    }
+    if (!partial.CompletedSuccessfully()) {
+        return failure(TmpltState::Reset);
+    }
+
+    // Promote to completed PeerTemplate.
+    if (partial.m_weight > MAX_TEMPLATE_WEIGHT) {
+        return failure(TmpltState::ProtocolError);
+    }
+    uint32_t ntxs = partial.m_txs.size();
+    PeerTemplate pt;
+    pt.m_txs = std::move(partial.m_txs);
+    pt.m_weight = partial.m_weight;
+    pt.m_tip = partial.m_tip;
+    pt.m_hash = partial.m_hash;
+    pt.m_nodeid = nodeid;
+    pt.m_time = now;
+    pt.TopoSort();
+    m_peer_reconcile.erase(it);
+    m_peer_templates.push_back(std::move(pt));
+    m_peer_template_cache[nodeid] = &m_peer_templates.back();
+    return {TmpltState::Complete, ntxs};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+uint256 TemplateManagerT<SketchCapacity>::GetLastPeerTemplateHash(NodeId nodeid)
+{
+    auto it = m_peer_template_cache.find(nodeid);
+    if (it == m_peer_template_cache.end()) return uint256::ZERO;
+    return it->second->m_hash;
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::ForgetPeer(NodeId nodeid)
+{
+    auto it = SetPeerReconcile(nodeid, std::monostate{});
+    m_peer_reconcile.erase(it);
+    m_peer_template_cache.erase(nodeid);
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+typename TemplateManagerT<SketchCapacity>::NextTemplateTx TemplateManagerT<SketchCapacity>::GetNextTemplateTx(
+    NodeId nodeid, NodeClock::time_point now,
+    const CTxMemPool& mempool,
+    const uint256& active_tip_hash,
+    const std::map<GenTxid, CTransactionRef>* recent_block_txs)
+{
+    auto cache_it = m_peer_template_cache.find(nodeid);
+    if (cache_it == m_peer_template_cache.end()) return {};
+    PeerTemplate& pt = *cache_it->second;
+
+    // Can't reason about a template with no tip
+    if (!pt.m_tip) return {};
+
+    // Only check recent block txs when the template targets a different tip
+    // (if tips match, all template txs are unconfirmed by definition)
+    const bool check_recent_block = recent_block_txs
+        && pt.m_tip->GetBlockHash() != active_tip_hash;
+
+    const size_t total = pt.m_txs.size();
+
+    auto in_mempool_or_block = [&](const auto& wtxid) -> bool {
+        if (mempool.exists(wtxid)) return true;
+        if (check_recent_block) {
+            auto wit = recent_block_txs->find(GenTxid{wtxid});
+            if (wit != recent_block_txs->end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    while (!pt.m_pending.empty()) {
+        auto [pos, nchildren] = pt.m_pending.back();
+        pt.m_pending.pop_back();
+
+        auto& ttx = *pt.m_txs[pos];
+
+        auto [usable, package_parent] = pt.ConsumePendingParents(*ttx.tx);
+
+        if (ttx.next_mempool_check == NodeClock::time_point::max()) {
+            // (1) Permanently rejected
+            usable = false;
+        } else if (in_mempool_or_block(ttx.tx->GetWitnessHash())) {
+            // (2) Already in mempool or confirmed in recent block — bump and skip
+            ttx.next_mempool_check = Jitter(now, ATMP_RECHECK_INTERVAL);
+            continue;
+        } else if (!usable && now >= ttx.next_mempool_check) {
+            // (3) Multiple low-fee parents, 1p1c won't apply — skip
+            ttx.next_mempool_check = Jitter(now, ATMP_RETRY_INTERVAL);
+        }
+
+        if (!usable || now < ttx.next_mempool_check) {
+            // (4) Not usable or not ready, store for parent info
+            cache_it->second->StashPendingParent(ttx.tx, nchildren, (usable && package_parent == nullptr));
+        } else {
+            // (5) Return tx for ATMP
+            return NextTemplateTx{ttx.tx, std::move(package_parent), total - pt.m_pending.size(), total, nchildren};
+        }
+    }
+
+    return {};
+}
+
+template <int SketchCapacity>
+    requires ValidSketchCapacity<SketchCapacity>
+void TemplateManagerT<SketchCapacity>::ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
+                                       NodeClock::time_point now,
+                                       TemplateATMPResult result,
+                                       bool needed_parent, uint32_t nchildren)
+{
+    bool package_candidate = !needed_parent;
+
+    // 1. Update next_mempool_check based on result
+    auto it = m_pool.find(tx->GetWitnessHash());
+    if (it != m_pool.end()) {
+        switch (result) {
+        case TemplateATMPResult::ACCEPTED:
+        case TemplateATMPResult::ALREADY_IN_MEMPOOL:
+            it->next_mempool_check = Jitter(now, ATMP_RECHECK_INTERVAL);
+            nchildren = 0; // doesn't need to be tracked as a potential parent
+            break;
+        case TemplateATMPResult::MISSING_INPUTS:
+            package_candidate = false;
+            [[fallthrough]];
+        case TemplateATMPResult::CONFLICT:
+        case TemplateATMPResult::RECONSIDERABLE:
+            it->next_mempool_check = Jitter(now, ATMP_RETRY_INTERVAL);
+            break;
+        case TemplateATMPResult::PREMATURE_SPEND:
+            it->next_mempool_check = Jitter(now, ATMP_RETRY_SLOW_INTERVAL);
+            package_candidate = false;
+            break;
+        case TemplateATMPResult::UNACCEPTABLE:
+            it->next_mempool_check = NodeClock::time_point::max();
+            package_candidate = false;
+            break;
+        }
+    }
+
+    // 2. Stash info about txs with children for potential 1p1c attempts.
+    if (nchildren > 0) {
+        auto cache_it = m_peer_template_cache.find(nodeid);
+        if (cache_it != m_peer_template_cache.end()) {
+            cache_it->second->StashPendingParent(tx, nchildren, package_candidate);
+        }
+    }
+}
+
+} // namespace node
+
+#endif // BITCOIN_NODE_TEMPLATEMAN_IMPL_H

@@ -42,8 +42,10 @@ static constexpr int TOTAL_BUCKETS = 32;
 /** Per-bucket sketch capacity. */
 static constexpr int SKETCH_CAPACITY = 64;
 
-/** Sketch serialized size. */
-static constexpr size_t SKETCH_SER_SIZE{SKETCH_CAPACITY * 46 / 8};
+/** Valid sketch capacities: multiples of 4 (so capacity * 46 bits is a whole
+ *  number of bytes) covering the useful range for tests and production. */
+template <int N>
+concept ValidSketchCapacity = N == 4 || N == 8 || N == 16 || N == 32 || N == 64;
 
 /** A mask with one bit per bucket. */
 using BucketMask = BitSet<TOTAL_BUCKETS>;
@@ -137,7 +139,7 @@ using TemplateTxRef = TemplateTxSet::iterator;
 
 class TemplateTxVec {
 private:
-    friend class TemplateManager;
+    template <int SketchCapacity> requires ValidSketchCapacity<SketchCapacity> friend class TemplateManagerT;
     std::vector<TemplateTxRef> values;
 
 public:
@@ -191,8 +193,12 @@ public:
     uint64_t GetShortID(const Wtxid& wtxid) const;
 };
 
-/** A locally-generated block template for the sendtemplate protocol. */
-class LocalTemplate : public Template {
+/** A locally-generated block template for the sendtemplate protocol.
+ *
+ *  Templated on per-bucket sketch capacity so tests can exercise the
+ *  round machinery at small scale; production uses SKETCH_CAPACITY. */
+template <int SketchCapacity> requires ValidSketchCapacity<SketchCapacity>
+class LocalTemplateT : public Template {
 public:
     /* m_txs is ordered by shortid, based on m_nonce and m_tip */
 
@@ -200,10 +206,13 @@ public:
     uint64_t m_nonce;             //!< template-level nonce
     NetworkId m_network_id;        //!< network id for this template
 
+    /** Sketch serialized size. */
+    static constexpr size_t SER_SIZE{SketchCapacity * 46 / 8};
+
     /** A serialized sketch in wire format. */
     struct Sketch {
         uint32_t elements;              //!< number of elements in this sketch
-        std::array<unsigned char, SKETCH_SER_SIZE> ser; //!< serialized sketch bytes
+        std::array<unsigned char, SER_SIZE> ser; //!< serialized sketch bytes
 
         SERIALIZE_METHODS(Sketch, obj) {
             READWRITE(obj.elements, obj.ser);
@@ -242,7 +251,7 @@ public:
      *  shortids in the specified basis. At round 0, the group index
      *  is the low 2 bits of the bucket index; at round R (1-4), the
      *  group index is the low (R+1) bits of the bucket index, and we
-     *  also skip the last SKETCH_CAPACITY shortids per group (covered
+     *  also skip the last SketchCapacity shortids per group (covered
      *  by previous sketches) after encoding the rest.
      */
     GRVector GetShortIDBytes(int round, uint8_t basis_id, GroupMask mask) const;
@@ -263,6 +272,9 @@ public:
      */
     const BasisInfo* GetBasisInfo(uint8_t basis_id) const;
 };
+
+/** Production local template (full sketch capacity). */
+using LocalTemplate = LocalTemplateT<SKETCH_CAPACITY>;
 
 /** Bitset-based tracking of template positions.
  *
@@ -393,8 +405,11 @@ public:
  *  the groups are split in parallel using the received provider odd-child sketches.
  *  TryDecodeGroups() attempts ((basis+local)^provider) then (basis^provider) for
  *  each unresolved group, early-exiting per group on first success.
- */
-class PeerTemplateSketch : public Template {
+ *
+ *  Templated on per-bucket sketch capacity (see LocalTemplateT); a receiver
+ *  must be instantiated at the same capacity as the provider it talks to. */
+template <int SketchCapacity> requires ValidSketchCapacity<SketchCapacity>
+class PeerTemplateSketchT : public Template {
 public:
     /* m_txs is constructed from the basis txs followed by local txs
      *  [0 .. m_basis_count-1]: from retained basis positions
@@ -430,10 +445,10 @@ public:
      *  ProcessShortidFallback at the start of Process(round), equals round-1. */
     int m_sketch_level{-1};
 
-    PeerTemplateSketch();
-    ~PeerTemplateSketch();
-    PeerTemplateSketch(PeerTemplateSketch&&) = default;
-    PeerTemplateSketch& operator=(PeerTemplateSketch&&) = default;
+    PeerTemplateSketchT();
+    ~PeerTemplateSketchT();
+    PeerTemplateSketchT(PeerTemplateSketchT&&) = default;
+    PeerTemplateSketchT& operator=(PeerTemplateSketchT&&) = default;
 
     struct ProcessResult {
         bool resolved;          //!< all TOTAL_BUCKETS buckets reconciled
@@ -448,7 +463,7 @@ public:
     ProcessResult Init(TemplateTxVec&& txs,
                        std::vector<uint64_t>&& shortids,
                        size_t basis_count,
-                       std::span<const LocalTemplate::Sketch> combined_sketches,
+                       std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> combined_sketches,
                        GroupMask shortidmask, const GRVector& shortid_bytes);
 
     /** Process incoming data for rounds 1-4.
@@ -458,7 +473,7 @@ public:
      */
     ProcessResult Process(int round, GroupMask shortidmask_sent, GroupMask sketchmask_sent,
                           const GRVector& shortid_bytes,
-                          std::span<const LocalTemplate::Sketch> sketches);
+                          std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches);
 
 private:
     struct Sketches;
@@ -477,6 +492,9 @@ private:
      *  After this call, the non-zero entries of m_shortids equal the provider's shortid set. */
     void FinalizeShortids();
 };
+
+/** Production peer sketch (full sketch capacity). */
+using PeerTemplateSketch = PeerTemplateSketchT<SKETCH_CAPACITY>;
 
 /** Receiver-side reconstruction state after sketch reconciliation completes.
  *
@@ -519,13 +537,20 @@ struct TemplateInfo {
  *
  * Maintains a shared tx pool (refcounted) across all templates,
  * and provides provider-side template generation and sketch encoding.
+ *
+ * Templated on per-bucket sketch capacity so tests can exercise the
+ * reconciliation machinery at small scale; production uses SKETCH_CAPACITY.
  */
-class TemplateManager
+template <int SketchCapacity> requires ValidSketchCapacity<SketchCapacity>
+class TemplateManagerT
 {
 public:
-    explicit TemplateManager(bool deterministic = false) : m_rng{deterministic} {}
+    using LocalTemplate = LocalTemplateT<SketchCapacity>;
+    using PeerTemplateSketch = PeerTemplateSketchT<SketchCapacity>;
 
-    ~TemplateManager();
+    explicit TemplateManagerT(bool deterministic = false) : m_rng{deterministic} {}
+
+    ~TemplateManagerT();
 
     enum class TmpltState { Reset, Unresolved, NeedsTxs, Complete, ProtocolError };
 
@@ -681,7 +706,7 @@ public:
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
                                uint64_t nonce, uint256 basis_hash,
                                const GRVector& basis_delta,
-                               std::span<const LocalTemplate::Sketch> sketches,
+                               std::span<const typename LocalTemplate::Sketch> sketches,
                                GroupMask shortidmask, const GRVector& shortid_bytes,
                                NodeClock::time_point now);
 
@@ -692,7 +717,7 @@ public:
     TmpltResult UpdatePeerSketch(NodeId nodeid, uint256 templatehash, int round,
                                  GroupMask shortidmask, GroupMask sketchmask,
                                  const GRVector& shortid_bytes,
-                                 std::span<const LocalTemplate::Sketch> sketches,
+                                 std::span<const typename LocalTemplate::Sketch> sketches,
                                  NodeClock::time_point now);
 
     /** Feed incoming tmplttxn transactions into a PeerTemplatePartial.
@@ -754,6 +779,9 @@ public:
      *  Returns error template state on shortid collision or overweight. */
     util::Expected<PeerTemplatePartial, TmpltState> MakePeerTemplatePartial(PeerTemplateSketch&& sketch);
 };
+
+/** Production template manager (full sketch capacity). */
+using TemplateManager = TemplateManagerT<SKETCH_CAPACITY>;
 
 } // namespace node
 
