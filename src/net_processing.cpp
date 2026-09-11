@@ -5719,6 +5719,7 @@ void PeerManagerImpl::MaybeGenerateTemplate(Network net)
     opt.block_reserved_weight = MINIMUM_BLOCK_RESERVED_WEIGHT;
     opt.block_max_weight = node::MAX_TEMPLATE_WEIGHT;
     opt.test_block_validity = false;
+    opt.max_entry_time = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch() - node::MIN_TEMPLATE_TX_AGE);
     node::BlockAssembler assembler{m_chainman.ActiveChainstate(), &m_mempool, opt,
                                    node::BlockAssembler::ALLOW_OVERSIZED_BLOCKS};
     auto block_template = assembler.CreateNewBlock();

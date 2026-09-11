@@ -350,6 +350,7 @@ void BlockAssembler::addChunks()
             // This chunk will fit, so add it to the block.
             nConsecutiveFailed = 0;
             for (const auto& tx : selected_transactions) {
+                if (tx.get().GetTime() > m_options.max_entry_time) continue;
                 AddToBlock(tx);
             }
             pblocktemplate->m_package_feerates.emplace_back(chunk_feerate_vsize);

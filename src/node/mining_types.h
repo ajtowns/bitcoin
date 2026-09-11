@@ -89,6 +89,10 @@ struct BlockCreateOptions {
      * Should only be disabled for tests / benchmarks.
      */
     bool test_block_validity{true};
+    /**
+     * Skip entries that entered the mempool after this time
+     */
+    std::chrono::seconds max_entry_time{std::chrono::seconds::max()};
 };
 
 struct BlockWaitOptions {
