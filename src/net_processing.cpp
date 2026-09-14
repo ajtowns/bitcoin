@@ -5923,8 +5923,8 @@ void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
 
         auto shortids = ltd.tmpl->GetShortIDBytes(0, basis_id, shortidmask);
 
-        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes sketches=%d shortidmask=%02x shortids=%d peer=%d",
-                 ltd.tmpl->m_hash.ToString(), basis_hash.ToString(), basis_id, delta.encoded_elements.size(), sketches_to_send.size(), shortidmask_raw, shortids.n_elements, node.GetId());
+        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes (%d txs) sketches=%d shortidmask=%02x shortids=%d peer=%d",
+                 ltd.tmpl->m_hash.ToString(), basis_hash.ToString(), basis_id, delta.encoded_elements.size(), delta.n_elements, sketches_to_send.size(), shortidmask_raw, shortids.n_elements, node.GetId());
 
         MakeAndPushMessage(node, NetMsgType::TMPLT,
                            uint8_t{0}, ltd.tmpl->m_hash,
