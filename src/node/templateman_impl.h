@@ -1085,8 +1085,10 @@ typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCa
     const GRVector& basis_delta,
     std::span<const typename LocalTemplateT<SketchCapacity>::Sketch> sketches,
     GroupMask shortidmask, const GRVector& shortid_bytes,
-    NodeClock::time_point now)
+    NodeClock::time_point now, size_t& basis_tx_count)
 {
+    basis_tx_count = 0;
+
     // Must be in monostate (awaiting round-0 response).
     auto [is_mono, it] = GetPeerRecState<std::monostate>(m_peer_reconcile, nodeid);
 
@@ -1117,6 +1119,7 @@ typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCa
         } else {
             // found basis hash
             const PeerTemplate& basis = *cache_it->second;
+            basis_tx_count = basis.m_txs.size();
             TemplateTxnsSelection sel;
             try {
                 sel.GRDecode(basis_delta);

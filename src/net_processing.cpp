@@ -4575,15 +4575,17 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 }
             }
 
-            LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes sketches=%d shortidmask=%02x shortids=%d peer=%d",
-                     hash.ToString(), tip_hash.ToString(), basis_hash.ToString(), basis_delta.encoded_elements.size(), sketches.size(), shortidmask_raw, shortid_bytes.n_elements, pfrom.GetId());
-
             LOCK(m_template_mutex);
 
+            size_t basis_tx_count{0};
             auto result = m_templateman.InitPeerSketch(pfrom.GetId(), tip, hash, nonce,
                                                        basis_hash, basis_delta, sketches,
                                                        shortidmask, shortid_bytes,
-                                                       NodeClock::now());
+                                                       NodeClock::now(), basis_tx_count);
+
+            LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes (kept=%d/%d) sketches=%d shortidmask=%02x shortids=%d peer=%d",
+                     hash.ToString(), tip_hash.ToString(), basis_hash.ToString(), basis_delta.encoded_elements.size(), basis_delta.n_elements, basis_tx_count, sketches.size(), shortidmask_raw, shortid_bytes.n_elements, pfrom.GetId());
+
             ProcessTemplateSketchUpdate(pfrom, peer, 0, basis_id, result);
         } else if (round <= 4) {
             uint32_t shortidmask_raw{0};
@@ -5923,8 +5925,8 @@ void PeerManagerImpl::MaybeSendTemplateMessages(CNode& node, Peer& peer)
 
         auto shortids = ltd.tmpl->GetShortIDBytes(0, basis_id, shortidmask);
 
-        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes (%d txs) sketches=%d shortidmask=%02x shortids=%d peer=%d",
-                 ltd.tmpl->m_hash.ToString(), basis_hash.ToString(), basis_id, delta.encoded_elements.size(), delta.n_elements, sketches_to_send.size(), shortidmask_raw, shortids.n_elements, node.GetId());
+        LogDebug(BCLog::GETTMPLT, "Sending tmplt round=0 hash=%s basis=%s basis_id=%d delta=%d bytes sketches=%d shortidmask=%02x shortids=%d peer=%d",
+                 ltd.tmpl->m_hash.ToString(), basis_hash.ToString(), basis_id, delta.encoded_elements.size(), sketches_to_send.size(), shortidmask_raw, shortids.n_elements, node.GetId());
 
         MakeAndPushMessage(node, NetMsgType::TMPLT,
                            uint8_t{0}, ltd.tmpl->m_hash,
