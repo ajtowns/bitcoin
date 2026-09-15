@@ -69,13 +69,14 @@ using NetworkId = uint32_t;
 static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
 /** How long to keep completed peer templates before expiry. */
-static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{180}};
+static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{210}};
 
 /** Average interval between local template generation cycles. */
 static constexpr auto TEMPLATE_GENERATE_INTERVAL{std::chrono::seconds{30}};
 
-/** Average interval between gettmplt requests to each peer. */
+/** Average interval between gettmplt requests to each peer (1m30-2m30). */
 static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::minutes{2}};
+static constexpr auto TEMPLATE_REQUEST_SPREAD{std::chrono::minutes{1}};
 
 /** Maximum number of inbound peers to actively request templates from. */
 static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
@@ -560,10 +561,16 @@ public:
         GroupMask shortidmask, sketchmask; //!< only meaningful when state == Unresolved
     };
 
-    /** Return a jittered time point uniformly distributed in [now + avg/2, now + 3*avg/2). */
-    NodeClock::time_point Jitter(NodeClock::time_point now, std::chrono::seconds avg)
+    /** Return a jittered time point uniformly distributed in [now + avg - spread/2, now + avg + spread/2). */
+    NodeClock::time_point Jitter(NodeClock::time_point now, std::chrono::microseconds avg, std::chrono::microseconds spread)
     {
-        return m_rng.rand_uniform_delay(now + avg / 2, avg);
+        return m_rng.rand_uniform_delay(now + avg - spread/2, spread);
+    }
+
+    /** Return a jittered time point uniformly distributed in [now + avg/2, now + 3*avg/2). */
+    NodeClock::time_point Jitter(NodeClock::time_point now, std::chrono::microseconds avg)
+    {
+        return Jitter(now, avg, /*spread=*/avg);
     }
 
 private:

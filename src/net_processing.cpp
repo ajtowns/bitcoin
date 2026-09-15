@@ -5848,7 +5848,7 @@ void PeerManagerImpl::MaybeRequestTemplate(CNode& node, Peer& peer)
         }
         m_templateman.WaitingForPeerSketch(node.GetId());
         basis_hash = m_templateman.GetLastPeerTemplateHash(node.GetId());
-        peer.m_next_gettmplt = m_templateman.Jitter(now, node::TEMPLATE_REQUEST_INTERVAL);
+        peer.m_next_gettmplt = m_templateman.Jitter(now, node::TEMPLATE_REQUEST_INTERVAL, node::TEMPLATE_REQUEST_SPREAD);
     }
 
     if (basis_hash.IsNull()) {
