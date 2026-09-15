@@ -298,8 +298,10 @@ FUZZ_TARGET(templateman_mgr, .init = initialize_templateman)
                 size_t idx = fdp.ConsumeIntegralInRange<size_t>(0, generated_hashes.size() - 1);
                 const FuzzLocalTemplate* tmpl = mgr.GetLocalTemplate(generated_hashes[idx], 0);
                 if (!tmpl) return;
+                size_t basis_tx_count{0};
                 auto result = mgr.InitPeerSketch(peer, nullptr, tmpl->m_hash,
-                                   tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), {}, {}, now());
+                                   tmpl->m_nonce, uint256::ZERO, {}, tmpl->GetSketches(0), {}, {}, now(),
+                                   basis_tx_count);
                 handle_result(peer, 0, result);
             },
             [&]() {

@@ -709,13 +709,15 @@ public:
 
     /** Start a new peer sketch from a round-0 tmplt message.
      *  Scans mempool+pool for matching txs, initialises PeerTemplateSketch.
-     *  Returns Unresolved (with masks for gettmplt n=1), NeedsTxs, or Complete. */
+     *  Returns Unresolved (with masks for gettmplt n=1), NeedsTxs, or Complete.
+     *  basis_tx_count is set to the number of txs in the basis template, or 0
+     *  if no usable basis was given. */
     TmpltResult InitPeerSketch(NodeId nodeid, const CBlockIndex* tip, uint256 templatehash,
                                uint64_t nonce, uint256 basis_hash,
                                const GRVector& basis_delta,
                                std::span<const typename LocalTemplate::Sketch> sketches,
                                GroupMask shortidmask, const GRVector& shortid_bytes,
-                               NodeClock::time_point now);
+                               NodeClock::time_point now, size_t& basis_tx_count);
 
     /** Feed round 1-4 data into an existing peer sketch.
      *  shortidmask/sketchmask are parsed from the peer's tmplt message; must partition

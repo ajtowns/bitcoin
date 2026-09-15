@@ -464,9 +464,11 @@ static TestManager::TmpltState reconcile_template(
     // Round 0: InitPeerSketch with the round-0 sketches and no basis (flat).
     uint256 basis_hash = uint256::ZERO;
     GRVector basis_delta;
+    size_t basis_tx_count{0};
     auto result = mgr.InitPeerSketch(peer, nullptr, provider_tmpl.m_hash,
                                      provider_tmpl.m_nonce, basis_hash, basis_delta,
-                                     provider_tmpl.GetSketches(0), {}, {}, now);
+                                     provider_tmpl.GetSketches(0), {}, {}, now, basis_tx_count);
+    BOOST_CHECK(basis_tx_count == 0); // no basis
     int round = 0;
     while (result.state == TestManager::TmpltState::Unresolved && round < 4) {
         ++round;
@@ -577,9 +579,11 @@ BOOST_AUTO_TEST_CASE(mgr_basis_reconcile)
     GRVector basis_delta = sel.GREncode();
 
     auto now = test_time(1000);
+    size_t basis_tx_count{0};
     auto result = recv_mgr.InitPeerSketch(peer, nullptr, v2_tmpl->m_hash,
                                           v2_tmpl->m_nonce, v1_hash, basis_delta,
-                                          v2_tmpl->GetSketches(0), {}, {}, now);
+                                          v2_tmpl->GetSketches(0), {}, {}, now, basis_tx_count);
+    BOOST_CHECK(basis_tx_count == v1_tmpl->m_txs.size());
 
     int round = 0;
     while (result.state == TestManager::TmpltState::Unresolved && round < 4) {
@@ -634,14 +638,15 @@ BOOST_AUTO_TEST_CASE(mgr_state_errors)
     auto now = test_time(1000);
 
     // InitPeerSketch without WaitingForPeerSketch → Reset (no monostate entry).
+    size_t basis_tx_count{0};
     auto r = mgr.InitPeerSketch(peer, nullptr, prov_tmpl->m_hash, prov_tmpl->m_nonce,
-                                uint256::ZERO, {}, prov_tmpl->GetSketches(0), {}, {}, now);
+                                uint256::ZERO, {}, prov_tmpl->GetSketches(0), {}, {}, now, basis_tx_count);
     BOOST_CHECK(r.state == TestManager::TmpltState::Reset);
 
     // Proper init.
     mgr.WaitingForPeerSketch(peer);
     r = mgr.InitPeerSketch(peer, nullptr, prov_tmpl->m_hash, prov_tmpl->m_nonce,
-                           uint256::ZERO, {}, prov_tmpl->GetSketches(0), {}, {}, now);
+                           uint256::ZERO, {}, prov_tmpl->GetSketches(0), {}, {}, now, basis_tx_count);
     // 20 txs over capacity 8 at round 0 → may be Unresolved or Complete.
     if (r.state == TestManager::TmpltState::Unresolved) {
         // Wrong round (skip ahead) → ProtocolError.
