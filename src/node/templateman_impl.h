@@ -1111,8 +1111,11 @@ typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCa
 
     if (!basis_hash.IsNull()) {
         auto cache_it = m_peer_template_cache.find(nodeid);
-        if (cache_it != m_peer_template_cache.end() && cache_it->second->m_hash == basis_hash) {
-            // null basis_hash, missing basis hash and incorrect basis hash are all treated the same
+        if (cache_it == m_peer_template_cache.end() || cache_it->second->m_hash != basis_hash) {
+            // missing basis hash and incorrect basis hash mean we won't be able to reconstruct, so soft fail
+            return failure(TmpltState::Reset);
+        } else {
+            // found basis hash
             const PeerTemplate& basis = *cache_it->second;
             TemplateTxnsSelection sel;
             try {
