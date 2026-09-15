@@ -5999,7 +5999,7 @@ bool PeerManagerImpl::ConsiderTemplateTransactions(Peer& peer)
     auto result = ConsiderTemplateTx(peer, next);
 
     WITH_LOCK(m_template_mutex,
-              m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, /*needed_parent=*/bool{next.package_parent}, next.nchildren));
+              m_templateman.ReportATMPResult(peer.m_id, next.tx, now, result, next.package_parent, next.nchildren));
 
     LogDebug(BCLog::GETTMPLT, "%s template tx %d/%d 1p1c=%d children=%d wtxid=%s peer=%d",
              node::TemplateATMPResultString(result), next.pos, next.total,
@@ -6015,7 +6015,7 @@ node::TemplateATMPResult PeerManagerImpl::ConsiderTemplateTx(
 
     MempoolAcceptResult result = ([&]() EXCLUSIVE_LOCKS_REQUIRED(g_msgproc_mutex, !m_tx_download_mutex) -> MempoolAcceptResult {
         LOCK(::cs_main);
-        if (!next.package_parent) {
+        if (!next.package_parent || m_mempool.exists(next.package_parent->GetHash())) {
             // just try a single tx
             auto result = m_chainman.ProcessTransaction(next.tx);
             if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {

@@ -772,7 +772,7 @@ public:
     void ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
                           NodeClock::time_point now,
                           TemplateATMPResult result,
-                          bool needed_parent, uint32_t nchildren);
+                          const CTransactionRef& needed_parent, uint32_t nchildren);
 
     /** Transition a fully-resolved PeerTemplateSketch to a PeerTemplatePartial.
      *  Releases pool refs for local txs absent from the peer's template.

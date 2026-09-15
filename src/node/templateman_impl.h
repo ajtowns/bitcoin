@@ -1484,9 +1484,9 @@ template <int SketchCapacity>
 void TemplateManagerT<SketchCapacity>::ReportATMPResult(NodeId nodeid, const CTransactionRef& tx,
                                        NodeClock::time_point now,
                                        TemplateATMPResult result,
-                                       bool needed_parent, uint32_t nchildren)
+                                       const CTransactionRef& needed_parent, uint32_t nchildren)
 {
-    bool package_candidate = !needed_parent;
+    bool package_candidate = (needed_parent == nullptr);
 
     // 1. Update next_mempool_check based on result
     auto it = m_pool.find(tx->GetWitnessHash());
@@ -1496,6 +1496,13 @@ void TemplateManagerT<SketchCapacity>::ReportATMPResult(NodeId nodeid, const CTr
         case TemplateATMPResult::ALREADY_IN_MEMPOOL:
             it->next_mempool_check = Jitter(now, ATMP_RECHECK_INTERVAL);
             nchildren = 0; // doesn't need to be tracked as a potential parent
+            if (needed_parent) {
+                auto cache_it = m_peer_template_cache.find(nodeid);
+                if (cache_it != m_peer_template_cache.end()) {
+                    // parent was accepted too, so is no longer pending
+                    cache_it->second->m_pending_parents.erase(needed_parent->GetHash());
+                }
+            }
             break;
         case TemplateATMPResult::MISSING_INPUTS:
             package_candidate = false;
