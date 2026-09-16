@@ -4583,7 +4583,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                                                        shortidmask, shortid_bytes,
                                                        NodeClock::now(), basis_tx_count);
 
-            LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes (kept=%d/%d) sketches=%d shortidmask=%02x shortids=%d peer=%d",
+            LogDebug(BCLog::GETTMPLT, "Got tmplt round=0 template=%s tip=%s basis=%s delta=%d bytes (dropped=%d/%d) sketches=%d shortidmask=%02x shortids=%d peer=%d",
                      hash.ToString(), tip_hash.ToString(), basis_hash.ToString(), basis_delta.encoded_elements.size(), basis_delta.n_elements, basis_tx_count, sketches.size(), shortidmask_raw, shortid_bytes.n_elements, pfrom.GetId());
 
             ProcessTemplateSketchUpdate(pfrom, peer, 0, basis_id, result);
