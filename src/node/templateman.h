@@ -262,7 +262,7 @@ public:
         uint8_t basis_id; // 1 + position in m_basisinfo
         uint16_t common_tx_count; // Number of txs in basis also in this template
         uint256 basis_hash;
-        GRVector delta; // Retained-tx positions from a basis template to a new template, Golomb-Rice encoded
+        GRVector delta; // Dropped basis positions from a basis template to a new template, Golomb-Rice encoded; the receiver keeps every basis tx not listed
         std::vector<bool> in_basis; // whether txs in this template were in the basis
         std::array<size_t, TOTAL_BUCKETS> bucket_count; // How many txs in each bucket are in the template but not the basis
     };

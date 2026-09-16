@@ -565,15 +565,14 @@ BOOST_AUTO_TEST_CASE(mgr_basis_reconcile)
     recv_mgr.WaitingForPeerSketch(peer);
 
     // Receiver still has v1 as its last peer template → basis_hash lookup hits the cache.
-    // Build the basis_delta the provider would send: positions of v2's retained txs in v1.
+    // Build the basis_delta the provider would send: positions of v1's txs dropped in v2.
     TemplateTxnsSelection sel;
     {
-        std::unordered_map<const CTransaction*, size_t> v1_pos;
-        for (size_t i = 0; i < v1_tmpl->m_txs.size(); ++i) v1_pos.emplace(v1_tmpl->m_txs[i]->tx.get(), i);
-        for (const auto& ref : v2_tmpl->m_txs) {
-            auto it = v1_pos.find(ref->tx.get());
-            // v2 retained txs (0..30) are in v1; new txs (40..55) are not
-            if (it != v1_pos.end()) sel.Add(it->second);
+        std::unordered_map<const CTransaction*, size_t> v2_pos;
+        for (size_t i = 0; i < v2_tmpl->m_txs.size(); ++i) v2_pos.emplace(v2_tmpl->m_txs[i]->tx.get(), i);
+        for (size_t i = 0; i < v1_tmpl->m_txs.size(); ++i) {
+            // v1 txs 30..39 are not retained in v2; everything else in v1 is
+            if (!v2_pos.contains(v1_tmpl->m_txs[i]->tx.get())) sel.Add(i);
         }
     }
     GRVector basis_delta = sel.GREncode();
