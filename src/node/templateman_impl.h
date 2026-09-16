@@ -140,15 +140,19 @@ const typename LocalTemplateT<SketchCapacity>::BasisInfo* TemplateManagerT<Sketc
         retained_map.emplace(ref->tx.get(), pos++);
     }
 
-    // Collect retained positions (in basis order) into a TemplateTxnsSelection
+    // Collect dropped basis positions (in basis order) into a TemplateTxnsSelection.
+    // The basis delta describes which basis txs are NOT retained in this template,
+    // which the receiver inverts against the basis template's size; for a steady
+    // mempool this is far smaller than the retained set.
     TemplateTxnsSelection sel;
     uint16_t in_common{0};
     for (size_t i = 0; i < basis->m_txs.size(); ++i) {
         if (auto b_it = retained_map.find(basis->m_txs[i]->tx.get()); b_it != retained_map.end()) {
-            sel.Add(i);
             in_basis[b_it->second] = true;
             --bucket_count[best.shortids[b_it->second] % TOTAL_BUCKETS];
             ++in_common;
+        } else {
+            sel.Add(i);
         }
     }
     best.m_basisinfo.emplace_back(1 + best.m_basisinfo.size(), in_common, basis_hash, sel.GREncode(), std::move(in_basis), std::move(bucket_count));
@@ -1128,8 +1132,22 @@ typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCa
                 // so don't try to recover automatically
                 return failure(TmpltState::ProtocolError);
             }
-            txs.reserve(sel.Count());
-            shortids.reserve(sel.Count());
+            size_t next_pos = 0;
+            auto next_dropped = [&](size_t dropped) {
+                while (next_pos < dropped) {
+                    const auto& ref = basis.m_txs[next_pos];
+                    Assume(ref != m_pool.end());
+                    ++ref->num_templates;
+                    shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
+                    txs.values.push_back(ref);
+                    basis_tx_set.insert(ref->tx.get());
+                    ++next_pos;
+                }
+                ++next_pos;
+                Assume(next_pos == dropped + 1);
+            };
+            txs.reserve(basis.m_txs.size() - sel.Count());
+            shortids.reserve(basis.m_txs.size() - sel.Count());
             for (size_t chunk_idx = 0; chunk_idx < sel.m_positions.size(); ++chunk_idx) {
                 for (unsigned bit : sel.m_positions[chunk_idx]) {
                     uint32_t pos = chunk_idx * TemplateTxnsSelection::CHUNK_SIZE + bit;
@@ -1137,14 +1155,10 @@ typename TemplateManagerT<SketchCapacity>::TmpltResult TemplateManagerT<SketchCa
                         RemoveTxs(std::move(txs));
                         return failure(TmpltState::ProtocolError);
                     }
-                    const auto& ref = basis.m_txs[pos];
-                    Assume(ref != m_pool.end());
-                    ++ref->num_templates;
-                    shortids.push_back(hasher.GetShortID(ref->tx->GetWitnessHash()));
-                    txs.values.push_back(ref);
-                    basis_tx_set.insert(ref->tx.get());
+                    next_dropped(pos);
                 }
             }
+            next_dropped(basis.m_txs.size());
         }
     }
     basis_count = txs.size();

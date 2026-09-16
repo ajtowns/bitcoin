@@ -1,4 +1,4 @@
-# BIN25-2.4 Wire Protocol
+# BIN25-2.5 Wire Protocol
 
 Implemented wire messages for the gettmplt template sharing protocol.
 
@@ -6,7 +6,7 @@ Implemented wire messages for the gettmplt template sharing protocol.
 
 Announced via BIP-434 FEATURE message.
 
-    feature_id:   "BIN25-2.4"
+    feature_id:   "BIN25-2.5"
     feature_data: empty
 
 ## Messages
@@ -18,7 +18,7 @@ Announced via BIP-434 FEATURE message.
     round:      uint8_t = 0
     basis_hash: uint256          optional; omitted or zero if no basis
 
-Sent every ~2 min to peers that advertised BIN25-2.4. `basis_hash`
+Sent every ~2 min to peers that advertised BIN25-2.5. `basis_hash`
 is the hash of the most recent completed peer template from this peer,
 enabling delta encoding.
 
@@ -42,7 +42,7 @@ Both masks are always present on the wire (round 4 sends sketchmask=0).
     nonce:         uint64_t     template-level nonce for shortid computation
     basis_hash:    uint256      basis template hash (or zero)
     basis_id:      uint8_t      identifier for the basis for future messages
-    basis_delta:   GRVector     retained positions from basis
+    basis_delta:   GRVector     dropped positions from basis
     sketches:      vector<Sketch>   4 stride-4 group sketches (round 0)
 
 Sent from `MaybeSendTemplateMessages` when a pending `Req` is ready and
@@ -101,8 +101,8 @@ cycle. Multiple `tmplttxn` messages may be sent for one template.
 
     Receiver                          Provider
     --------                          --------
-    FEATURE "BIN25-2.4"  ---------->
-                          <----------  FEATURE "BIN25-2.4"
+    FEATURE "BIN25-2.5"  ---------->
+                          <----------  FEATURE "BIN25-2.5"
 
     gettmplt n=0 [basis]  --------->
                           <---------  tmplt hash n=0 tip nonce basis delta sketches[4]
