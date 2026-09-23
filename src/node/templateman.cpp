@@ -176,10 +176,10 @@ bool RequestedTemplateTxns::Queue(const uint256& hash, const LocalTemplate& tmpl
 std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemplate& tmpl, size_t max_bytes)
 {
     std::vector<CTransactionRef> txs;
-    size_t msg_size = 0;
+    size_t msg_size = 3; // room for encoding number of elements in the vector
     bool hit_limit = false;
 
-    for (size_t chunk_idx = 0; chunk_idx < m_positions.size() && !hit_limit; ++chunk_idx) {
+    for (size_t chunk_idx = 0; !hit_limit && chunk_idx < m_positions.size(); ++chunk_idx) {
         auto& chunk = m_positions[chunk_idx];
         if (chunk.None()) continue;
 
@@ -191,10 +191,11 @@ std::vector<CTransactionRef> RequestedTemplateTxns::GetNextChunk(const LocalTemp
             }
             const CTransactionRef& tx = tmpl.m_txs[abs_pos]->tx;
             size_t tx_size = GetSerializeSize(TX_WITH_WITNESS(tx));
-            txs.push_back(tx);
-            msg_size += tx_size;
-            chunk.Reset(bit);
-            if (msg_size >= max_bytes) {
+            if (txs.empty() || msg_size + tx_size <= max_bytes) {
+                txs.push_back(tx);
+                msg_size += tx_size;
+                chunk.Reset(bit);
+            } else {
                 hit_limit = true;
                 break;
             }
