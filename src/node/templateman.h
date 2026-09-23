@@ -85,7 +85,7 @@ static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
 static constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
 
 /** Skip transactions that entered the mempool this recently (prefer relaying txs normally) */
-static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{10};
+static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{20};
 
 /** Template weight limit (larger than consensus to capture more txs). */
 static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
@@ -791,6 +791,18 @@ public:
 
 /** Production template manager (full sketch capacity). */
 using TemplateManager = TemplateManagerT<SKETCH_CAPACITY>;
+
+class MempoolSequenceTrack
+{
+private:
+    /** Mempool sequence number tracking */
+    std::array<uint64_t, 3> m_mempool_sequences{};
+    NodeClock::time_point m_last_mempool_sequence{NodeClock::time_point::min()};
+
+public:
+    void Track(const CTxMemPool& mempool, NodeClock::time_point now);
+    uint64_t OldSequence() const { return m_mempool_sequences[0]; }
+};
 
 } // namespace node
 

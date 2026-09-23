@@ -90,9 +90,9 @@ struct BlockCreateOptions {
      */
     bool test_block_validity{true};
     /**
-     * Skip entries that entered the mempool after this time
+     * Skip entries that entered the mempool after this sequence number.
      */
-    std::chrono::seconds max_entry_time{std::chrono::seconds::max()};
+    uint64_t max_entry_seq{std::numeric_limits<uint64_t>::max()};
 };
 
 struct BlockWaitOptions {
