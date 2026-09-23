@@ -317,4 +317,15 @@ template class LocalTemplateT<SKETCH_CAPACITY>;
 template class PeerTemplateSketchT<SKETCH_CAPACITY>;
 template class TemplateManagerT<SKETCH_CAPACITY>;
 
+void MempoolSequenceTrack::Track(const CTxMemPool& mempool, NodeClock::time_point now)
+{
+    if (now < m_last_mempool_sequence) m_last_mempool_sequence = now; // time skip
+    if (m_last_mempool_sequence + (MIN_TEMPLATE_TX_AGE*2/5) <= now) {
+        m_last_mempool_sequence = now;
+        std::ranges::copy(m_mempool_sequences.begin()+1, m_mempool_sequences.end(), m_mempool_sequences.begin());
+        LOCK(mempool.cs);
+        m_mempool_sequences.back() = mempool.GetSequence();
+    }
+}
+
 } // namespace node
