@@ -36,10 +36,12 @@ namespace node {
 //! before being used. Thus, new fields should be added only if needed.
 class SnapshotMetadata
 {
-    static constexpr uint16_t VERSION{2};
     const std::set<uint16_t> m_supported_versions{VERSION};
     const MessageStartChars m_network_magic;
 public:
+    //! The version of the snapshot format this code understands.
+    static constexpr uint16_t VERSION{2};
+
     //! The hash of the block that reflects the tip of the chain for the
     //! UTXO set contained in this snapshot.
     uint256 m_base_blockhash;
