@@ -1144,7 +1144,7 @@ static RPCMethod submitheader()
         "Decode the given hexdata as a header and submit it as a candidate chain tip if valid."
                 "\nThrows when the header is invalid.\n",
                 {
-                    {"hexdata", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hex-encoded block header data"},
+                    {"hexdata", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "the hex-encoded block header data, as one or more concatenated headers"},
                 },
                 RPCResult{
                     RPCResult::Type::NONE, "", "None"},
@@ -1154,20 +1154,40 @@ static RPCMethod submitheader()
                 },
         [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
 {
-    CBlockHeader h;
-    if (!DecodeHexBlockHeader(h, request.params[0].get_str())) {
+    const std::string& hexdata{request.params[0].get_str()};
+    if (hexdata.empty() || !IsHex(hexdata)) {
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block header decode failed");
+    }
+    const std::vector<unsigned char> data{ParseHex(hexdata)};
+    SpanReader reader{data};
+    std::vector<CBlockHeader> headers;
+    while (!reader.empty()) {
+        try {
+            headers.emplace_back();
+            reader >> headers.back();
+        } catch (const std::exception&) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block header decode failed");
+        }
     }
     ChainstateManager& chainman = EnsureAnyChainman(request.context);
     {
         LOCK(cs_main);
-        if (!chainman.m_blockman.LookupBlockIndex(h.hashPrevBlock)) {
-            throw JSONRPCError(RPC_VERIFY_ERROR, "Must submit previous header (" + h.hashPrevBlock.GetHex() + ") first");
+        const uint256& prev{headers.front().hashPrevBlock};
+        if (!chainman.m_blockman.LookupBlockIndex(prev)) {
+            throw JSONRPCError(RPC_VERIFY_ERROR, "Must submit previous header (" + prev.GetHex() + ") first");
         }
     }
 
     BlockValidationState state;
-    chainman.ProcessNewBlockHeaders({{h}}, /*min_pow_checked=*/true, state);
+    // Submit in batches so cs_main is released between them, rather than held
+    // for the whole run, keeping other RPCs (and shutdown) responsive.
+    static constexpr size_t HEADERS_PER_BATCH{1000};
+    for (size_t i{0}; i < headers.size(); i += HEADERS_PER_BATCH) {
+        const size_t count{std::min(HEADERS_PER_BATCH, headers.size() - i)};
+        if (!chainman.ProcessNewBlockHeaders(std::span<const CBlockHeader>(headers).subspan(i, count), /*min_pow_checked=*/true, state)) {
+            break;
+        }
+    }
     if (state.IsValid()) return UniValue::VNULL;
     if (state.IsError()) {
         throw JSONRPCError(RPC_VERIFY_ERROR, state.ToString());
