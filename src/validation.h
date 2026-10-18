@@ -1347,6 +1347,23 @@ public:
     //! Return pointer to the Chainstate if it is loaded.
     Chainstate* LoadAssumeutxoChainstate() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
+    /**
+     * Load a UTXO set snapshot file into a new snapshot chainstate, connecting
+     * no blocks.
+     *
+     * Meant to run before the chainstates are loaded, when the block index is
+     * available and the coins database is not: it marks the index up to the
+     * snapshot's base block as though that part of the chain had been
+     * validated, writes the coins straight into the snapshot chainstate
+     * directory, and checks what it wrote against the assumeutxo commitment in
+     * chainparams. Exits having done the work, so the caller should stop.
+     *
+     * No coin is validated against a block; the commitment is what the contents
+     * are checked against, and everything else about the file is checked. Any
+     * failure leaves nothing behind.
+     */
+    util::Result<void> LoadTxoutSetFromFile(const fs::path& snapshot_file) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+
     //! Add new chainstate.
     Chainstate& AddChainstate(std::unique_ptr<Chainstate> chainstate) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 

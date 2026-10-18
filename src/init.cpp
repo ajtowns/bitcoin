@@ -549,6 +549,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
             "(default: 0 = disable pruning blocks, 1 = allow manual pruning via RPC, >=%u = automatically prune block files to stay under the specified target size in MiB)", MIN_DISK_SPACE_FOR_BLOCK_FILES / 1_MiB), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex", "If enabled, wipe chain state and block index, and rebuild them from blk*.dat files on disk. Also wipe and rebuild other optional indexes that are active. If an assumeutxo snapshot was loaded, its chainstate will be wiped as well. The snapshot can then be reloaded via RPC.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex-chainstate", "If enabled, wipe chain state, and rebuild it from blk*.dat files on disk. If an assumeutxo snapshot was loaded, its chainstate will be wiped as well. The snapshot can then be reloaded via RPC.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-loadtxoutset=<file>", "Load a UTXO set snapshot file into a new snapshot chainstate, then stop. The coins are written straight into the chainstate database and checked against the assumeutxo commitment in chainparams, which needs an entry for the snapshot's base block, and that block's header must already be in the block index. Restart without this option afterwards.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-settings=<file>", strprintf("Specify path to dynamic settings data file. Can be disabled with -nosettings. File is written at runtime and not meant to be edited by users (use %s instead for custom settings). Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME, BITCOIN_SETTINGS_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #if HAVE_SYSTEM
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -1434,6 +1435,36 @@ static ChainstateLoadResult InitAndLoadChainstate(
     }
     ChainstateManager& chainman = *node.chainman;
     if (chainman.m_interrupt) return {ChainstateLoadStatus::INTERRUPTED, {}};
+
+    // -loadtxoutset does its work here: it wants the block index, not the
+    // chainstates, and it must not be running while either is being loaded or
+    // used. The work is the whole of what it does, so it asks the node to stop,
+    // and the restart without the option is the caller's job.
+    if (const std::string snapshot_file{args.GetArg("-loadtxoutset", "")}; !snapshot_file.empty()) {
+        LogInfo("Attempting to load txoutset from %s...", snapshot_file);
+        LOCK(::cs_main);
+        // The block manager's own load, rather than ChainstateManager's, which
+        // wants a chainstate to exist already so it can pass that chainstate's
+        // snapshot hash down. There is none yet here, and this is the load that
+        // matters: the index in memory, with the coins databases still closed.
+        if (!chainman.m_blockman.LoadBlockIndexDB(/*snapshot_blockhash=*/std::nullopt)) {
+            LogInfo("Failed to load block index");
+            return {ChainstateLoadStatus::FAILURE, _("Error opening block database")};
+        }
+        LogInfo("Loaded block index");
+        if (auto res{chainman.LoadTxoutSetFromFile(fs::u8path(snapshot_file))}; !res) {
+            return {ChainstateLoadStatus::FAILURE,
+                    Untranslated(strprintf("Loading the UTXO set snapshot failed: %s", util::ErrorString(res).original))};
+        }
+        LogInfo("The UTXO set snapshot is loaded. Restart without -loadtxoutset to use it.");
+        // Ask the node to stop rather than stopping it from here: exiting in the
+        // middle of this call tears down objects whose threads are still live.
+        // Raising the interrupt is also what makes INTERRUPTED the honest answer
+        // here, and it keeps the caller from offering a reindex, which is not
+        // what it wants.
+        (void)(*Assert(node.shutdown_signal))();
+        return {ChainstateLoadStatus::INTERRUPTED, {}};
+    }
 
     // This is defined and set here instead of inline in validation.h to avoid a hard
     // dependency between validation and index/base, since the latter is not in

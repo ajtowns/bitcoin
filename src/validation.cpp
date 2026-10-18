@@ -19,6 +19,7 @@
 #include <consensus/validation.h>
 #include <cuckoocache.h>
 #include <flatfile.h>
+#include <dbwrapper.h>
 #include <hash.h>
 #include <kernel/chainparams.h>
 #include <kernel/coinstats.h>
@@ -30,6 +31,8 @@
 #include <kernel/warning.h>
 #include <logging/timer.h>
 #include <node/blockstorage.h>
+#include <kernel/caches.h>
+#include <leveldb/env.h>
 #include <node/utxo_snapshot.h>
 #include <policy/ephemeral_policy.h>
 #include <policy/policy.h>
@@ -60,6 +63,7 @@
 #include <util/signalinterrupt.h>
 #include <util/strencodings.h>
 #include <util/string.h>
+#include <util/thread.h>
 #include <util/threadpool.h>
 #include <util/time.h>
 #include <util/trace.h>
@@ -6183,6 +6187,447 @@ Chainstate* ChainstateManager::LoadAssumeutxoChainstate()
     auto snapshot_chainstate{std::make_unique<Chainstate>(nullptr, m_blockman, *this, base_blockhash)};
     LogInfo("[snapshot] switching active chainstate to %s", snapshot_chainstate->ToString());
     return &this->AddChainstate(std::move(snapshot_chainstate));
+}
+
+namespace {
+/** Markers for the two records a snapshot chainstate holds, the same bytes
+ * txdb.cpp reads those records back under. Declared here rather than shared,
+ * since this is not the code that owns the layout. */
+constexpr uint8_t SNAPSHOT_COIN_MARKER{'C'};
+constexpr uint8_t SNAPSHOT_BEST_BLOCK_MARKER{'B'};
+
+/** How often, in coins, progress is reported while a snapshot is being
+ * loaded. */
+constexpr uint64_t SNAPSHOT_PROGRESS_INTERVAL{10'000'000};
+
+/** How many coins travel together between the three stages. */
+constexpr size_t SNAPSHOT_ITEMS_PER_BATCH{1 << 16};
+
+/** How many batches each queue may hold. Two queues, so this is the whole of
+ * what the pipeline can have in flight on top of the leveldb cache. */
+constexpr size_t SNAPSHOT_QUEUE_BATCHES{4};
+
+/** A coin's key in the snapshot chainstate, as txdb.cpp's CoinEntry builds it:
+ * the marker, then the outpoint. */
+struct SnapshotCoinKey {
+    uint8_t marker;
+    COutPoint outpoint;
+
+    SERIALIZE_METHODS(SnapshotCoinKey, obj)
+    {
+        READWRITE(obj.marker, obj.outpoint.hash, VARINT(obj.outpoint.n));
+    }
+};
+
+/** A file that does not sync. leveldb syncs every file it writes and the
+ * manifest on every version change, which over a set this size is hundreds of
+ * syncs, and they are the whole of the difference between the load taking a
+ * minute and taking three. */
+class NoSyncFile final : public leveldb::WritableFile
+{
+public:
+    explicit NoSyncFile(std::unique_ptr<leveldb::WritableFile> file) : m_file{std::move(file)} {}
+
+    leveldb::Status Append(const leveldb::Slice& data) override { return m_file->Append(data); }
+    leveldb::Status Close() override { return m_file->Close(); }
+    leveldb::Status Flush() override { return m_file->Flush(); }
+    leveldb::Status Sync() override { return leveldb::Status::OK(); }
+    std::string GetName() const override { return m_file->GetName(); }
+
+private:
+    std::unique_ptr<leveldb::WritableFile> m_file;
+};
+
+/** The environment those files come from. Everything else is the default
+ * environment's: only the files leveldb writes through this one are affected,
+ * which is the snapshot database's and nothing else's. */
+class NoSyncEnv final : public leveldb::EnvWrapper
+{
+public:
+    NoSyncEnv() : leveldb::EnvWrapper{leveldb::Env::Default()} {}
+
+    leveldb::Status NewWritableFile(const std::string& f, leveldb::WritableFile** r) override
+    {
+        leveldb::WritableFile* file{nullptr};
+        const leveldb::Status status{target()->NewWritableFile(f, &file)};
+        if (status.ok()) {
+            *r = new NoSyncFile{std::unique_ptr<leveldb::WritableFile>{file}};
+        }
+        return status;
+    }
+
+    leveldb::Status NewAppendableFile(const std::string& f, leveldb::WritableFile** r) override
+    {
+        leveldb::WritableFile* file{nullptr};
+        const leveldb::Status status{target()->NewAppendableFile(f, &file)};
+        if (status.ok()) {
+            *r = new NoSyncFile{std::unique_ptr<leveldb::WritableFile>{file}};
+        }
+        return status;
+    }
+};
+
+/** What is written, on the disk. DirectoryCommit makes the names durable and
+ * this makes the contents, so that the name the rename publishes points at
+ * files whose data has left the page cache. The block files are committed
+ * before they are recorded for the same reason. */
+void CommitFiles(const fs::path& dir)
+{
+    for (const auto& entry : fs::directory_iterator{dir}) {
+        if (!entry.is_regular_file()) continue;
+        const std::unique_ptr<std::FILE, decltype(&std::fclose)> file{fsbridge::fopen(entry.path(), "rb+"), &std::fclose};
+        if (!file || !FileCommit(file.get())) {
+            throw std::runtime_error{strprintf("Could not commit %s", fs::PathToString(entry.path()))};
+        }
+    }
+}
+
+/** One coin as the dump holds it, before either of the two encodings it needs:
+ * the record the node reads back, and the element the commitment is over. They
+ * are not the same bytes, so the coin crosses the queues decoded and each
+ * encoding happens on the thread that wants it. */
+struct SnapshotItem {
+    COutPoint outpoint;
+    Coin coin;
+};
+
+//! Shared between the two queues, since both consumers only read it.
+using SnapshotBatch = std::shared_ptr<const std::vector<SnapshotItem>>;
+
+/** Batches between threads, one producer and one consumer. Pushing blocks while
+ * it is full, so a thread that runs ahead cannot exhaust memory. */
+template <typename T>
+class SnapshotQueue
+{
+public:
+    explicit SnapshotQueue(size_t capacity) : m_capacity{capacity} {}
+
+    void Push(T batch)
+    {
+        std::unique_lock lock{m_mutex};
+        m_not_full.wait(lock, [&] { return m_done || m_batches.size() < m_capacity; });
+        if (m_done) return;
+        m_batches.push_back(std::move(batch));
+        lock.unlock();
+        m_not_empty.notify_one();
+    }
+
+    bool Pop(T& batch)
+    {
+        std::unique_lock lock{m_mutex};
+        m_not_empty.wait(lock, [&] { return m_done || !m_batches.empty(); });
+        if (m_batches.empty()) return false;
+        batch = std::move(m_batches.front());
+        m_batches.pop_front();
+        lock.unlock();
+        m_not_full.notify_one();
+        return true;
+    }
+
+    void Finish()
+    {
+        std::lock_guard lock{m_mutex};
+        m_done = true;
+        m_not_empty.notify_one();
+        m_not_full.notify_one();
+    }
+
+private:
+    const size_t m_capacity;
+    std::mutex m_mutex;
+    std::condition_variable m_not_empty;
+    std::condition_variable m_not_full;
+    std::deque<T> m_batches;
+    bool m_done{false};
+};
+
+/** The only thread that touches the file: reads the dump, decodes it, and hands
+ * the coins to both encoders. A single reader is what keeps the hash input in
+ * file order without any sequencing of its own, the commitment being a stream
+ * hash. */
+void SnapshotReaderTask(AutoFile& file, const uint64_t coins_expected,
+                        SnapshotQueue<SnapshotBatch>& hash_queue, SnapshotQueue<SnapshotBatch>& write_queue,
+                        std::optional<bilingual_str>& error, uint64_t& coins_done)
+{
+    auto batch{std::make_shared<std::vector<SnapshotItem>>()};
+    batch->reserve(SNAPSHOT_ITEMS_PER_BATCH);
+    auto publish = [&]() {
+        if (!batch->empty()) {
+            const SnapshotBatch published{batch};
+            hash_queue.Push(published);
+            write_queue.Push(published);
+        }
+        batch = std::make_shared<std::vector<SnapshotItem>>();
+        batch->reserve(SNAPSHOT_ITEMS_PER_BATCH);
+    };
+
+    uint64_t coins_left{coins_expected};
+    uint64_t coins_reported{0};
+    try {
+        while (coins_left > 0) {
+            Txid txid;
+            file >> txid;
+
+            const size_t coins_per_txid{ReadCompactSize(file)};
+            if (coins_per_txid > coins_left) {
+                error = Untranslated("Snapshot holds fewer coins than its metadata claims");
+                break;
+            }
+
+            for (size_t i{0}; i < coins_per_txid; ++i) {
+                SnapshotItem item;
+                item.outpoint.n = static_cast<uint32_t>(ReadCompactSize(file));
+                item.outpoint.hash = txid;
+                file >> item.coin;
+                batch->push_back(std::move(item));
+                ++coins_done;
+
+                if (batch->size() >= SNAPSHOT_ITEMS_PER_BATCH) publish();
+                if (coins_done - coins_reported >= SNAPSHOT_PROGRESS_INTERVAL) {
+                    coins_reported = coins_done;
+                    LogInfo("[snapshot] %d coins read (%.2f%%)",
+                            coins_done, 100.0 * coins_done / coins_expected);
+                }
+            }
+
+            coins_left -= coins_per_txid;
+        }
+
+        if (!error) {
+            // The file contradicting itself, rather than a check on the set.
+            std::byte left_over;
+            file >> left_over;
+            error = Untranslated("Snapshot holds more coins than its metadata claims");
+        }
+    } catch (const std::ios_base::failure& e) {
+        if (coins_left != 0) {
+            error = Untranslated(strprintf("Could not read the snapshot data after %d of %d coins: %s",
+                                           coins_done, coins_expected, e.what()));
+        }
+    }
+
+    publish();
+}
+
+/** Builds the element kernel/coinstats.cpp's ApplyCoinHash builds: the outpoint,
+ * the height and coinbase flag as a plain 32 bit integer rather than the varint
+ * the record holds, and the uncompressed txout. */
+void SnapshotHashTask(SnapshotQueue<SnapshotBatch>& queue, uint256& out)
+{
+    // The hash object belongs to this thread, and the result is written into the
+    // caller's value before the thread ends, so joining it is all the
+    // synchronisation the reader needs.
+    HashWriter hasher{};
+    DataStream element{};
+    SnapshotBatch items;
+    while (queue.Pop(items)) {
+        for (const SnapshotItem& item : *items) {
+            element.clear();
+            element << item.outpoint
+                    << ((uint32_t{item.coin.nHeight} << 1) | uint32_t{item.coin.fCoinBase})
+                    << item.coin.out;
+            hasher.write(std::as_bytes(MakeUCharSpan(element)));
+        }
+    }
+    out = hasher.GetHash();
+}
+
+/** Encodes each coin into the record the node reads back and hands batches of
+ * them to leveldb, which is this thread's alone. */
+void SnapshotWriterTask(SnapshotQueue<SnapshotBatch>& queue, CDBWrapper& db)
+{
+    CDBBatch batch{db};
+    SnapshotBatch items;
+    while (queue.Pop(items)) {
+        for (const SnapshotItem& item : *items) {
+            batch.Write(SnapshotCoinKey{SNAPSHOT_COIN_MARKER, item.outpoint}, item.coin);
+            if (batch.ApproximateSize() > DEFAULT_DB_CACHE_BATCH) {
+                db.WriteBatch(batch);
+                batch.Clear();
+            }
+        }
+    }
+    db.WriteBatch(batch);
+}
+} // namespace
+
+util::Result<void> ChainstateManager::LoadTxoutSetFromFile(const fs::path& snapshot_file)
+{
+    AssertLockHeld(::cs_main);
+
+    AutoFile file{fsbridge::fopen(snapshot_file, "rb")};
+    if (file.IsNull()) {
+        return util::Error{Untranslated(strprintf("Could not open %s", fs::PathToString(snapshot_file)))};
+    }
+
+    node::SnapshotMetadata metadata{GetParams().MessageStart()};
+    try {
+        file >> metadata;
+    } catch (const std::ios_base::failure& e) {
+        return util::Error{Untranslated(strprintf("Could not read the snapshot metadata: %s", e.what()))};
+    }
+    const uint256 base_blockhash{metadata.m_base_blockhash};
+
+    // Chainparams holds the commitment the file has to meet, and the two things
+    // the chainstate needs that the file cannot supply: the height of its base
+    // block, and the number of transactions up to it.
+    const auto maybe_au_data{GetParams().AssumeutxoForBlockhash(base_blockhash)};
+    if (!maybe_au_data) {
+        return util::Error{Untranslated(strprintf("No assumeutxo entry in chainparams for base block %s", base_blockhash.ToString()))};
+    }
+    const AssumeutxoData& au_data{*maybe_au_data};
+
+    // Refuse rather than guess: whatever is there may be whole, half written, or
+    // someone else's.
+    if (auto existing{node::FindAssumeutxoChainstateDir(m_options.datadir)}) {
+        return util::Error{Untranslated(strprintf("A snapshot chainstate already exists at %s; remove it first", fs::PathToString(*existing)))};
+    }
+
+    // The header chain has to be there, since skipping its validation is the
+    // whole point. The file does not say what height its base block is at, so
+    // the height comes from chainparams and is compared against the chain: a
+    // base block that is real but not at the assumed height cannot pass.
+    CBlockIndex* base_block{m_blockman.LookupBlockIndex(base_blockhash)};
+    if (!base_block) {
+        return util::Error{Untranslated(strprintf("The base block %s is not in the block index; its header chain needs loading first", base_blockhash.ToString()))};
+    }
+    if (base_block->nHeight != au_data.height) {
+        return util::Error{Untranslated(strprintf("The base block %s is at height %d, but chainparams expects it at height %d",
+                                                  base_blockhash.ToString(), base_block->nHeight, au_data.height))};
+    }
+
+    // Mark the chain up to the base block as though its witness data had been
+    // seen. Without this the chainstate is refused on the next startup by
+    // NeedsRedownload(), which asks for a reindex. The same faking
+    // PopulateAndValidateSnapshot() does for a snapshot loaded while running,
+    // and for the same reason.
+    for (CBlockIndex* index{base_block}; index && index->nHeight >= 1; index = index->pprev) {
+        if (DeploymentActiveAt(*index, *this, Consensus::DEPLOYMENT_SEGWIT)) {
+            index->nStatus |= BLOCK_OPT_WITNESS;
+        }
+        m_blockman.m_dirty_blockindex.insert(index);
+    }
+    base_block->m_chain_tx_count = au_data.m_chain_tx_count;
+    m_blockman.WriteBlockIndexDB();
+
+    const fs::path chainstate_dir{
+        m_options.datadir / fs::u8path(strprintf("chainstate%s", std::string{node::SNAPSHOT_CHAINSTATE_SUFFIX}))};
+    const fs::path building_dir{fs::u8path(fs::PathToString(chainstate_dir) + ".new")};
+    // Left behind by a run interrupted before the rename. Nothing else looks at
+    // this name.
+    fs::remove_all(building_dir);
+
+    std::optional<bilingual_str> error{};
+    uint256 hash_serialized{};
+    uint64_t coins_done{0};
+    {
+        // Obfuscation on, as the node opens the directory, so a key is generated
+        // here exactly as the node would have generated one.
+        // Writing the set is one pass with nothing to lose: the database is
+        // built beside the name the node looks for and renamed into place, so a
+        // crash part way through leaves a directory nothing reads. That being
+        // so, the syncing leveldb would do per file buys nothing here; the
+        // directory is committed below, before the rename, which is the
+        // durability publishing the name actually needs.
+        // testing_env is the field the fuzzer sets its own environment through,
+        // and the only way to set one for a single database.
+        NoSyncEnv no_sync_env{};
+        // A quarter of this is leveldb's write buffer, which is smaller than a
+        // batch: a batch goes into the memtable whole, so each write fills it
+        // and the flush that follows is one batch — one file of about the size
+        // of the node's own file limit. A larger cache would hold several
+        // batches per buffer, and the files would follow the buffer instead.
+        // Only this write is affected; the node reopens with its own cache.
+        CDBWrapper db{DBParams{
+            .path = building_dir,
+            .cache_bytes = DEFAULT_DB_CACHE_BATCH,
+            .obfuscate = true,
+            .testing_env = &no_sync_env,
+        }};
+
+        // Reading, hashing and writing share only the decoded coin: the record
+        // and the commitment element are different bytes, so serialising both on
+        // one thread leaves the second encoding queued behind the first. Here
+        // one thread reads and decodes, and the two encodings run off it in
+        // parallel. The writing is the busiest of the three, so the pass runs at
+        // the rate the records are encoded at.
+        LogInfo("[snapshot] loading %d coins from snapshot %s", metadata.m_coins_count, base_blockhash.ToString());
+        SnapshotQueue<SnapshotBatch> hash_queue{SNAPSHOT_QUEUE_BATCHES};
+        SnapshotQueue<SnapshotBatch> write_queue{SNAPSHOT_QUEUE_BATCHES};
+        // Named, so which of the three is the one to look at is answerable from
+        // outside the process.
+        std::thread reader_thread{util::TraceThread, "utxoread", [&] {
+            SnapshotReaderTask(file, metadata.m_coins_count, hash_queue, write_queue, error, coins_done);
+        }};
+        std::thread hash_thread{util::TraceThread, "utxohash", [&] {
+            SnapshotHashTask(hash_queue, hash_serialized);
+        }};
+        std::thread writer_thread{util::TraceThread, "utxowrite", [&] {
+            SnapshotWriterTask(write_queue, db);
+        }};
+
+        // The reader decides when the queues end, so it is joined first and the
+        // other two are then drained however the reading went.
+        reader_thread.join();
+        hash_queue.Finish();
+        write_queue.Finish();
+        hash_thread.join();
+        writer_thread.join();
+
+        if (!error) {
+            // The best block goes in last, so a database that is not whole never
+            // has one.
+            db.Write(SNAPSHOT_BEST_BLOCK_MARKER, base_blockhash);
+        }
+    }
+
+    if (error) {
+        fs::remove_all(building_dir);
+        return util::Error{*error};
+    }
+
+    // The commitment is the only thing that says these are the right coins.
+    if (AssumeutxoHash{hash_serialized} != au_data.hash_serialized) {
+        fs::remove_all(building_dir);
+        return util::Error{Untranslated(strprintf("The snapshot holds the wrong coins: chainparams commits to %s, this file has %s",
+                                                  au_data.hash_serialized.ToString(), hash_serialized.ToString()))};
+    }
+
+    // The blockhash file is what makes the directory a snapshot chainstate, so
+    // it goes in after the coins and before the rename. Until the rename, none
+    // of this is anything a node will look at.
+    const fs::path blockhash_file{building_dir / node::SNAPSHOT_BLOCKHASH_FILENAME};
+    AutoFile hash_file{fsbridge::fopen(blockhash_file, "wb")};
+    if (hash_file.IsNull()) {
+        fs::remove_all(building_dir);
+        return util::Error{Untranslated(strprintf("Could not write %s", fs::PathToString(blockhash_file)))};
+    }
+    hash_file << base_blockhash;
+    if (hash_file.fclose() != 0) {
+        fs::remove_all(building_dir);
+        return util::Error{Untranslated(strprintf("Could not close %s", fs::PathToString(blockhash_file)))};
+    }
+
+    // The rename is what publishes it: up to here nothing has the name a node
+    // looks for, so a failure leaves the datadir as it was. The commits either
+    // side are what make it survive a power cut: the files first, so their
+    // contents have left the page cache, then the directory, so the names
+    // inside it are on the disk the rename will point at, and then the datadir,
+    // so the rename itself is.
+    try {
+        LogInfo("[snapshot] syncing db files");
+        CommitFiles(building_dir);
+        DirectoryCommit(building_dir);
+        fs::rename(building_dir, chainstate_dir);
+        DirectoryCommit(m_options.datadir);
+    } catch (const std::exception& e) {
+        fs::remove_all(building_dir);
+        return util::Error{Untranslated(strprintf("Could not publish %s as %s: %s",
+                                                  fs::PathToString(building_dir), fs::PathToString(chainstate_dir), e.what()))};
+    }
+
+    LogInfo("[snapshot] wrote %d coins at height %d to %s", coins_done, base_block->nHeight, fs::PathToString(chainstate_dir));
+    return {};
 }
 
 Chainstate& ChainstateManager::AddChainstate(std::unique_ptr<Chainstate> chainstate)
