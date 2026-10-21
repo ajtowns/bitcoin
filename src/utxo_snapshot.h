@@ -7,6 +7,7 @@
 #define BITCOIN_UTXO_SNAPSHOT_H
 
 #include <coins.h>
+#include <consensus/consensus.h>
 #include <crypto/muhash.h>
 #include <hash.h>
 #include <kernel/chainparams.h>
@@ -124,9 +125,9 @@ inline void WriteCoinStatsElement(DataStream& out, const COutPoint& outpoint, co
  * `handle(outpoint, coin)`. An error from `handle` ends the reading.
  *
  * Errors if txids are out of order, or if the file holds more or fewer
- * coins than the metadata says, or has trailing data. Requiring txid
- * order means hashing in file order gives the same hash_serialized_3 a
- * node computes over its database.
+ * coins than the metadata says, or has trailing data. Output indices follow
+ * database key order, which may differ from the numeric order required by
+ * the commitment.
  *
  * Returns how many coins were read. */
 template <typename Handle>
@@ -157,12 +158,19 @@ util::Result<uint64_t> ReadSnapshotCoins(AutoFile& file, uint64_t coins_expected
                 return util::Error{Untranslated("Mismatch in coins count in snapshot metadata and actual snapshot data")};
             }
 
+            uint64_t outputs_size{0};
             for (size_t i{0}; i < coins_per_txid; ++i) {
                 COutPoint outpoint;
                 outpoint.n = static_cast<uint32_t>(ReadCompactSize(file));
                 outpoint.hash = txid;
                 Coin coin;
                 file >> coin;
+                // Bound the data retained to sort one transaction for hashing.
+                // Its unspent outputs must fit within a valid block's weight.
+                outputs_size += GetSerializeSize(coin.out);
+                if (outputs_size > MAX_BLOCK_WEIGHT / WITNESS_SCALE_FACTOR) {
+                    return util::Error{Untranslated("Bad snapshot - transaction outputs exceed maximum block weight")};
+                }
                 if (auto res{handle(outpoint, coin)}; !res) {
                     return util::Error{util::ErrorString(res)};
                 }
@@ -243,7 +251,7 @@ util::Result<void> ReadSnapshotBatches(AutoFile& file, uint64_t coins_expected, 
     return {};
 }
 
-/** Calculate hash_serialized_3 of the coins in `queue`, in the order they arrive. */
+/** Calculate hash_serialized_3 of the coins in `queue`, with numerically ordered output indices. */
 inline void HashSnapshotBatches(SnapshotQueue& queue, uint256& out)
 {
     // The hash object belongs to this thread, and the result is written into the
@@ -251,14 +259,30 @@ inline void HashSnapshotBatches(SnapshotQueue& queue, uint256& out)
     // synchronisation the reader needs.
     HashWriter hasher{};
     DataStream element{};
+    // The database orders VARINT-encoded output indices lexicographically,
+    // whereas the commitment orders them numerically. A transaction may also
+    // span batches: retain their storage until all its outputs can be hashed.
+    std::vector<const SnapshotItem*> outputs;
+    std::vector<SnapshotBatch> retained;
+    const auto flush = [&] {
+        std::ranges::sort(outputs, {}, [](const SnapshotItem* item) { return item->outpoint.n; });
+        for (const auto* item : outputs) {
+            element.clear();
+            WriteCoinStatsElement(element, item->outpoint, item->coin);
+            hasher.write(std::as_bytes(MakeUCharSpan(element)));
+        }
+        outputs.clear();
+        retained.clear();
+    };
     SnapshotBatch items;
     while (queue.Pop(items)) {
         for (const SnapshotItem& item : *items) {
-            element.clear();
-            WriteCoinStatsElement(element, item.outpoint, item.coin);
-            hasher.write(std::as_bytes(MakeUCharSpan(element)));
+            if (!outputs.empty() && outputs.back()->outpoint.hash != item.outpoint.hash) flush();
+            outputs.push_back(&item);
         }
+        retained.push_back(std::move(items));
     }
+    flush();
     out = hasher.GetHash();
 }
 
