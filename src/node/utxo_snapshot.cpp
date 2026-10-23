@@ -50,6 +50,42 @@ static constexpr size_t SNAPSHOT_QUEUE_BATCHES{1};
 static constexpr size_t SNAPSHOT_DATA_BATCH_BYTES{4_MiB};
 static constexpr size_t SNAPSHOT_DB_BATCHES{1};
 
+void SnapshotChunkWriter::Flush()
+{
+    if (m_chunk.empty()) return;
+    WriteCompactSize(m_file, m_chunk.size());
+    m_file.write(MakeByteSpan(m_chunk));
+    m_chunk.clear();
+}
+
+void SnapshotChunkWriter::WriteCoins(const Txid& txid, std::span<const std::pair<uint32_t, Coin>> coins)
+{
+    while (!coins.empty()) {
+        size_t count{0};
+        size_t size{0};
+        while (count < coins.size()) {
+            const auto& [index, coin]{coins[count]};
+            const size_t next{size + GetSizeOfCompactSize(index) + GetSerializeSize(coin)};
+            if (m_chunk.size() + 32 + GetSizeOfCompactSize(count + 1) + next > SNAPSHOT_CHUNK_SIZE) break;
+            size = next;
+            ++count;
+        }
+        if (count == 0) {
+            if (m_chunk.empty()) throw std::ios_base::failure("Coin exceeds snapshot chunk size");
+            Flush();
+            continue;
+        }
+        m_chunk << txid;
+        WriteCompactSize(m_chunk, count);
+        for (const auto& [index, coin] : coins.first(count)) {
+            WriteCompactSize(m_chunk, index);
+            m_chunk << coin;
+        }
+        coins = coins.subspan(count);
+        if (!coins.empty()) Flush();
+    }
+}
+
 namespace node {
 
 bool WriteSnapshotBaseBlockhash(const fs::path& datadir, const uint256& base_blockhash)

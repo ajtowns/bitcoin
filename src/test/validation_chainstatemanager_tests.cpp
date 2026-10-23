@@ -288,14 +288,8 @@ struct SnapshotTestSetup : TestChain100Setup {
                 // A UTXO is missing but count is correct
                 metadata.m_coins_count -= 1;
 
-                Txid txid;
-                auto_infile >> txid;
-                // coins size
-                (void)ReadCompactSize(auto_infile);
-                // vout index
-                (void)ReadCompactSize(auto_infile);
-                Coin coin;
-                auto_infile >> coin;
+                // Skip a complete chunk; loading must reject the missing coins.
+                (void)ReadSnapshotChunk(auto_infile);
         }));
 
         BOOST_CHECK(!node::FindAssumeutxoChainstateDir(chainman.m_options.datadir));
@@ -514,12 +508,11 @@ BOOST_AUTO_TEST_CASE(snapshot_hash_order)
     for (const size_t count : {99, 100}) {
         {
             AutoFile file{fsbridge::fopen(path, "wb")};
-            file << txid;
-            WriteCompactSize(file, count);
-            for (size_t n{0}; n < count; ++n) {
-                WriteCompactSize(file, n);
-                file << large_coin;
-            }
+            std::vector<std::pair<uint32_t, Coin>> outputs;
+            for (uint32_t n{0}; n < count; ++n) outputs.emplace_back(n, large_coin);
+            SnapshotChunkWriter writer{file};
+            writer.WriteCoins(txid, outputs);
+            writer.Flush();
             BOOST_REQUIRE_EQUAL(file.fclose(), 0);
         }
         AutoFile file{fsbridge::fopen(path, "rb")};
