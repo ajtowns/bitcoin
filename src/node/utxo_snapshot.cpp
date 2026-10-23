@@ -41,14 +41,14 @@
  * loaded. */
 static constexpr uint64_t SNAPSHOT_PROGRESS_INTERVAL{10'000'000};
 
-/** How many batches each of the reader's queues may hold. */
-static constexpr size_t SNAPSHOT_QUEUE_BATCHES{16};
+//! Bound decoded look-ahead alongside the two encoded database batches.
+static constexpr size_t SNAPSHOT_QUEUE_BATCHES{1};
 
 /** The size of each batch sent to the leveldb writer, and the number
  * of batches that may be in the queue. Does not impact how frequently
  * writes get flushed by the writer. */
 static constexpr size_t SNAPSHOT_DATA_BATCH_BYTES{4_MiB};
-static constexpr size_t SNAPSHOT_DB_BATCHES{8};
+static constexpr size_t SNAPSHOT_DB_BATCHES{1};
 
 namespace node {
 
@@ -169,7 +169,8 @@ void SnapshotSerializeTask(SnapshotQueue& in, DBBatchQueue& out, std::optional<b
     }
 }
 
-/** Writes serialized records to leveldb. Only this thread touches `db` until joined. */
+/** Obfuscates serialized records and builds database batches while the
+ * database worker inserts the preceding batch into leveldb. */
 void SnapshotWriteTask(DBBatchQueue& in, CDBWrapper& db, std::optional<bilingual_str>& error)
 {
     try {

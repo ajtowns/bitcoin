@@ -14,6 +14,7 @@
 #include <uint256.h>
 #include <util/byte_units.h>
 #include <util/log.h>
+#include <util/thread.h>
 #include <util/threadnames.h>
 #include <util/vector.h>
 
@@ -89,8 +90,32 @@ std::vector<std::byte> RawCoinDataDBWriter::Batch::Add(const COutPoint& outpoint
 
 RawCoinDataDBWriter::RawCoinDataDBWriter(CDBWrapper& db, uint64_t flush_size) :
     m_db{db},
-    m_batch{db},
-    m_flush_size{flush_size} { }
+    m_flush_size{flush_size}
+{
+    m_available.Push(std::make_unique<CDBBatch>(db));
+    m_available.Push(std::make_unique<CDBBatch>(db));
+    m_available.Pop(m_batch);
+    m_thread = std::thread{util::TraceThread, "snapshotdb", [this] {
+        try {
+            EncodedBatch batch;
+            while (m_pending.Pop(batch)) {
+                m_db.WriteBatch(*batch);
+                batch->Clear();
+                m_available.Push(std::move(batch));
+            }
+        } catch (...) {
+            m_error = std::current_exception();
+            m_pending.Finish();
+            m_available.Finish();
+        }
+    }};
+}
+
+RawCoinDataDBWriter::~RawCoinDataDBWriter()
+{
+    m_pending.Finish();
+    m_thread.join();
+}
 
 void RawCoinDataDBWriter::Write(std::span<const std::byte> batch)
 {
@@ -107,20 +132,30 @@ void RawCoinDataDBWriter::Write(std::span<const std::byte> batch)
         std::memcpy(&value_size, in.data(), sizeof(value_size));
         in = in.subspan(sizeof(value_size));
         if (in.size() < value_size) throw std::runtime_error{"truncated coin data batch"};
-        m_batch.Write(key, in.first(value_size));
+        m_batch->Write(key, in.first(value_size));
         in = in.subspan(value_size);
-        if (m_batch.ApproximateSize() >= m_flush_size) Flush();
+        if (m_batch->ApproximateSize() >= m_flush_size) SubmitBatch();
     }
+}
+
+void RawCoinDataDBWriter::SubmitBatch()
+{
+    m_pending.Push(std::move(m_batch));
+    if (!m_available.Pop(m_batch)) std::rethrow_exception(m_error);
 }
 
 void RawCoinDataDBWriter::Flush()
 {
-    m_db.WriteBatch(m_batch);
-    m_batch.Clear();
+    SubmitBatch();
+    // Owning both buffers means no batch remains queued or being written.
+    EncodedBatch idle;
+    if (!m_available.Pop(idle)) std::rethrow_exception(m_error);
+    m_available.Push(std::move(idle));
 }
 
 void RawCoinDataDBWriter::WriteBestBlock(const uint256& block_hash)
 {
+    Flush();
     m_db.Write(DB_BEST_BLOCK, block_hash);
 }
 
