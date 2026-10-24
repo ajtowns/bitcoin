@@ -14,6 +14,7 @@ If --txid=raw or --txid=rawle is specified, txid will be BLOB instead;
 if --spk=raw, then scriptpubkey will be BLOB instead.
 """
 import argparse
+import io
 import os
 import sqlite3
 import sys
@@ -21,7 +22,7 @@ import time
 
 
 UTXO_DUMP_MAGIC = b'utxo\xff'
-UTXO_DUMP_VERSION = 2
+UTXO_DUMP_VERSION = 3
 NET_MAGIC_BYTES = {
     b"\xf9\xbe\xb4\xd9": "Mainnet",
     b"\x0a\x03\xcf\x40": "Signet",
@@ -160,13 +161,26 @@ def main():
     coins_per_hash_left = 0
     prevout_hash = None
     max_height = 0
+    previous_outpoint = None
 
+    snapshot_file = f
+    f = io.BytesIO()
     for coin_idx in range(1, num_utxos+1):
+        if f.tell() == len(f.getbuffer()):
+            assert coins_per_hash_left == 0, "transaction group spans chunks"
+            size = read_compactsize(snapshot_file)
+            assert 0 < size <= 262144
+            payload = snapshot_file.read(size)
+            assert len(payload) == size
+            f = io.BytesIO(payload)
         # read key (COutPoint)
         if coins_per_hash_left == 0:  # read next prevout hash
             prevout_hash = f.read(32)
             coins_per_hash_left = read_compactsize(f)
         prevout_index = read_compactsize(f)
+        outpoint = (prevout_hash, prevout_index)
+        assert previous_outpoint is None or previous_outpoint < outpoint, "outpoints not strictly ordered"
+        previous_outpoint = outpoint
         # read value (Coin)
         code = read_varint(f)
         height = code >> 1
@@ -201,7 +215,7 @@ def main():
     con.close()
 
     print(f"TOTAL: {num_utxos} coins written to {args.outfile}, snapshot height is {max_height}.")
-    if f.read(1) != b'':  # EOF should be reached by now
+    if f.read(1) != b'' or snapshot_file.read(1) != b'':  # EOF should be reached by now
         print(f"WARNING: input file {args.infile} has not reached EOF yet!")
         sys.exit(1)
 

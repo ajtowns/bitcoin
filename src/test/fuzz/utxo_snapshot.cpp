@@ -34,8 +34,10 @@
 #include <cstdint>
 #include <functional>
 #include <ios>
+#include <map>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -133,24 +135,25 @@ void utxo_snapshot_fuzz(FuzzBufferType buffer)
             outfile << std::span{file_data};
         } else {
             int height{1};
+            std::map<Txid, std::vector<std::pair<uint32_t, Coin>>> groups;
             for (const auto& block : *g_chain) {
-                auto coinbase{block->vtx.at(0)};
-                outfile << coinbase->GetHash();
-                WriteCompactSize(outfile, 1); // number of coins for the hash
-                WriteCompactSize(outfile, 0); // index of coin
-                outfile << Coin(coinbase->vout[0], height, /*fCoinBaseIn=*/true);
-                height++;
+                const auto& coinbase{block->vtx.at(0)};
+                groups[coinbase->GetHash()].emplace_back(0, Coin{coinbase->vout[0], height, true});
+                ++height;
             }
+            SnapshotChunkWriter writer{outfile};
+            for (const auto& [txid, coins] : groups) writer.WriteCoins(txid, coins);
+            writer.Flush();
         }
         if constexpr (INVALID) {
             // Append an invalid coin to ensure invalidity. This error will be
             // detected late in the snapshot load, and allows the
             // INVALID fuzz target to reach more potential code coverage.
             const auto& coinbase{g_chain->back()->vtx.back()};
-            outfile << coinbase->GetHash();
-            WriteCompactSize(outfile, 1);   // number of coins for the hash
-            WriteCompactSize(outfile, 999); // index of coin
-            outfile << Coin{coinbase->vout[0], /*nHeightIn=*/999, /*fCoinBaseIn=*/false};
+            SnapshotChunkWriter writer{outfile};
+            const std::vector<std::pair<uint32_t, Coin>> coins{{999, Coin{coinbase->vout[0], 999, false}}};
+            writer.WriteCoins(coinbase->GetHash(), coins);
+            writer.Flush();
         }
         assert(outfile.fclose() == 0);
     }

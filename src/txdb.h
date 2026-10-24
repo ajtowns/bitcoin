@@ -12,16 +12,19 @@
 #include <kernel/cs_main.h>
 #include <streams.h>
 #include <sync.h>
+#include <util/blockingqueue.h>
 #include <util/check.h>
 #include <util/fs.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <future>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 class Coin;
@@ -37,16 +40,18 @@ struct CoinsViewOptions {
 };
 
 /** Writes already-serialized coin records into a coin database, without staging
- * in a CoinsView cache. */
+ * in a CoinsView cache. Batch construction and database writes overlap
+ * through two reusable buffers. */
 class RawCoinDataDBWriter
 {
 public:
     explicit RawCoinDataDBWriter(CDBWrapper& db, uint64_t flush_size);
+    ~RawCoinDataDBWriter();
 
     /** Store one batch, flushing to leveldb as the flush size is reached. */
     void Write(std::span<const std::byte> batch);
 
-    /** Write any pending records to leveldb */
+    //! Wait until every record written so far is in the database.
     void Flush();
 
     /** Store the best block. Call this only after every coin is written; a database
@@ -77,9 +82,17 @@ public:
     };
 
 private:
+    using EncodedBatch = std::unique_ptr<CDBBatch>;
+
+    void SubmitBatch();
+
     CDBWrapper& m_db;
-    CDBBatch m_batch;
     uint64_t m_flush_size;
+    util::BlockingQueue<EncodedBatch> m_available{2};
+    util::BlockingQueue<EncodedBatch> m_pending{1};
+    EncodedBatch m_batch;
+    std::exception_ptr m_error;
+    std::thread m_thread;
 };
 
 /** CCoinsView backed by the coin database (chainstate/) */

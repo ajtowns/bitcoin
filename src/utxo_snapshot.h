@@ -7,6 +7,7 @@
 #define BITCOIN_UTXO_SNAPSHOT_H
 
 #include <coins.h>
+#include <consensus/consensus.h>
 #include <crypto/muhash.h>
 #include <hash.h>
 #include <kernel/chainparams.h>
@@ -27,7 +28,10 @@
 #include <cstdint>
 #include <ios>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 // UTXO set snapshot magic bytes
@@ -39,7 +43,7 @@ inline constexpr std::array<uint8_t, 5> SNAPSHOT_MAGIC_BYTES = {'u', 't', 'x', '
 //! before being used. Thus, new fields should be added only if needed.
 class SnapshotMetadata
 {
-    static constexpr uint16_t VERSION{2};
+    static constexpr uint16_t VERSION{3};
     static inline bool IsSupportedVersion(uint16_t version) {
         return version == VERSION;
     }
@@ -114,74 +118,93 @@ public:
     }
 };
 
+//! Maximum payload size of a version 3 snapshot chunk. Each chunk contains
+//! complete coins, grouped by txid, and is prefixed by its CompactSize length.
+inline constexpr size_t SNAPSHOT_CHUNK_SIZE{262'144};
+
+//! Read one nonempty, bounded snapshot chunk. Group headers never span chunks.
+inline DataStream ReadSnapshotChunk(AutoFile& file)
+{
+    const auto size{ReadCompactSize(file)};
+    if (size == 0 || size > SNAPSHOT_CHUNK_SIZE) {
+        throw std::ios_base::failure("Invalid snapshot chunk size");
+    }
+    DataStream chunk;
+    chunk.resize(size);
+    file.read(MakeWritableByteSpan(chunk));
+    return chunk;
+}
+
+//! Pack sorted transaction outputs into independently decodable snapshot chunks.
+class SnapshotChunkWriter
+{
+    AutoFile& m_file;
+    DataStream m_chunk;
+
+public:
+    explicit SnapshotChunkWriter(AutoFile& file) : m_file{file} {}
+    void WriteCoins(const Txid& txid, std::span<const std::pair<uint32_t, Coin>> coins);
+    void Flush();
+};
+
 /** Duplicates (and must stay identical with) kernel/coinstats.cpp TxOutSer. */
 inline void WriteCoinStatsElement(DataStream& out, const COutPoint& outpoint, const Coin& coin)
 {
     out << outpoint << ((uint32_t{coin.nHeight} << 1) | uint32_t{coin.fCoinBase}) << coin.out;
 }
 
-/** Reads a snapshot's coin stream in file order, handing each coin to
- * `handle(outpoint, coin)`. An error from `handle` ends the reading.
- *
- * Errors if txids are out of order, or if the file holds more or fewer
- * coins than the metadata says, or has trailing data. Requiring txid
- * order means hashing in file order gives the same hash_serialized_3 a
- * node computes over its database.
- *
- * Returns how many coins were read. */
+/** Read complete coins from independently decodable v3 chunks. Outpoints must
+ * increase globally by txid bytes and then numeric output index, including
+ * across chunks. A transaction group may be repeated in the next chunk, but
+ * group headers and coins may not straddle a chunk boundary. */
 template <typename Handle>
 util::Result<uint64_t> ReadSnapshotCoins(AutoFile& file, uint64_t coins_expected, Handle&& handle,
                                          const util::SignalInterrupt* interrupt = nullptr)
 {
     uint64_t coins_left{coins_expected};
     uint64_t coins_done{0};
-
-    // last_txid starts at zero, which is below any real txid.
-    Txid last_txid;
+    uint64_t outputs_size{0};
+    std::optional<COutPoint> previous;
+    DataStream chunk;
     try {
         while (coins_left > 0) {
             if (interrupt && *interrupt) {
                 return util::Error{Untranslated("Aborting after an interrupt was requested")};
             }
+            if (chunk.empty()) chunk = ReadSnapshotChunk(file);
 
             Txid txid;
-            file >> txid;
-            if (!(last_txid < txid)) {
-                return util::Error{Untranslated(strprintf("Bad snapshot - txids are not in key order: %s follows %s",
-                                                          txid.ToString(), last_txid.ToString()))};
-            }
-            last_txid = txid;
-
-            const uint64_t coins_per_txid{ReadCompactSize(file)};
-            if (coins_per_txid > coins_left) {
+            chunk >> txid;
+            const uint64_t coins_per_txid{ReadCompactSize(chunk)};
+            if (coins_per_txid == 0 || coins_per_txid > coins_left) {
                 return util::Error{Untranslated("Mismatch in coins count in snapshot metadata and actual snapshot data")};
             }
-
-            for (size_t i{0}; i < coins_per_txid; ++i) {
-                COutPoint outpoint;
-                outpoint.n = static_cast<uint32_t>(ReadCompactSize(file));
-                outpoint.hash = txid;
+            for (uint64_t i{0}; i < coins_per_txid; ++i) {
+                COutPoint outpoint{txid, static_cast<uint32_t>(ReadCompactSize(chunk))};
                 Coin coin;
-                file >> coin;
+                chunk >> coin;
+                if (previous && !(*previous < outpoint)) {
+                    return util::Error{Untranslated("Snapshot coins are not strictly ordered by outpoint")};
+                }
+                if (!previous || previous->hash != txid) outputs_size = 0;
+                // Retain the transaction resource bound across chunk boundaries.
+                outputs_size += GetSerializeSize(coin.out);
+                if (outputs_size > MAX_BLOCK_WEIGHT / WITNESS_SCALE_FACTOR) {
+                    return util::Error{Untranslated("Bad snapshot - transaction outputs exceed maximum block weight")};
+                }
+                previous = outpoint;
                 if (auto res{handle(outpoint, coin)}; !res) {
                     return util::Error{util::ErrorString(res)};
                 }
                 ++coins_done;
+                --coins_left;
             }
-            coins_left -= coins_per_txid;
         }
-
-        // All the promised coins have been read. Reading one more
-        // byte should hit EOF, which will be caught below and treated as
-        // success because coins_left == 0. If the read succeeds, the file
-        // has trailing data.
-        std::byte left_over;
-        file >> left_over;
-        return util::Error{Untranslated(strprintf("Bad snapshot - coins left over after deserializing %d coins", coins_expected))};
+        if (!chunk.empty() || file.tell() != file.size()) {
+            return util::Error{Untranslated(strprintf("Bad snapshot - coins left over after deserializing %d coins", coins_expected))};
+        }
     } catch (const std::ios_base::failure&) {
-        if (coins_left != 0) {
-            return util::Error{Untranslated(strprintf("Bad snapshot format or truncated snapshot after deserializing %d coins", coins_done))};
-        }
+        return util::Error{Untranslated(strprintf("Bad snapshot format or truncated snapshot after deserializing %d coins", coins_done))};
     }
     return coins_done;
 }
@@ -243,7 +266,7 @@ util::Result<void> ReadSnapshotBatches(AutoFile& file, uint64_t coins_expected, 
     return {};
 }
 
-/** Calculate hash_serialized_3 of the coins in `queue`, in the order they arrive. */
+/** Calculate hash_serialized_3 of the coins in `queue`, with numerically ordered output indices. */
 inline void HashSnapshotBatches(SnapshotQueue& queue, uint256& out)
 {
     // The hash object belongs to this thread, and the result is written into the
@@ -251,14 +274,30 @@ inline void HashSnapshotBatches(SnapshotQueue& queue, uint256& out)
     // synchronisation the reader needs.
     HashWriter hasher{};
     DataStream element{};
+    // The database orders VARINT-encoded output indices lexicographically,
+    // whereas the commitment orders them numerically. A transaction may also
+    // span batches: retain their storage until all its outputs can be hashed.
+    std::vector<const SnapshotItem*> outputs;
+    std::vector<SnapshotBatch> retained;
+    const auto flush = [&] {
+        std::ranges::sort(outputs, {}, [](const SnapshotItem* item) { return item->outpoint.n; });
+        for (const auto* item : outputs) {
+            element.clear();
+            WriteCoinStatsElement(element, item->outpoint, item->coin);
+            hasher.write(std::as_bytes(MakeUCharSpan(element)));
+        }
+        outputs.clear();
+        retained.clear();
+    };
     SnapshotBatch items;
     while (queue.Pop(items)) {
         for (const SnapshotItem& item : *items) {
-            element.clear();
-            WriteCoinStatsElement(element, item.outpoint, item.coin);
-            hasher.write(std::as_bytes(MakeUCharSpan(element)));
+            if (!outputs.empty() && outputs.back()->outpoint.hash != item.outpoint.hash) flush();
+            outputs.push_back(&item);
         }
+        retained.push_back(std::move(items));
     }
+    flush();
     out = hasher.GetHash();
 }
 

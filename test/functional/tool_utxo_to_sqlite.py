@@ -117,6 +117,11 @@ class UtxoToSqliteTest(BitcoinTestFramework):
                 wallet.send_to(from_node=node, scriptPubKey=output_script, amount=i, fee=20000)
             self.generate(wallet, 1)
 
+        self.log.info('Create a transaction whose unspent outputs span snapshot chunks')
+        large_tx = wallet.create_self_transfer_multi(num_outputs=20000)
+        assert len(bytes.fromhex(large_tx['hex'])) > 262144
+        self.generateblock(node, output=wallet.get_address(), transactions=[large_tx['hex']])
+
         self.log.info('Dump UTXO set via `dumptxoutset` RPC')
         input_filename = os.path.join(self.options.tmpdir, "utxos.dat")
         node.dumptxoutset(input_filename, "latest")

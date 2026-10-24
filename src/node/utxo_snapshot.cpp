@@ -41,14 +41,50 @@
  * loaded. */
 static constexpr uint64_t SNAPSHOT_PROGRESS_INTERVAL{10'000'000};
 
-/** How many batches each of the reader's queues may hold. */
-static constexpr size_t SNAPSHOT_QUEUE_BATCHES{16};
+//! Bound decoded look-ahead alongside the two encoded database batches.
+static constexpr size_t SNAPSHOT_QUEUE_BATCHES{1};
 
 /** The size of each batch sent to the leveldb writer, and the number
  * of batches that may be in the queue. Does not impact how frequently
  * writes get flushed by the writer. */
 static constexpr size_t SNAPSHOT_DATA_BATCH_BYTES{4_MiB};
-static constexpr size_t SNAPSHOT_DB_BATCHES{8};
+static constexpr size_t SNAPSHOT_DB_BATCHES{1};
+
+void SnapshotChunkWriter::Flush()
+{
+    if (m_chunk.empty()) return;
+    WriteCompactSize(m_file, m_chunk.size());
+    m_file.write(MakeByteSpan(m_chunk));
+    m_chunk.clear();
+}
+
+void SnapshotChunkWriter::WriteCoins(const Txid& txid, std::span<const std::pair<uint32_t, Coin>> coins)
+{
+    while (!coins.empty()) {
+        size_t count{0};
+        size_t size{0};
+        while (count < coins.size()) {
+            const auto& [index, coin]{coins[count]};
+            const size_t next{size + GetSizeOfCompactSize(index) + GetSerializeSize(coin)};
+            if (m_chunk.size() + 32 + GetSizeOfCompactSize(count + 1) + next > SNAPSHOT_CHUNK_SIZE) break;
+            size = next;
+            ++count;
+        }
+        if (count == 0) {
+            if (m_chunk.empty()) throw std::ios_base::failure("Coin exceeds snapshot chunk size");
+            Flush();
+            continue;
+        }
+        m_chunk << txid;
+        WriteCompactSize(m_chunk, count);
+        for (const auto& [index, coin] : coins.first(count)) {
+            WriteCompactSize(m_chunk, index);
+            m_chunk << coin;
+        }
+        coins = coins.subspan(count);
+        if (!coins.empty()) Flush();
+    }
+}
 
 namespace node {
 
@@ -169,7 +205,8 @@ void SnapshotSerializeTask(SnapshotQueue& in, DBBatchQueue& out, std::optional<b
     }
 }
 
-/** Writes serialized records to leveldb. Only this thread touches `db` until joined. */
+/** Obfuscates serialized records and builds database batches while the
+ * database worker inserts the preceding batch into leveldb. */
 void SnapshotWriteTask(DBBatchQueue& in, CDBWrapper& db, std::optional<bilingual_str>& error)
 {
     try {
