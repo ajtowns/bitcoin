@@ -37,10 +37,10 @@ typedef int64_t NodeId;
 namespace node {
 
 /** Number of buckets; the low bits of a shortid select its bucket. */
-static constexpr int TOTAL_BUCKETS = 32;
+inline constexpr int TOTAL_BUCKETS = 32;
 
 /** Per-bucket sketch capacity. */
-static constexpr int SKETCH_CAPACITY = 64;
+inline constexpr int SKETCH_CAPACITY = 64;
 
 /** Valid sketch capacities: multiples of 4 (so capacity * 46 bits is a whole
  *  number of bytes) covering the useful range for tests and production. */
@@ -66,29 +66,29 @@ public:
 using NetworkId = uint32_t;
 
 /** How long to keep local templates before expiry. */
-static constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
+inline constexpr auto LOCAL_TEMPLATE_EXPIRY{std::chrono::seconds{300}};
 
 /** How long to keep completed peer templates before expiry. */
-static constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{210}};
+inline constexpr auto PEER_TEMPLATE_EXPIRY{std::chrono::seconds{210}};
 
 /** Average interval between local template generation cycles. */
-static constexpr auto TEMPLATE_GENERATE_INTERVAL{std::chrono::seconds{30}};
+inline constexpr auto TEMPLATE_GENERATE_INTERVAL{std::chrono::seconds{30}};
 
 /** Average interval between gettmplt requests to each peer (1m30-2m30). */
-static constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::minutes{2}};
-static constexpr auto TEMPLATE_REQUEST_SPREAD{std::chrono::minutes{1}};
+inline constexpr auto TEMPLATE_REQUEST_INTERVAL{std::chrono::minutes{2}};
+inline constexpr auto TEMPLATE_REQUEST_SPREAD{std::chrono::minutes{1}};
 
 /** Maximum number of inbound peers to actively request templates from. */
-static constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
+inline constexpr int MAX_INBOUND_TEMPLATE_PEERS{10};
 
 /** Average number of request cycles before rotating out an active inbound. */
-static constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
+inline constexpr int INBOUND_TEMPLATE_ROTATION_FREQ{8};
 
 /** Skip transactions that entered the mempool this recently (prefer relaying txs normally) */
-static constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{20};
+inline constexpr std::chrono::seconds MIN_TEMPLATE_TX_AGE{20};
 
 /** Template weight limit (larger than consensus to capture more txs). */
-static constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
+inline constexpr unsigned int MAX_TEMPLATE_WEIGHT{8000000};
 
 /** A serializable Golomb-Rice-encoded vector of uint64_t values */
 struct GRVector {
