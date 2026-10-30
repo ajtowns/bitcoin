@@ -619,6 +619,7 @@ public:
     void UnitTestMisbehaving(NodeId peer_id) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex) { Misbehaving(*Assert(GetPeerRef(peer_id)), ""); };
     void UpdateLastBlockAnnounceTime(NodeId node, int64_t time_in_seconds) override;
     ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const override;
+    bool SendMessageToPeer(NodeId peer_id, CSerializedNetMsg&& msg) override;
 
 private:
     void ProcessMessage(Peer& peer, CNode& pfrom, const std::string& msg_type, DataStream& vRecv, NodeClock::time_point time_received,
@@ -5413,6 +5414,15 @@ bool PeerManagerImpl::MaybeDisconnectForTxRelayCapacity(CNode& node, const std::
     LogDebug(BCLog::NET, "failed to find a tx-relaying eviction candidate - connection dropped after %s message, peer=%d\n", msg_type, node.GetId());
     node.fDisconnect = true;
     return true;
+}
+
+bool PeerManagerImpl::SendMessageToPeer(NodeId peer_id, CSerializedNetMsg&& msg)
+{
+    bool success = m_connman.ForNode(peer_id, [&](CNode* node) {
+        PushMessage(*node, std::move(msg));
+        return true;
+    });
+    return success;
 }
 
 bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptMsgProc)

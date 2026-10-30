@@ -1113,18 +1113,13 @@ static RPCMethod sendmsgtopeer()
             }
 
             NodeContext& node = EnsureAnyNodeContext(request.context);
-            CConnman& connman = EnsureConnman(node);
+            PeerManager& peerman = EnsurePeerman(node);
 
             CSerializedNetMsg msg_ser;
             msg_ser.data = msg.value();
             msg_ser.m_type = msg_type;
 
-            bool success = connman.ForNode(peer_id, [&](CNode* node) {
-                connman.PushMessage(node, std::move(msg_ser));
-                return true;
-            });
-
-            if (!success) {
+            if (!peerman.SendMessageToPeer(peer_id, std::move(msg_ser))) {
                 throw JSONRPCError(RPC_MISC_ERROR, "Error: Could not send message to peer");
             }
 

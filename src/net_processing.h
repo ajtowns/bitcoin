@@ -204,8 +204,18 @@ public:
      * guaranteed to not change dependent on state - ie they are suitable for
      * use when describing peers which we know to be desirable, but for which
      * we do not have a confirmed set of service flags.
-    */
+     */
     virtual ServiceFlags GetDesirableServiceFlags(ServiceFlags services) const = 0;
+
+    /**
+     * Send an out of band message to a peer (thread-safe)
+     *
+     * @param[in]  peer_id      The peer id
+     * @param[in]  msg          The message to send
+     * @return True if the peer is fully connected (in which case the message
+     *         is pushed to the peer), otherwise false.
+     */
+    virtual bool SendMessageToPeer(NodeId peer_id, CSerializedNetMsg&& msg) = 0;
 };
 
 #endif // BITCOIN_NET_PROCESSING_H
