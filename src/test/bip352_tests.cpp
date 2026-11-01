@@ -355,6 +355,11 @@ BOOST_AUTO_TEST_CASE(bip352_decode_address)
          "02ee1266376e264684abcec3e23784d71d4baa6e3f0a916bdec6073ea8ef03a51e",
          "034f1641088921947a8ce957afe4057c9d739b9c6ec7ed2b421216a9a2be461690",
          "", 0},
+        {ChainType::TESTNET5,
+         "tsp1qqthpye3hdcnydp9temp7yduy6uw5h2nw8u9fz677ccrna280qwj3uq60zeqs3zfpj3age62h4ljq2lyawwdecmk8a545yysk4x3tu3skjqm2thu6",
+         "02ee1266376e264684abcec3e23784d71d4baa6e3f0a916bdec6073ea8ef03a51e",
+         "034f1641088921947a8ce957afe4057c9d739b9c6ec7ed2b421216a9a2be461690",
+         "", 0},
         {ChainType::SIGNET,
          "tsp1qqvrl2accqtatgtkllv5fdsfapq6vqnrr0uf2whhmjyas4teg7ljfqqlpec0ze90m97t3stv92p5ekzkcwzmpx0x8p7ljj9xqcjjpvnfurc00tjn9",
          "0307f5771802fab42edffb2896c13d0834c04c637f12a75efb913b0aaf28f7e490",
@@ -416,7 +421,7 @@ BOOST_AUTO_TEST_CASE(bip352_decode_address)
     };
 
     for (const auto& vec : invalid_vectors) {
-        for (const auto chain : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::SIGNET, ChainType::REGTEST}) {
+        for (const auto chain : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::TESTNET5, ChainType::SIGNET, ChainType::REGTEST}) {
             SelectParams(chain);
             auto sp = DecodeSilentPaymentsAddress(vec.address, Params());
             BOOST_REQUIRE_MESSAGE(!sp.has_value(), vec.address);

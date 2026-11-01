@@ -17,6 +17,7 @@
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/verify_flags.h>
+#include <span.h>
 #include <uint256.h>
 #include <util/chaintype.h>
 #include <util/log.h>
@@ -474,6 +475,109 @@ public:
 };
 
 /**
+ * Testnet (v5): public test network which is reset from time to time.
+ */
+class CTestNet5Params : public CChainParams {
+public:
+    CTestNet5Params(const TestNetOptions& opts) {
+        m_chain_type = ChainType::TESTNET5;
+        consensus.signet_blocks = false;
+        consensus.signet_challenge.clear();
+        consensus.nSubsidyHalvingInterval = 210000;
+        consensus.BIP34Height = 1;
+        consensus.BIP34Hash = uint256{};
+        consensus.BIP65Height = 1;
+        consensus.BIP66Height = 1;
+        consensus.CSVHeight = 1;
+        consensus.SegwitHeight = 1;
+        consensus.MinBIP9WarningHeight = 0;
+        //consensus.powLimit = uint256{"0000000000000fffff0000000000000000000000000000000000000000000000"}; // diff=2**20
+        consensus.powLimit = uint256{"000000000007fff8000000000000000000000000000000000000000000000000"}; // diff=8192
+        consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
+        consensus.nPowTargetSpacing = 10 * 60;
+        consensus.fPowAllowMinDifficultyBlocks = false;
+        consensus.enforce_BIP94 = false;
+        consensus.fPowNoRetargeting = false;
+
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].min_activation_height = 0; // No activation delay
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].threshold = 1512; // 75%
+        consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].period = 2016;
+
+        // Deployment of the Consensus Cleanup (BIP 54)
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].bit = 0;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].min_activation_height = 0; // No activation delay
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].threshold = 1; // 0%
+        consensus.vDeployments[Consensus::DEPLOYMENT_CONSENSUSCLEANUP].period = 2016;
+
+        ApplyDeploymentOptions(opts.dep_opts);
+
+        consensus.nMinimumChainWork = uint256{"0000000000000000000000000000000000000000000000000000000000000000"};
+        consensus.defaultAssumeValid = uint256{"0000000000000000000000000000000000000000000000000000000000000000"};
+
+        pchMessageStart[0] = 0x46;
+        pchMessageStart[1] = 0x49;
+        pchMessageStart[2] = 0x56;
+        pchMessageStart[3] = 0x45;
+        nDefaultPort = 18335;
+        nPruneAfterHeight = 1000;
+        m_assumed_blockchain_size = 31;
+        m_assumed_chain_state_size = 2;
+
+        const char* testnet5_genesis_msg = "2026-11-03 974343 00000000000000000000a86d6da2c1563d08668d9ec18cce58cb8c865d4a31c8";
+        const CScript testnet5_genesis_script = CScript() << OP_RETURN << "9763e96a00000000"_hex;
+        genesis = CreateGenesisBlock(testnet5_genesis_msg, testnet5_genesis_script,
+                1793680278,
+                0x73ba1699,
+                0x1b07fff8,
+                0x201c4000,
+                50 * COIN);
+        consensus.hashGenesisBlock = genesis.GetHash();
+        assert(consensus.hashGenesisBlock == uint256{"000000000001bd3ade1e24d07c1a3677d4868c34f2f1696fa419e3b9f061b1e0"});
+        assert(genesis.hashMerkleRoot == uint256{"9b408309d845f83d37cdecdde8b72bb4f931292f04e5c43f87929586aabb48de"});
+
+        vFixedSeeds.clear();
+        vSeeds.clear();
+        // nodes with support for servicebits filtering should be at the top
+        //vSeeds.emplace_back("seed.testnet5.bitcoin.sprovoost.nl."); // Sjors Provoost
+        //vSeeds.emplace_back("seed.testnet5.wiz.biz."); // Jason Maurice
+
+        base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
+        base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,196);
+        base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
+        base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
+        base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+
+        bech32_hrp = "tb";
+        silent_payments_hrp = "tsp";
+
+        //vFixedSeeds = std::vector<uint8_t>(std::begin(chainparams_seed_testnet5), std::end(chainparams_seed_testnet5));
+
+        fDefaultConsistencyChecks = false;
+        m_is_mockable_chain = false;
+
+        m_assumeutxo_data = {
+        };
+
+        chainTxData = ChainTxData{
+            .nTime    = 1793523176,
+            .tx_count = 1,
+            .dTxRate  = 0.1148250171344748,
+        };
+
+        // Generated by headerssync-params.py on 2026-09-08.
+        m_headers_sync_params = HeadersSyncParams{
+            .commitment_period = 616,
+            .redownload_buffer_size = 16199, // 16199/616 = ~26.3 commitments
+        };
+    }
+};
+
+/**
  * Signet: test network with an additional consensus parameter (see BIP325).
  */
 class SigNetParams : public CChainParams {
@@ -739,6 +843,11 @@ std::unique_ptr<const CChainParams> CChainParams::TestNet4(const TestNetOptions&
     return std::make_unique<const CTestNet4Params>(options);
 }
 
+std::unique_ptr<const CChainParams> CChainParams::TestNet5(const TestNetOptions& options)
+{
+    return std::make_unique<const CTestNet5Params>(options);
+}
+
 std::vector<int> CChainParams::GetAvailableSnapshotHeights() const
 {
     std::vector<int> heights;
@@ -755,6 +864,7 @@ std::optional<ChainType> GetNetworkForMagic(const MessageStartChars& message)
     const auto mainnet_msg = CChainParams::Main()->MessageStart();
     const auto testnet_msg = CChainParams::TestNet()->MessageStart();
     const auto testnet4_msg = CChainParams::TestNet4()->MessageStart();
+    const auto testnet5_msg = CChainParams::TestNet5()->MessageStart();
     const auto regtest_msg = CChainParams::RegTest()->MessageStart();
     const auto signet_msg = CChainParams::SigNet()->MessageStart();
 
@@ -764,6 +874,8 @@ std::optional<ChainType> GetNetworkForMagic(const MessageStartChars& message)
         return ChainType::TESTNET;
     } else if (std::ranges::equal(message, testnet4_msg)) {
         return ChainType::TESTNET4;
+    } else if (std::ranges::equal(message, testnet5_msg)) {
+        return ChainType::TESTNET5;
     } else if (std::ranges::equal(message, regtest_msg)) {
         return ChainType::REGTEST;
     } else if (std::ranges::equal(message, signet_msg)) {

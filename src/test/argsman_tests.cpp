@@ -841,8 +841,8 @@ struct ArgsMergeTestingSetup : public BasicTestingSetup {
             ForEachNoDup(conf_actions, SET, SECTION_NEGATE, [&] {
                 for (bool soft_set : {false, true}) {
                     for (bool force_set : {false, true}) {
-                        for (const std::string& section : {ChainTypeToString(ChainType::MAIN), ChainTypeToString(ChainType::TESTNET), ChainTypeToString(ChainType::TESTNET4), ChainTypeToString(ChainType::SIGNET)}) {
-                            for (const std::string& network : {ChainTypeToString(ChainType::MAIN), ChainTypeToString(ChainType::TESTNET), ChainTypeToString(ChainType::TESTNET4), ChainTypeToString(ChainType::SIGNET)}) {
+                        for (const std::string& section : {ChainTypeToString(ChainType::MAIN), ChainTypeToString(ChainType::TESTNET), ChainTypeToString(ChainType::TESTNET4), ChainTypeToString(ChainType::TESTNET5), ChainTypeToString(ChainType::SIGNET)}) {
+                            for (const std::string& network : {ChainTypeToString(ChainType::MAIN), ChainTypeToString(ChainType::TESTNET), ChainTypeToString(ChainType::TESTNET4), ChainTypeToString(ChainType::TESTNET5), ChainTypeToString(ChainType::SIGNET)}) {
                                 for (bool net_specific : {false, true}) {
                                     fn(arg_actions, conf_actions, soft_set, force_set, section, network, net_specific);
                                 }
@@ -996,7 +996,7 @@ BOOST_FIXTURE_TEST_CASE(util_ArgsMerge, ArgsMergeTestingSetup)
     // Results file is formatted like:
     //
     //   <input> || <IsArgSet/IsArgNegated/GetArg output> | <GetArgs output> | <GetUnsuitable output>
-    BOOST_CHECK_EQUAL(out_sha_hex, "f1ee5ab094cc43d16a6086fa7f2c10389e0f99902616b31bbf29189972ad1473");
+    BOOST_CHECK_EQUAL(out_sha_hex, "d56cdc3274bc02fe5e45ab9a535d19713ee05473c526124160ebb38fdc627405");
 }
 
 // Similar test as above, but for ArgsManager::GetChainTypeString function.
@@ -1098,7 +1098,7 @@ BOOST_FIXTURE_TEST_CASE(util_ChainMerge, ChainMergeTestingSetup)
     // Results file is formatted like:
     //
     //   <input> || <output>
-    BOOST_CHECK_EQUAL(out_sha_hex, "c0e33aab0c74e040ddcee9edad59e8148d8e1cacb3cccd9ea1a1f485cb6bad21");
+    BOOST_CHECK_EQUAL(out_sha_hex, "dc2d521c329bf2d987e8dae0ef8394274abd97ebc856df79f050f5c35528959c");
 }
 
 BOOST_AUTO_TEST_CASE(util_ReadWriteSettings)

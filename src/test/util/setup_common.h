@@ -134,6 +134,12 @@ struct Testnet4Setup : public TestingSetup {
         : TestingSetup{ChainType::TESTNET4} {}
 };
 
+/** Identical to TestingSetup, but chain set to testnet5 */
+struct Testnet5Setup : public TestingSetup {
+    Testnet5Setup()
+        : TestingSetup{ChainType::TESTNET5} {}
+};
+
 class CBlock;
 class CScript;
 

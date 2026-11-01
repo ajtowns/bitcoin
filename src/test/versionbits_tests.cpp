@@ -456,7 +456,7 @@ BOOST_FIXTURE_TEST_CASE(blockscriptflags, RegTestingSetup)
     BOOST_CHECK_EQUAL(chainman.m_all_consensus_script_flags.as_int(), CONSENSUS_SCRIPT_VERIFY_FLAGS.as_int());
 
     // Every other chain should have a subset (though this should already have been checked at compile-time)
-    for (const auto& chain_type : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::SIGNET}) {
+    for (const auto& chain_type : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::TESTNET5, ChainType::SIGNET}) {
         auto params{CreateChainParams(*m_node.args, chain_type)};
         script_verify_flags possible_flags{ChainstateManager::GetAllConsensusScriptFlags(params->GetConsensus())};
         BOOST_CHECK_EQUAL((possible_flags & CONSENSUS_SCRIPT_VERIFY_FLAGS).as_int(), possible_flags.as_int());
@@ -469,7 +469,7 @@ BOOST_FIXTURE_TEST_CASE(versionbits_computeblockversion, BlockVersionTest)
 
     // check that any deployment on any chain can conceivably reach both
     // ACTIVE and FAILED states in roughly the way we expect
-    for (const auto& chain_type: {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::SIGNET, ChainType::REGTEST}) {
+    for (const auto& chain_type: {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::TESTNET5, ChainType::SIGNET, ChainType::REGTEST}) {
         const auto chainParams = CreateChainParams(*m_node.args, chain_type);
         uint32_t chain_all_vbits{0};
         for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
