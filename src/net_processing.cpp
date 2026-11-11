@@ -211,6 +211,11 @@ static constexpr size_t MAX_ADDR_PROCESSING_TOKEN_BUCKET{MAX_ADDR_TO_SEND};
 /** Private broadcast connections must complete within this time. Disconnect the peer if it takes longer. */
 static constexpr auto PRIVATE_BROADCAST_MAX_CONNECTION_LIFETIME{3min};
 
+/** Support for deserializing transactions up to a limited size */
+static constexpr TransactionSerParams TX_WITH_WITNESS_BLOCK_LIMIT{
+    .allow_witness = true, .reject_empty = true, .max_weight = MAX_BLOCK_TXS_WEIGHT
+};
+
 // Internal stuff
 namespace {
 /** Blocks that are in flight, and that are in the queue to be downloaded. */
@@ -4721,8 +4726,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         CTransactionRef ptx;
         // A transaction that does not fit in a valid block cannot be valid.
-        uint64_t weight_left{MAX_BLOCK_TXS_WEIGHT};
-        vRecv >> TxWithWitnessP2P(weight_left)(ptx);
+        vRecv >> TX_WITH_WITNESS_BLOCK_LIMIT(ptx);
 
         const Txid& txid = ptx->GetHash();
         const Wtxid& wtxid = ptx->GetWitnessHash();
@@ -4808,8 +4812,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         CBlockHeaderAndShortTxIDs cmpctblock;
         // The prefilled transactions are part of the block, so stop deserializing as soon as they exceed the weight
         // that the transactions of a valid block can have.
-        uint64_t weight_left{MAX_BLOCK_TXS_WEIGHT};
-        vRecv >> TxWithWitnessP2P(weight_left)(cmpctblock);
+        vRecv >> TX_WITH_WITNESS_BLOCK_LIMIT(cmpctblock);
 
         bool received_new_header = false;
         const auto blockhash = cmpctblock.header.GetHash();
@@ -5065,8 +5068,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         BlockTransactions resp;
         // The transactions are part of the block, so stop deserializing as soon as they exceed the weight that the
         // transactions of a valid block can have (not accounting for those of the block that are already known).
-        uint64_t weight_left{MAX_BLOCK_TXS_WEIGHT};
-        vRecv >> TxWithWitnessP2P(weight_left)(resp);
+        vRecv >> TX_WITH_WITNESS_BLOCK_LIMIT(resp);
 
         return ProcessCompactBlockTxns(pfrom, peer, resp);
     }
@@ -5123,8 +5125,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
         // Stop deserializing as soon as the transactions read exceed the weight that the transactions of a valid
         // block can have.
-        uint64_t weight_left{MAX_BLOCK_TXS_WEIGHT};
-        vRecv >> TxWithWitnessP2P(weight_left)(*pblock);
+        vRecv >> TX_WITH_WITNESS_BLOCK_LIMIT(*pblock);
 
         LogDebug(BCLog::NET, "received block %s peer=%d\n", pblock->GetHash().ToString(), pfrom.GetId());
 

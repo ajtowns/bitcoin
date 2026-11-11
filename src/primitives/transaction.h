@@ -181,10 +181,18 @@ struct TransactionSerParams {
      *  valid) as soon as that is known, rather than first allocating memory for whatever else they
      *  contain. */
     const bool reject_empty{false};
-    /** When deserializing, if not null, the weight that the deserialized transactions may still
-     *  have in total (over all transactions deserialized with these parameters). It is decreased
-     *  while reading, and deserialization fails as soon as the data read is known to exceed it. */
-    uint64_t* const weight_left{nullptr};
+    /** When deserializing, limit deserialized transactions to this weight.
+     *  The default (uint64_t max) means no limit, and no calculations
+     *  are performed. Weight is tracked via State::weight_left. */
+    const uint64_t max_weight{std::numeric_limits<uint64_t>::max()};
+
+    struct State {
+        uint64_t weight_left{0};
+    };
+
+    constexpr bool HasState() const { return max_weight < std::numeric_limits<uint64_t>::max(); }
+    constexpr State InitState() const { return { .weight_left = max_weight }; }
+
     SER_PARAMS_OPFUNC
 };
 inline constexpr TransactionSerParams TX_WITH_WITNESS{.allow_witness = true};
@@ -192,12 +200,6 @@ inline constexpr TransactionSerParams TX_NO_WITNESS{.allow_witness = false};
 /** TX_WITH_WITNESS, but rejecting transactions without inputs or outputs. For data received from
  *  P2P peers. */
 inline constexpr TransactionSerParams TX_WITH_WITNESS_P2P{.allow_witness = true, .reject_empty = true};
-/** TX_WITH_WITNESS_P2P, additionally limiting the total weight of the deserialized transactions to
- *  weight_left. */
-inline TransactionSerParams TxWithWitnessP2P(uint64_t& weight_left)
-{
-    return {.allow_witness = true, .reject_empty = true, .weight_left = &weight_left};
-}
 
 /** The minimum weight of a transaction input: its prevout (36 bytes), an empty scriptSig (1), and its nSequence (4). */
 inline constexpr uint64_t MIN_WEIGHT_PER_TXIN{WITNESS_SCALE_FACTOR * (36 + 1 + 4)};
@@ -222,13 +224,15 @@ inline constexpr uint64_t MIN_WEIGHT_PER_TXOUT{WITNESS_SCALE_FACTOR * (8 + 1)};
  * - uint32_t nLockTime
  */
 template<typename Stream, typename TxType>
-void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& params)
+void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& params, TransactionSerParams::State* state)
 {
+    if (!params.HasState()) state = nullptr;
+
     // Charge weight against the budget, if any, failing as soon as it is exceeded.
     const auto charge{[&](uint64_t weight) {
-        if (!params.weight_left) return;
-        if (weight > *params.weight_left) throw std::ios_base::failure("Weight limit exceeded");
-        *params.weight_left -= weight;
+        if (!state) return;
+        if (weight > state->weight_left) throw std::ios_base::failure("Weight limit exceeded");
+        state->weight_left -= weight;
     }};
     // Charge the weight of the version and the lock time up front.
     charge(WITNESS_SCALE_FACTOR * (sizeof(tx.version) + sizeof(tx.nLockTime)));
@@ -261,7 +265,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vin.resize(num_inputs);
     for (auto& txin : tx.vin) {
         s >> txin;
-        if (params.weight_left) charge(WITNESS_SCALE_FACTOR * ::GetSerializeSize(txin) - MIN_WEIGHT_PER_TXIN);
+        if (state) charge(WITNESS_SCALE_FACTOR * ::GetSerializeSize(txin) - MIN_WEIGHT_PER_TXIN);
     }
 
     // Read the number of outputs. In case of an empty vin, the byte read as the flags is the number of outputs (if the
@@ -274,7 +278,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
     tx.vout.resize(num_outputs);
     for (auto& txout : tx.vout) {
         s >> txout;
-        if (params.weight_left) charge(WITNESS_SCALE_FACTOR * ::GetSerializeSize(txout) - MIN_WEIGHT_PER_TXOUT);
+        if (state) charge(WITNESS_SCALE_FACTOR * ::GetSerializeSize(txout) - MIN_WEIGHT_PER_TXOUT);
     }
 
     if ((flags & 1) && fAllowWitness) {
@@ -282,7 +286,7 @@ void UnserializeTransaction(TxType& tx, Stream& s, const TransactionSerParams& p
         flags ^= 1;
         for (size_t i = 0; i < tx.vin.size(); i++) {
             s >> tx.vin[i].scriptWitness;
-            if (params.weight_left) charge(::GetSerializeSize(tx.vin[i].scriptWitness));
+            if (state) charge(::GetSerializeSize(tx.vin[i].scriptWitness));
         }
         if (!tx.HasWitness()) {
             /* It's illegal to encode witnesses when all witness stacks are empty. */
@@ -443,12 +447,15 @@ struct CMutableTransaction
 
     template <typename Stream>
     inline void Unserialize(Stream& s) {
-        UnserializeTransaction(*this, s, s.template GetParams<TransactionSerParams>());
+        const TransactionSerParams& params = s.template GetParams<TransactionSerParams>();
+        TransactionSerParams::State& state = s.template GetState<TransactionSerParams>();
+        UnserializeTransaction(*this, s, params, &state);
     }
 
     template <typename Stream>
     CMutableTransaction(deserialize_type, const TransactionSerParams& params, Stream& s) {
-        UnserializeTransaction(*this, s, params);
+        TransactionSerParams::State state = params.InitState();
+        UnserializeTransaction(*this, s, params, &state);
     }
 
     template <typename Stream>

@@ -479,14 +479,16 @@ BOOST_AUTO_TEST_CASE(WeightLimitedDeserializationTest)
     const auto check{[&](const auto& obj, auto deser) {
         const auto data{DataStream{} << TX_WITH_WITNESS(obj)};
         for (const uint64_t limit : {txs_weight, txs_weight - 1}) {
+            const TransactionSerParams TxWitLimit{.allow_witness = true, .reject_empty = true, .max_weight = limit};
             DataStream stream{data};
-            uint64_t weight_left{limit};
+            ParamsStream paramsstream{stream, TxWitLimit};
+            auto& state = paramsstream.GetState<TransactionSerParams>();
             if (limit == txs_weight) {
-                stream >> TxWithWitnessP2P(weight_left)(deser);
-                BOOST_CHECK_EQUAL(weight_left, 0U);
+                paramsstream >> deser;
+                BOOST_CHECK_EQUAL(state.weight_left, 0U);
                 BOOST_CHECK_EQUAL((DataStream{} << TX_WITH_WITNESS(deser)).str(), data.str());
             } else {
-                BOOST_CHECK_EXCEPTION(stream >> TxWithWitnessP2P(weight_left)(deser), std::ios_base::failure, HasReason{"Weight limit exceeded"});
+                BOOST_CHECK_EXCEPTION(paramsstream >> deser, std::ios_base::failure, HasReason{"Weight limit exceeded"});
             }
         }
     }};

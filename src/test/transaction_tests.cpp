@@ -1557,22 +1557,25 @@ BOOST_AUTO_TEST_CASE(weight_limited_deserialization)
         const auto data = ser(tx);
         const auto weight = GetTransactionWeight(CTransaction{tx});
         for (const uint64_t limit : {uint64_t(weight), uint64_t(weight) + 1, uint64_t(weight) - 1}) {
-            uint64_t weight_left{limit};
+            const TransactionSerParams TxWitLimit{.allow_witness = true, .reject_empty = false, .max_weight = limit};
+            SpanReader stream{data};
+            ParamsStream paramsstream{stream, TxWitLimit};
+            auto& state = paramsstream.GetState<TransactionSerParams>();
+
             CMutableTransaction deser;
-            const TransactionSerParams params{.allow_witness = true, .weight_left = &weight_left};
             if (limit >= uint64_t(weight)) {
-                SpanReader{data} >> params(deser);
-                BOOST_CHECK_EQUAL(weight_left, limit - weight);
+                paramsstream >> deser;
+                BOOST_CHECK_EQUAL(state.weight_left, limit - weight);
                 BOOST_CHECK(CTransaction{deser}.GetWitnessHash() == CTransaction{tx}.GetWitnessHash());
             } else {
-                BOOST_CHECK_EXCEPTION(SpanReader{data} >> params(deser), std::ios_base::failure, HasReason("Weight limit exceeded"));
+                BOOST_CHECK_EXCEPTION(paramsstream >> deser, std::ios_base::failure, HasReason("Weight limit exceeded"));
             }
         }
     }
 
     // The limit applies to the transactions of a block together.
     CBlock block;
-    int64_t txs_weight{0};
+    uint64_t txs_weight{0};
     for (const auto& tx : txs) {
         if (tx.vin.empty()) continue;
         block.vtx.push_back(MakeTransactionRef(tx));
@@ -1581,15 +1584,17 @@ BOOST_AUTO_TEST_CASE(weight_limited_deserialization)
     const auto data = ser(block);
     BOOST_CHECK_EQUAL(GetBlockWeight(block), txs_weight + WITNESS_SCALE_FACTOR * int64_t(80 + 1));
     for (const auto limit : {txs_weight, txs_weight - 1}) {
-        uint64_t weight_left(limit);
+        const TransactionSerParams TxWitLimit{.allow_witness = true, .reject_empty = false, .max_weight = limit};
+        SpanReader stream{data};
+        ParamsStream paramsstream{stream, TxWitLimit};
+        auto& state = paramsstream.GetState<TransactionSerParams>();
         CBlock deser;
-        const TransactionSerParams params{.allow_witness = true, .weight_left = &weight_left};
         if (limit == txs_weight) {
-            SpanReader{data} >> params(deser);
-            BOOST_CHECK_EQUAL(weight_left, 0U);
+            paramsstream >> deser;
+            BOOST_CHECK_EQUAL(state.weight_left, 0U);
             BOOST_CHECK_EQUAL(deser.vtx.size(), block.vtx.size());
         } else {
-            BOOST_CHECK_EXCEPTION(SpanReader{data} >> params(deser), std::ios_base::failure, HasReason("Weight limit exceeded"));
+            BOOST_CHECK_EXCEPTION(paramsstream >> deser, std::ios_base::failure, HasReason("Weight limit exceeded"));
         }
     }
 }

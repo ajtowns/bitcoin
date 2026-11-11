@@ -56,13 +56,16 @@ FUZZ_TARGET(transaction, .init = initialize_transaction)
     // then subtracts exactly its weight from the budget.
     const uint64_t weight = GetTransactionWeight(tx);
     for (const uint64_t budget : {uint64_t{0}, weight / 2, weight - 1, weight, weight + 1}) {
-        uint64_t weight_left{budget};
         CMutableTransaction budget_tx;
-        const TransactionSerParams params{.allow_witness = true, .weight_left = &weight_left};
+        const TransactionSerParams params{.allow_witness = true, .max_weight = budget};
         try {
-            SpanReader{buffer} >> params(budget_tx);
+            SpanReader reader{buffer};
+            ParamsStream paramsstream{reader, params};
+            auto& state = paramsstream.GetState<TransactionSerParams>();
+            assert(state.weight_left == budget);
+            paramsstream >> budget_tx;
             assert(budget >= weight);
-            assert(weight_left == budget - weight);
+            assert(state.weight_left == budget - weight);
             assert(CTransaction{budget_tx}.GetWitnessHash() == tx.GetWitnessHash());
         } catch (const std::ios_base::failure&) {
             assert(budget < weight);
