@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 /**
@@ -1209,11 +1210,22 @@ uint64_t GetSerializeSize(const T& t)
 template<typename T>
 concept ContainsStream = requires(T t) { t.GetStream(); };
 
+template <typename P>
+concept HasSerState = requires(const P& p) {
+    { p.InitState() } -> std::same_as<typename P::State>;
+};
+template <typename P> struct SerStateOf { using type = std::monostate; };
+template <HasSerState P> struct SerStateOf<P> { using type = typename P::State; };
+
 /** Wrapper that overrides the GetParams() function of a stream. */
 template <typename SubStream, typename Params>
 class ParamsStream
 {
+    using State = typename SerStateOf<Params>::type;
+
     const Params& m_params;
+    NO_UNIQUE_ADDRESS State m_state; // starts as m_params.InitState(), or monostate
+
     // If ParamsStream constructor is passed an lvalue argument, Substream will
     // be a reference type, and m_substream will reference that argument.
     // Otherwise m_substream will be a substream instance and move from the
@@ -1223,12 +1235,31 @@ class ParamsStream
     // SubStream is a file stream.
     SubStream m_substream;
 
+    static State InitState(const Params& params)
+    {
+        if constexpr (HasSerState<Params>) {
+            return params.InitState();
+        } else {
+            return {};
+        }
+    }
+
 public:
-    ParamsStream(SubStream&& substream, const Params& params LIFETIMEBOUND) : m_params{params}, m_substream{std::forward<SubStream>(substream)} {}
+    ParamsStream(SubStream&& substream, const Params& params LIFETIMEBOUND) : m_params{params}, m_state{InitState(m_params)}, m_substream{std::forward<SubStream>(substream)} {}
 
     template <typename NestedSubstream, typename Params1, typename Params2, typename... NestedParams>
     ParamsStream(NestedSubstream&& s, const Params1& params1 LIFETIMEBOUND, const Params2& params2 LIFETIMEBOUND, const NestedParams&... params LIFETIMEBOUND)
         : ParamsStream{::ParamsStream{std::forward<NestedSubstream>(s), params2, params...}, params1} {}
+
+    // Disallow copying (potentially duplicating m_substream or m_state)
+    ParamsStream(const ParamsStream&) = delete;
+
+    // Allow moving
+    ParamsStream(ParamsStream&&) = default;
+
+    // Disallow assignment (m_params is a reference)
+    ParamsStream& operator=(const ParamsStream&) = delete;
+    ParamsStream& operator=(ParamsStream&&) = delete;
 
     template <typename U> ParamsStream& operator<<(const U& obj) { ::Serialize(*this, obj); return *this; }
     template <typename U> ParamsStream& operator>>(U&& obj) { ::Unserialize(*this, obj); return *this; }
@@ -1246,6 +1277,17 @@ public:
             return m_params;
         } else {
             return m_substream.template GetParams<P>();
+        }
+    }
+
+    //! Get reference to stream state.
+    template <HasSerState P>
+    typename P::State& GetState()
+    {
+        if constexpr (std::is_convertible_v<Params, P>) {
+            return m_state;
+        } else {
+            return m_substream.template GetState<P>();
         }
     }
 
@@ -1324,7 +1366,7 @@ public:
      * See SER_PARAMS for more information on serialization parameters.                  \
      */                                                                                  \
     template <typename T>                                                                \
-    auto operator()(T&& t) const                                                         \
+    auto operator()(T&& t LIFETIMEBOUND) const LIFETIMEBOUND                             \
     {                                                                                    \
         return ParamsWrapper{*this, t};                                                  \
     }
