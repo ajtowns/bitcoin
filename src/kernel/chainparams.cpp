@@ -529,21 +529,18 @@ public:
         m_assumed_blockchain_size = 0;
         m_assumed_chain_state_size = 0;
 
-        // TODO: the genesis block has not been mined yet. Everything only known
-        // once it is mined is zeroed out and marked below, so the header does not
-        // satisfy its own nBits and the node cannot run on testnet5 yet.
-        const char* testnet5_genesis_msg = "2026-11-13 975744 0000000000000000000000000000000000000000000000000000000000000000"; // TODO: mainnet block hash
-        const CScript testnet5_genesis_script = CScript() << OP_RETURN << "0000000000000000"_hex; // TODO: extranonce
+        const char* testnet5_genesis_msg = "2026-11-14 975744 0000000000000000000123e2681e2f82acdcb9430a15eec24cc85b400691d479";
+        const CScript testnet5_genesis_script = CScript() << OP_RETURN << "95ebf76a02000000"_hex;
         genesis = CreateGenesisBlock(testnet5_genesis_msg,
                 testnet5_genesis_script,
-                0, // TODO: nTime
-                0, // TODO: nNonce
+                1794632593, // nTime
+                0x653d9131, // nNonce
                 0x1a0fffff,
-                0, // TODO: nVersion
+                0x2230c000, // nVersion
                 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256{"d85e1cfac23a9f61127914f51a503144fa63a23346994f892703add74beaf2b9"}); // TODO
-        assert(genesis.hashMerkleRoot == uint256{"d95e016023e7cf281dcff3ccadde45eb3fc1b5543c20136f53ff76ecea6d1cbd"}); // TODO
+        assert(consensus.hashGenesisBlock == uint256{"00000000000008c1637e7d3252dc1c333d4546fd6fff6a474b200d674a91d497"});
+        assert(genesis.hashMerkleRoot == uint256{"8c5899b65c5b0834adb17af314e22a9bf067e7ed8144c37967b5ec56b5a6e28d"});
 
         // No DNS or fixed seeds defined for Testnet 5 yet.
         vFixedSeeds.clear();
